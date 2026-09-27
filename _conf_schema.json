@@ -136,7 +136,7 @@
   },
   "draw_negative_prompt": {
     "description": "负向提示词",
-    "hint": "附加给 anima 的 negative_prompt，如低质量标签；留空不传",
+    "hint": "附加给 anima 的 negative_prompt，如低质量标签；留空使用内置默认（排除男性角色：1boy, male, man, boy），填写则整体覆盖（若要保留排除男性请在自定义内容里自行带上）",
     "type": "string",
     "default": ""
   },

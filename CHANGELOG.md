@@ -2,6 +2,16 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v1.8.6 (2026-09-28)
+
+AI 封面图不再出现男性角色（版本 v1.8.5 -> v1.8.6）。
+
+- **问题**：AI 封面图（anima 联动）的提示词只描述了塔罗牌面主题与氛围，没有约束主角性别，出图时不时冒出男性形象，与「萌系塔罗少女」的卡面调性不符。
+- **正向约束（三处）**：`fortune.py` 新增 `FEMALE_SUBJECT_ZH/EN`，内置提示词模板（中文描述 / 英文自然语言 / 英文 Danbooru 标签）、LLM 生图系统提示 `draw_system_hint`、本地兜底模板 `local_draw_prompt` 全部写入「主体为动漫少女 / 1girl, solo, female only」并明确禁止男性角色——即便 LLM 不听话，兜底模板与系统提示也带着这条约束。
+- **负向兜底**：`draw_negative_prompt` 留空时不再什么都不传，改用内置 `DEFAULT_DRAW_NEGATIVE`（`1boy, male, man, boy, masculine, male focus`）透传给 anima，双保险；填了自定义负向的用户内容整体覆盖（配置 hint 已注明「若要保留排除男性请在自定义内容里自行带上」）。
+- 覆盖范围：仅绘图提示词链路；签文（`DEFAULT_LLM_PERSONA`）、词库与卡面文案不涉及角色形象，未改动。
+- 测试：`tests/test_fortune.py` 第 10 组新增 8 条守卫（两种语言的内置模板 / 兜底模板 / 系统提示 / 负向兜底），回退到改动前会直接失败。
+
 ## v1.8.5 (2026-09-27)
 
 帮助图宽度自适应（版本 v1.8.4 -> v1.8.5）。

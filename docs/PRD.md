@@ -360,7 +360,7 @@ result = await handler(event, prompt=<LLM 生成的提示词>, source="我会永
 | `draw_prompt_lang` | enum | `en` | 绘图提示词语言（en=动漫标签 / zh=真人自然语言，D6） |
 | `draw_prompt_format` | enum | `tags` | 提示词形式（tags=英文标签 / natural=自然语言） |
 | `draw_llm_prompt` | text | 内置 | 生成绘图提示词的 LLM 模板（注入当日运势事实与语言/格式约束） |
-| `draw_negative_prompt` | string | 空 | 附加负向提示词（透传 anima） |
+| `draw_negative_prompt` | string | 空（用内置默认） | 负向提示词（透传 anima）；留空用内置 `1boy, male, man, boy, masculine, male focus`，填写整体覆盖 |
 | `draw_timeout` | int | 120 | 等待出图上限（秒） |
 | `card_width` | int | 1024 | 卡面画布宽（同时透传给 anima 作为出图宽） |
 | `card_height` | int | 1536 | 卡面画布高（同时透传给 anima 作为出图高） |

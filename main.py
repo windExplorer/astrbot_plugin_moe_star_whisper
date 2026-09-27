@@ -342,7 +342,8 @@ class StarWhisperPlugin(Star):
         )
         if job["workflow"]:
             kwargs["workflow"] = job["workflow"]
-        negative = str(self._cfg("draw_negative_prompt", "") or "")
+        # v1.8.6：配置留空时用内置负向提示词兜底（排除男性角色），填写则整体覆盖
+        negative = str(self._cfg("draw_negative_prompt", "") or "") or fortune.DEFAULT_DRAW_NEGATIVE
         if negative:
             kwargs["negative_prompt"] = negative
         # anima v7.7.46+：静默生图（不发过程消息）与提示词透传（跳过其 LLM 处理/翻译）

@@ -229,12 +229,22 @@ def llm_facts(result: dict) -> str:
 
 # ---------- M6：anima 底图联动的提示词与响应解析 ----------
 
+# v1.8.6：卡面主角一律为女性角色，不出现男性形象（可被内置负向提示词进一步兜底）
+FEMALE_SUBJECT_ZH = "画面主体必须是一位女性角色（动漫少女），不要出现任何男性角色、男孩或男性形象"
+FEMALE_SUBJECT_EN = "1girl, solo, female focus, female only, no males, no boys"
+DEFAULT_DRAW_NEGATIVE = "1boy, male, man, boy, masculine, male focus"
+DRAW_NEGATIVE_HINT_ZH = "画面中只有女性角色，禁止出现男性角色"
+
+
 def draw_system_hint(lang: str) -> str:
     """生图提示词的系统提示——按目标语言切换，避免 LLM 跟着英文提示输出英文。"""
     if lang == "zh":
         return ("你为一张动漫风格的塔罗牌牌面撰写绘图提示词。"
+                + FEMALE_SUBJECT_ZH + "。"
                 "必须使用中文输出。只输出提示词本身，不要任何解释。")
     return ("You write image-generation prompts for a moe astrology fortune card. "
+            "The subject must be a female character (a single anime girl); "
+            "never include male characters. "
             "Output ONLY the prompt itself.")
 
 
@@ -271,13 +281,15 @@ def builtin_draw_prompt(lang: str, fmt: str) -> str:
         return (
             "根据下面的事实清单，为一张**动漫风格的塔罗牌牌面**插画写" + shape + "："
             "画面即清单中「今日塔罗」那张大阿卡纳的牌面演绎（牌面主题为中央构图），"
+            + FEMALE_SUBJECT_ZH + "，"
             "配华丽塔罗牌边框、星月与神秘学纹样，动漫赛璐璐质感，不要出现任何文字。"
             "⚠️ 必须输出中文描述，不要翻译成英文。只输出描述本身。\n{facts}"
         )
     if fmt == "natural":
         return (
             "Based on the fortune facts below, write ONE English sentence describing an "
-            "ANIME-STYLE TAROT CARD illustration: the major arcana card named in the facts "
+            "ANIME-STYLE TAROT CARD illustration: a single anime girl as the central figure "
+            "(female only, no male characters), the major arcana card named in the facts "
             "as the central motif, a complete ornate tarot card border fully visible and "
             "perfectly centered, symmetrical composition, portrait orientation, nothing "
             "cropped at the edges, mystical star-and-moon ambience, cel-shaded anime art. "
@@ -285,7 +297,8 @@ def builtin_draw_prompt(lang: str, fmt: str) -> str:
         )
     return (
         "Based on the fortune facts below, write ONE line of English Danbooru-style tags for an "
-        "ANIME-STYLE TAROT CARD illustration: the major arcana card named in the facts as the "
+        "ANIME-STYLE TAROT CARD illustration: " + FEMALE_SUBJECT_EN + ", "
+        "the major arcana card named in the facts as the "
         "central motif, symmetrical composition, centered, complete ornate tarot card border "
         "fully visible inside the frame, nothing cropped at the edges, portrait orientation, "
         "mystical symbols, star and crescent moon background, anime style, cel shading, "
@@ -302,11 +315,11 @@ def local_draw_prompt(result: dict, lang: str, fmt: str) -> str:
     if lang == "zh":
         mood = DRAW_GRADE_MOODS_ZH.get(grade, "温柔")
         return (f"动漫风格塔罗牌牌面：大阿卡纳「{tarot.get('name_cn', '星星')}」为主题的少女，"
-                f"{mood}，完整华丽的塔罗牌边框居中且左右对称，构图饱满不裁边，"
+                f"{mood}，{DRAW_NEGATIVE_HINT_ZH}，完整华丽的塔罗牌边框居中且左右对称，构图饱满不裁边，"
                 f"竖版构图，星月神秘氛围，淡彩，画质精美")
     mood = DRAW_GRADE_MOODS_EN.get(grade, "gentle smile")
     return (
-        f"tarot card design, anime style, 1girl, solo, {mood}, "
+        "tarot card design, anime style, " + FEMALE_SUBJECT_EN + f", {mood}, "
         f"the {arcana} major arcana motif, symmetrical composition, centered, "
         "complete ornate tarot card border fully visible, nothing cropped, "
         "portrait orientation, stars, crescent moon, mystical ambience, "

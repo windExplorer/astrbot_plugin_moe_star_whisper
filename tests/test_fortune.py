@@ -135,6 +135,24 @@ def main() -> int:
     check("tarot card design" in lp and "1girl" in lp and "The Star" in lp,
           "本地兜底提示词应为塔罗牌主题（v1.4.1）")
     check(fortune.local_draw_prompt(r1, "zh", "natural"), "中文兜底提示词非空")
+
+    # 10.1) v1.8.6：卡面主角限女性、不出男性（内置模板 / 兜底模板 / 系统提示 / 负向兜底）
+    for f in ("tags", "natural"):
+        check("1girl" in fortune.builtin_draw_prompt("en", f) or
+              "female only" in fortune.builtin_draw_prompt("en", f),
+              f"英文内置模板（{f}）必须约束女性主角")
+    check("no male" in fortune.builtin_draw_prompt("en", "natural"),
+          "英文自然语言模板必须排除男性角色")
+    check("男性角色" in fortune.builtin_draw_prompt("zh", "natural"),
+          "中文内置模板必须排除男性角色")
+    check("男性角色" in fortune.local_draw_prompt(r1, "zh", "tags"),
+          "中文兜底提示词必须排除男性角色")
+    check("no males" in fortune.local_draw_prompt(r1, "en", "tags"),
+          "英文兜底提示词必须排除男性")
+    check("1boy" in fortune.DEFAULT_DRAW_NEGATIVE and "male" in fortune.DEFAULT_DRAW_NEGATIVE,
+          "内置负向提示词必须排除男性角色")
+    check("女性角色" in fortune.draw_system_hint("zh") and "female" in fortune.draw_system_hint("en"),
+          "生图系统提示必须含女性主角约束")
     check(fortune.parse_draw_response('{"image_paths": ["a.png", " b.png "]}') == ["a.png", "b.png"],
           "解析 image_paths 列表")
     check(fortune.parse_draw_response('{"image_path": "one.png"}') == ["one.png"],
