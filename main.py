@@ -49,7 +49,7 @@ _STREAK_BADGES = {
 ITEM_DEFS = {
     "reroll": ("换签卡", "当日重抽一次，新结果覆盖旧结果（运势与底图完整重做）"),
     "amulet": ("厄运护身符", "佩戴后当日抽签保底小吉（抽签前使用）"),
-    "streak_guard": ("连签保护卡", "断签 3 天内 /运势补签 补回昨天"),
+    "streak_guard": ("连签保护卡", "断签 3 天内 /星语补签 补回昨天"),
     "candle": ("幸运香烛", "当日幸运指数 +8（抽签前使用）"),
 }
 DEFAULT_PRICES = {"reroll": 80, "amulet": 50, "streak_guard": 30, "candle": 20}
@@ -62,7 +62,7 @@ _ITEM_ALIASES = {
 }
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.8.3")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.8.4")
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         # ⚠️ 必须接受 config kwarg：star_manager 注入 AstrBotConfig 时若构造函数
@@ -630,7 +630,7 @@ class StarWhisperPlugin(Star):
 
     # ---------- 指令 ----------
 
-    @filter.command("运势", alias={"今日运势", "星语", "占卜"})
+    @filter.command("星语", alias={"运势", "今日运势", "占卜"})
     async def fortune_cmd(self, event: AstrMessageEvent):
         """抽当日专属星语签（一人一天一支，跨群/私聊一致）"""
         if self._store is None:
@@ -643,7 +643,7 @@ class StarWhisperPlugin(Star):
         if not event.is_private_chat():
             gid = str(event.get_group_id() or "")
             if gid and gid in self._disabled_groups():
-                yield event.plain_result("本群已停用星语签，管理员可用 /运势开关 on 开启～")
+                yield event.plain_result("本群已停用星语签，管理员可用 /星语开关 on 开启～")
                 return
         tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
         date = fortune.local_today(tz_name)
@@ -714,9 +714,9 @@ class StarWhisperPlugin(Star):
         if bg_fail_hint:
             yield event.plain_result(bg_fail_hint)
 
-    @filter.command("运势榜", alias={"星语榜"})
+    @filter.command("星语榜", alias={"运势榜"})
     async def rank_cmd(self, event: AstrMessageEvent):
-        """群内幸运指数排行（/运势榜 日|周，默认日；榜单卡）"""
+        """群内幸运指数排行（/星语榜 日|周，默认日；榜单卡）"""
         if self._store is None:
             yield event.plain_result("星语者还没整理好星盘，稍后再试～")
             return
@@ -765,7 +765,7 @@ class StarWhisperPlugin(Star):
             lines.append("还没有人抽签，快来当第一个！")
         yield event.plain_result("\n".join(lines))
 
-    @filter.command("运势PK", alias={"星语PK", "运势pk", "星语pk"})
+    @filter.command("星语PK", alias={"星语pk", "运势PK", "运势pk"})
     async def pk_cmd(self, event: AstrMessageEvent):
         """与被 @ 的人比一比今日幸运指数（双方需已抽签）"""
         if self._store is None:
@@ -794,7 +794,7 @@ class StarWhisperPlugin(Star):
         mine = self._store.get_fortune(uid, today)
         theirs = self._store.get_fortune(target, today)
         if mine is None:
-            yield event.plain_result("你今天还没抽签，先 /运势 一下吧～")
+            yield event.plain_result("你今天还没抽签，先 /星语 一下吧～")
             return
         if theirs is None:
             yield event.plain_result("对方今天还没抽签，让 TA 先来一支吧～")
@@ -838,10 +838,10 @@ class StarWhisperPlugin(Star):
             f"{verdict}{line}"
         )
 
-    @filter.command("运势开关", alias={"星语开关"})
+    @filter.command("星语开关", alias={"运势开关"})
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def switch_cmd(self, event: AstrMessageEvent):
-        """群内启停星语签（/运势开关 on|off，仅 AstrBot 管理员）"""
+        """群内启停星语签（/星语开关 on|off，仅 AstrBot 管理员）"""
         if event.is_private_chat():
             yield event.plain_result("群开关请在群聊里使用～")
             return
@@ -858,12 +858,12 @@ class StarWhisperPlugin(Star):
         elif arg.lower() in ("off", "关", "关闭"):
             try:
                 self._set_group_disabled(gid, True)
-                yield event.plain_result("已停用本群星语签（/运势开关 on 可重新开启）")
+                yield event.plain_result("已停用本群星语签（/星语开关 on 可重新开启）")
             except Exception:
                 yield event.plain_result("停用失败：配置保存出错，请看日志～")
         else:
             state = "停用" if gid in self._disabled_groups() else "开启"
-            yield event.plain_result(f"本群星语签当前：{state}（/运势开关 on|off）")
+            yield event.plain_result(f"本群星语签当前：{state}（/星语开关 on|off）")
 
     @filter.command("星语绑定", alias={"运势绑定", "绑定生日"})
     async def bind_cmd(self, event: AstrMessageEvent):
@@ -933,7 +933,7 @@ class StarWhisperPlugin(Star):
         line = f"星座：{prof['constellation']}"
         row = self._store.get_fortune(target_id, today)
         today_line = (
-            f"今日：{row['grade']}（{row['score']}）" if row is not None else "今日：还没抽签（/运势 抽一支）"
+            f"今日：{row['grade']}（{row['score']}）" if row is not None else "今日：还没抽签（/星语 抽一支）"
         )
         if (prof.get("birthday") or "") == today[5:]:
             today_line += " ｜ 🎂 今天是生日！"
@@ -957,7 +957,7 @@ class StarWhisperPlugin(Star):
 
     # ---------- 运势日历（M9） ----------
 
-    @filter.command("运势日历", alias={"星语日历", "运势月历"})
+    @filter.command("星语日历", alias={"运势日历", "运势月历"})
     async def calendar_cmd(self, event: AstrMessageEvent):
         """当月运势日历：每日吉凶与分数，未占卜的日子以小点标记"""
         if self._store is None:
@@ -982,7 +982,7 @@ class StarWhisperPlugin(Star):
                 month = int(m2.group(1))
         if not (1 <= month <= 12) or not (2000 <= year <= 2100):
             yield event.plain_result(
-                "格式：/运势日历 [月份]——/运势日历、/运势日历 8、/运势日历 2026-08"
+                "格式：/星语日历 [月份]——/星语日历、/星语日历 8、/星语日历 2026-08"
             )
             return
         month_prefix = f"{year:04d}-{month:02d}"
@@ -1013,7 +1013,7 @@ class StarWhisperPlugin(Star):
         for r in rows:
             lines.append(f"{r['date'][8:]} 日：{r['grade']}（{r['score']}）")
         if not rows:
-            lines.append("本月还没有占卜记录，/运势 抽一支吧～")
+            lines.append("本月还没有占卜记录，/星语 抽一支吧～")
         if stats["stardust"] is not None:
             lines.append(f"累计星尘 {stats['stardust']}")
         yield event.plain_result("\n".join(lines))
@@ -1052,10 +1052,10 @@ class StarWhisperPlugin(Star):
         for item_id, (name, _desc) in ITEM_DEFS.items():
             count = self._store.get_item(uid, item_id)
             lines.append(f"{name} ×{count}")
-        lines.append("用 /运势商店 看看有什么好东西～")
+        lines.append("用 /星语商店 看看有什么好东西～")
         yield event.plain_result("\n".join(lines))
 
-    @filter.command("运势商店", alias={"星语商店"})
+    @filter.command("星语商店", alias={"运势商店"})
     async def shop_cmd(self, event: AstrMessageEvent):
         """道具与价格一览（商店卡）"""
         if self._store is None or not self._economy_on():
@@ -1084,12 +1084,12 @@ class StarWhisperPlugin(Star):
         lines = ["🛒 萌萌星语 · 道具商店", ""]
         for name, price, desc, held in entries:
             lines.append(f"【{name}】{price} 星尘\n　{desc}\n　持有 ×{held}")
-        lines.append("\n购买：/运势购买 <名称> [数量]")
+        lines.append("\n购买：/星语购买 <名称> [数量]")
         yield event.plain_result("\n".join(lines))
 
-    @filter.command("运势购买", alias={"星语购买"})
+    @filter.command("星语购买", alias={"运势购买"})
     async def buy_cmd(self, event: AstrMessageEvent):
-        """购买道具：/运势购买 <名称> [数量]"""
+        """购买道具：/星语购买 <名称> [数量]"""
         if self._store is None or not self._economy_on():
             yield event.plain_result("道具经济未开放～")
             return
@@ -1104,7 +1104,7 @@ class StarWhisperPlugin(Star):
             raw = raw[:m_num.start()] + raw[m_num.end():]
         item_id = _ITEM_ALIASES.get(raw.strip())
         if item_id is None:
-            yield event.plain_result("要买什么？/运势商店 看看货架～")
+            yield event.plain_result("要买什么？/星语商店 看看货架～")
             return
         cap = max(1, int(self._cfg("item_hold_cap", 3)))
         held = self._store.get_item(uid, item_id)
@@ -1137,7 +1137,7 @@ class StarWhisperPlugin(Star):
                 ],
                 subtitle="萌萌星语 · 道具经济", accent_hex=self._accent_hex(uid, today),
                 file_key=f"{uid}_{today}_buy",
-                footer="使用：/运势使用 <名称>",
+                footer="使用：/星语使用 <名称>",
             )
         if card_path:
             yield event.image_result(card_path)
@@ -1146,9 +1146,9 @@ class StarWhisperPlugin(Star):
             f"购买成功：{name} ×{count}（-{price} 星尘）\n当前持有 ×{new_count}，余额 {balance - price}。"
         )
 
-    @filter.command("运势使用", alias={"星语使用"})
+    @filter.command("星语使用", alias={"运势使用"})
     async def use_cmd(self, event: AstrMessageEvent):
-        """使用道具：/运势使用 <换签卡|厄运护身符|幸运香烛>"""
+        """使用道具：/星语使用 <换签卡|厄运护身符|幸运香烛>"""
         if self._store is None or not self._economy_on():
             yield event.plain_result("道具经济未开放～")
             return
@@ -1167,7 +1167,7 @@ class StarWhisperPlugin(Star):
         if item_id == "reroll":
             existing = self._store.get_fortune(uid, date)
             if existing is None:
-                yield event.plain_result("今天还没抽签，不用换——先 /运势 抽一支吧～")
+                yield event.plain_result("今天还没抽签，不用换——先 /星语 抽一支吧～")
                 return
             payload = existing.get("payload") or {}
             used = int(payload.get("reroll_count", 0) or 0)
@@ -1175,7 +1175,7 @@ class StarWhisperPlugin(Star):
                 yield event.plain_result("今天已经换过一次签了，命运不接受讨价还价～")
                 return
             if self._store.get_item(uid, "reroll") < 1:
-                yield event.plain_result("背包里没有换签卡（/运势商店 有售）。")
+                yield event.plain_result("背包里没有换签卡（/星语商店 有售）。")
                 return
             self._store.add_item(uid, "reroll", -1)
             new_result = self._roll_daily(
@@ -1210,7 +1210,7 @@ class StarWhisperPlugin(Star):
                 yield event.plain_result("今天已经佩戴过了，不用重复使用～")
                 return
             if self._store.get_item(uid, item_id) < 1:
-                yield event.plain_result(f"背包里没有{ITEM_DEFS[item_id][0]}（/运势商店 有售）。")
+                yield event.plain_result(f"背包里没有{ITEM_DEFS[item_id][0]}（/星语商店 有售）。")
                 return
             self._store.add_item(uid, item_id, -1)
             self._store.add_ledger(uid, 0, f"use:{item_id}", date)
@@ -1223,7 +1223,7 @@ class StarWhisperPlugin(Star):
                         ITEM_DEFS[item_id][0],
                         "佩戴成功，今天抽签时生效 ✨" if item_id == "amulet"
                         else "已点燃，今天抽签时幸运指数 +8",
-                        "抽签：/运势",
+                        "抽签：/星语",
                     ],
                     subtitle="萌萌星语 · 道具经济", accent_hex=self._accent_hex(uid, date),
                     file_key=f"{uid}_{date}_use",
@@ -1234,9 +1234,9 @@ class StarWhisperPlugin(Star):
             yield event.plain_result(f"已使用{ITEM_DEFS[item_id][0]}：今天抽签时生效 ✨")
             return
 
-        yield event.plain_result("这个道具不需要手动使用（见 /运势商店 说明）。")
+        yield event.plain_result("这个道具不需要手动使用（见 /星语商店 说明）。")
 
-    @filter.command("运势补签", alias={"星语补签"})
+    @filter.command("星语补签", alias={"运势补签"})
     async def makeup_cmd(self, event: AstrMessageEvent):
         """断签 3 天内消耗连签保护卡补回昨天的签"""
         if self._store is None or not self._economy_on():
@@ -1250,7 +1250,7 @@ class StarWhisperPlugin(Star):
         profile = self._store.get_profile(uid) or {}
         last = str(profile.get("last_draw_date") or "")
         if not last:
-            yield event.plain_result("还没抽过签就谈不上补签——先 /运势 抽第一支吧～")
+            yield event.plain_result("还没抽过签就谈不上补签——先 /星语 抽第一支吧～")
             return
         if last == today:
             yield event.plain_result("今天已经抽过啦，不用补签～")
@@ -1266,7 +1266,7 @@ class StarWhisperPlugin(Star):
             yield event.plain_result("断签超过 3 天，连不上啦——从今天重新开始连签吧。")
             return
         if self._store.get_item(uid, "streak_guard") < 1:
-            yield event.plain_result("背包里没有连签保护卡（/运势商店 有售）。")
+            yield event.plain_result("背包里没有连签保护卡（/星语商店 有售）。")
             return
         self._store.add_item(uid, "streak_guard", -1)
         result = self._roll_daily(uid, prev, salt, profile)
@@ -1285,10 +1285,10 @@ class StarWhisperPlugin(Star):
             f"补签成功（{prev}）✨ 连签恢复到 {result['streak']} 天"
         )
 
-    @filter.command("运势发放", alias={"星语发放"})
+    @filter.command("星语发放", alias={"运势发放"})
     @filter.permission_type(filter.PermissionType.ADMIN)
     async def grant_cmd(self, event: AstrMessageEvent):
-        """手动调整星尘：/运势发放 @用户 <±n>（必走流水）"""
+        """手动调整星尘：/星语发放 @用户 <±n>（必走流水）"""
         if self._store is None or not self._economy_on():
             yield event.plain_result("道具经济未开放～")
             return
@@ -1305,7 +1305,7 @@ class StarWhisperPlugin(Star):
         raw = str(event.message_str or "")
         m = re.search(r"([+-]?\d+)", raw)
         if not m:
-            yield event.plain_result("格式：/运势发放 @用户 <±n>")
+            yield event.plain_result("格式：/星语发放 @用户 <±n>")
             return
         delta = int(m.group(1))
         if delta == 0:
@@ -1316,7 +1316,7 @@ class StarWhisperPlugin(Star):
             f"已{'发放' if delta > 0 else '扣除'} {abs(delta)} 颗星尘，当前余额 {self._store.get_balance(target)}。"
         )
 
-    @filter.command("运势帮助", alias={"星语帮助"})
+    @filter.command("星语帮助", alias={"运势帮助"})
     async def help_cmd(self, event: AstrMessageEvent):
         """查看萌萌星语的全部指令（帮助图）"""
         data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
@@ -1325,14 +1325,14 @@ class StarWhisperPlugin(Star):
         signer = str(self._cfg("fortune_signer", "星语者"))
         groups = [
             ("占卜", [
-                ("/运势", "抽当日专属星语签（别名 /今日运势 /星语 /占卜）"),
-                ("/运势日历 [月份]", "当月运势日历：每日吉凶与分数"),
-                ("/运势帮助", "查看本帮助图"),
+                ("/星语", "抽当日专属星语签（别名 /运势 /今日运势 /占卜）"),
+                ("/星语日历 [月份]", "当月运势日历：每日吉凶与分数"),
+                ("/星语帮助", "查看本帮助图"),
             ]),
             ("群玩法", [
-                ("/运势榜 [日|周]", "群内幸运指数排行"),
-                ("/运势PK @某人", "当日幸运指数对决"),
-                ("/运势开关 on|off", "群级启停（管理员）"),
+                ("/星语榜 [日|周]", "群内幸运指数排行"),
+                ("/星语PK @某人", "当日幸运指数对决"),
+                ("/星语开关 on|off", "群级启停（管理员）"),
             ]),
             ("星座", [
                 ("/星语绑定 <MM-DD>", "绑定生日，解锁星座与生日彩蛋"),
@@ -1340,11 +1340,11 @@ class StarWhisperPlugin(Star):
             ]),
             ("道具经济", [
                 ("/星尘", "星尘余额与背包"),
-                ("/运势商店", "道具与价格"),
-                ("/运势购买 <名称> [数量]", "购买道具"),
-                ("/运势使用 <名称>", "使用换签卡/护身符/香烛"),
-                ("/运势补签", "断签 3 天内补回昨天"),
-                ("/运势发放 @用户 <±n>", "手动调整星尘（管理员）"),
+                ("/星语商店", "道具与价格"),
+                ("/星语购买 <名称> [数量]", "购买道具"),
+                ("/星语使用 <名称>", "使用换签卡/护身符/香烛"),
+                ("/星语补签", "断签 3 天内补回昨天"),
+                ("/星语发放 @用户 <±n>", "手动调整星尘（管理员）"),
             ]),
         ]
         if render_help_card is not None:

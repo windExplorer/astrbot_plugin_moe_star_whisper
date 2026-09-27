@@ -754,17 +754,18 @@ def render_help_card(
     cards_root,
     font_path: str | None = None,
     extra_font_dirs=None,
-    width: int = 900,
+    width: int = 1120,
     signer: str = "星语者",
     subtitle: str = "萌萌星语 · 每日运势签",
-    footer: str = "从 /运势 开始 · 每天一支专属星语签",
+    footer: str = "从 /星语 开始 · 每天一支专属星语签",
     accent_hex: str = "#F6C6D3",
     theme: str = "light",
 ) -> str:
-    """帮助图（v1.8.1 重写）：与提示卡同族版式——渐变底座 + 分组节面板。
+    """帮助图（v1.8.4 重写排版）：与提示卡同族版式——渐变底座 + 分组节面板。
 
     groups: [(组名, [(指令, 说明), ...]), ...]；
     行内指令列按节内最宽指令对齐（强调色粗体），说明按剩余宽度折行；
+    画布 1120 宽 + 大字号（v1.8.4：900 宽的小字在 QQ 压缩下发糊）；
     高度随内容自适应，文件名固定 help.png。
     页脚 footer 是发给群友看的引导语，不要放管理员向内容（配置页他们进不去）。
     """
@@ -774,11 +775,11 @@ def render_help_card(
     dark = str(theme or "light").lower() == "dark"
     u0 = width / 900.0
     probe = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
-    f_cmd = _font(_bold_variant(font_file), int(15.5 * u0))
-    f_desc = _font(font_file, int(13.5 * u0))
-    f_lab = _font(_display_font_file(font_file), int(19 * u0))
+    f_cmd = _font(_bold_variant(font_file), int(17 * u0))
+    f_desc = _font(font_file, int(15 * u0))
+    f_lab = _font(_display_font_file(font_file), int(22 * u0))
 
-    sec_pad, head_h, row_lh, row_gap, sec_gap = int(14 * u0), int(30 * u0), int(20 * u0), int(6 * u0), int(14 * u0)
+    sec_pad, head_h, row_lh, row_gap, sec_gap = int(16 * u0), int(34 * u0), int(22 * u0), int(7 * u0), int(15 * u0)
     inner_w = int((width - (44 + 42) * 2 * u0))
     cmd_col_cap = int(inner_w * 0.55)
 
@@ -810,7 +811,7 @@ def render_help_card(
     H = int((218 + 12) * u0 + sum(h for h, _t, _r, _c in sec_geo)
             + sec_gap * max(0, len(sec_geo) - 1) + (96 + 14) * u0)
     ctx = _utility_card_base(width, H, accent_hex, font_file,
-                             subtitle=subtitle, title="运势帮助", dark=dark)
+                             subtitle=subtitle, title="星语帮助", dark=dark)
     draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
     left, right = ctx["left"], ctx["right"]
     y = ctx["y"]
@@ -972,7 +973,7 @@ def render_wallet_card(
     today_gain: int | None = None,
     date_str: str = "",
     accent_hex: str = "#F6C6D3",
-    hint: str = "购买与使用：/运势商店 · /运势使用",
+    hint: str = "购买与使用：/星语商店 · /星语使用",
     font_path: str | None = None,
     extra_font_dirs=None,
     signer: str = "星语者",
@@ -1036,7 +1037,7 @@ def render_shop_card(
     uid: str = "",
     avatar_data: bytes | None = None,
     accent_hex: str = "#F6C6D3",
-    hint: str = "购买：/运势购买 <名称> [数量]",
+    hint: str = "购买：/星语购买 <名称> [数量]",
     font_path: str | None = None,
     extra_font_dirs=None,
     signer: str = "星语者",

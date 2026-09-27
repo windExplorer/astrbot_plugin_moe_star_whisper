@@ -140,7 +140,7 @@ def main() -> int:
                              misc, file_key="t", winner="left", accent_hex="#F0A0B8")
     check(Path(pp).is_file(), "PK 卡落盘")
     pn = card.render_notice_card("购买成功", ["换签卡 ×1", "花费 80 星尘，余额 20", "当前持有 ×2"],
-                                 misc, file_key="t", footer="使用：/运势使用 <名称>")
+                                 misc, file_key="t", footer="使用：/星语使用 <名称>")
     check(Path(pn).is_file(), "通知卡落盘")
     # 日历：2026-09（1 号周二，30 天，跨 5 周）；含已占卜/未占卜/未来/今日
     cal_days = {"2026-09-05": ("大吉", 92), "2026-09-14": ("凶", 33), "2026-09-27": ("吉", 77)}
