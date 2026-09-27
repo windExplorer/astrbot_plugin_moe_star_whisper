@@ -112,11 +112,36 @@
     });
   }
   function busy(b) {
+    if (b) disarm();
     ["btnState", "btnRedraw", "btnRerender", "btnReset"].forEach(function (id) {
       $(id).disabled = b;
     });
   }
   function uid() { return $("uid").value.trim(); }
+
+  // 本页跑在无 allow-modals 的 sandbox iframe 里：window.confirm/alert 会被浏览器
+  // 静默忽略（confirm 恒 false）。危险操作的确认一律用两段式按钮，不用原生弹窗。
+  var armed = null;
+  function disarm() {
+    if (armed) {
+      clearTimeout(armed.timer);
+      armed.btn.textContent = armed.label;
+      armed = null;
+    }
+  }
+  function bindArm(btnId, confirmText, fn) {
+    $(btnId).onclick = function () {
+      var btn = $(btnId);
+      if (armed && armed.btn === btn) {
+        disarm();
+        fn();
+        return;
+      }
+      disarm();
+      armed = { btn: btn, label: btn.textContent, timer: setTimeout(disarm, 6000) };
+      btn.textContent = confirmText;
+    };
+  }
 
   function call(method, path, body) {
     busy(true);
@@ -194,10 +219,9 @@
     });
   }
 
-  function act(path, confirmText) {
+  function act(path) {
     var u = uid();
     if (!u) { showMsg("先填 QQ 号", true); return; }
-    if (confirmText && !window.confirm(confirmText)) return;
     getBridge(function (b) {
       call("POST", path, { uid: u }).then(function (d) {
         var f = d.fortune || {};
@@ -209,15 +233,9 @@
 
   $("btnState").onclick = loadState;
   $("uid").addEventListener("keydown", function (e) { if (e.key === "Enter") loadState(); });
-  $("btnRedraw").onclick = function () {
-    act("debug/redraw", "重抽会换种子重算该用户的今日签（复用当日底图），确认？");
-  };
-  $("btnRerender").onclick = function () {
-    act("debug/rerender", "按已存结果重渲染卡面（不重抽），确认？");
-  };
-  $("btnReset").onclick = function () {
-    act("debug/reset", "确认删除该用户今日签记录与卡文件？（星尘会随重抽再次发放）");
-  };
+  bindArm("btnRedraw", "再点一次确认重抽", function () { act("debug/redraw"); });
+  bindArm("btnRerender", "再点一次确认重绘", function () { act("debug/rerender"); });
+  bindArm("btnReset", "确认删除？再点一次", function () { act("debug/reset"); });
 })();
 </script>
 </body>

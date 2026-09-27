@@ -2,6 +2,14 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v1.2.1 (2026-09-27)
+
+修复调试面板的确认交互：原生 confirm 在 sandbox iframe 里会被静默忽略。
+
+- **问题（根因）**：v1.2.0 的重抽/重绘/重置确认用 `window.confirm`。AstrBot 插件 Page 的 sandbox 是 `allow-scripts allow-forms allow-downloads`（不含 `allow-modals`），按 sandbox 规范原生 confirm/alert 会被浏览器**静默忽略**——confirm 恒返回 false，三个操作在真机上永远「取消」，面板废掉。本地 file:// 冒烟没有 sandbox，恰好掩盖了这一点。
+- **修复**：确认改为**页面内两段式按钮**——第一次点击按钮变「再点一次确认」，6 秒内再点才执行，超时自动恢复原文案；零原生弹窗依赖。结果提示仍是页面内消息条（从未用过 alert）。
+- **冒烟（桩桥真浏览器）**：单次点击进确认态零误发、两连点正确执行、6 秒超时自动恢复、全程 confirm/alert 调用计数为 0；顺带修复重抽成功提示被状态刷新清空的交互问题（上轮已修）。
+
 ## v1.2.0 (2026-09-27)
 
 调试迁移到 WebUI：插件 Page 调试面板（仅管理员），撤掉 v1.1.0 的聊天调试指令。
