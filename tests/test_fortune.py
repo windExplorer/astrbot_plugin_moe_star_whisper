@@ -139,6 +139,14 @@ def main() -> int:
     check(fortune.parse_draw_response("绘图完成！") == [], "无路径文本返回空")
     check(fortune.parse_draw_response(None) == [], "None 返回空")
 
+    # 11) M7：星尘奖励公式
+    check(fortune.stardust_reward("大吉", 0) == 30, "大吉首签 10+20")
+    check(fortune.stardust_reward("凶", 3) == 26, "凶+连签3 10+14+2")
+    check(fortune.stardust_reward("大凶", 7) == 32, "大凶+连签7 10+18+4（越倒霉补偿越多）")
+    check(fortune.stardust_reward("中吉", 30) == 28, "中吉+连签30 10+12+6")
+    check(fortune.stardust_reward("小吉", 1) == 20, "小吉首签 10+10")
+    check(fortune.stardust_reward("吉", 1, base=0) == 15, "自定义基础值（streak=1 无连签加成）")
+
     if FAILED:
         print(f"\n{len(FAILED)} 项失败")
         return 1

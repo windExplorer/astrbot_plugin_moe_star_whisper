@@ -87,6 +87,20 @@ def main() -> int:
     check(len(jobs) == 1 and jobs[0]["status"] == "ok" and jobs[0]["duration_ms"] == 1234,
           "draw_jobs 落库与读回")
 
+    # 道具经济（M7）：流水/余额/背包/佩戴标记
+    st.add_ledger("e1", 30, "draw", "2026-09-27")
+    st.add_ledger("e1", -20, "buy:reroll")
+    check(st.get_balance("e1") == 10, f"余额=流水合计 10，实际 {st.get_balance('e1')}")
+    check(st.get_balance("nobody") == 0, "无记录用户余额 0")
+    st.add_item("e1", "reroll", 2)
+    st.add_item("e1", "reroll", 1)
+    check(st.get_item("e1", "reroll") == 3, "道具累加 upsert")
+    st.add_item("e1", "reroll", -1)
+    check(st.get_item("e1", "reroll") == 2, "道具扣减")
+    st.add_ledger("e1", 0, "use:amulet", "2026-09-28")
+    check(st.has_ledger("e1", "2026-09-28", "use:amulet"), "佩戴标记可查")
+    check(not st.has_ledger("e1", "2026-09-28", "use:candle"), "未佩戴不误报")
+
     st.close()
     if FAILED:
         print(f"\n{len(FAILED)} 项失败")

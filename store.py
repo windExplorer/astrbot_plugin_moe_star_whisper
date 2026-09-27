@@ -139,6 +139,23 @@ class Store:
         self._db.commit()
         return cur.rowcount == 1
 
+    def update_fortune_payload(self, user_id: str, date: str, result: dict,
+                               card_path: str | None = None) -> None:
+        """换签卡（M7）：覆盖当日签的运势内容（grade/score/payload/卡路径同步）。"""
+        self._db.execute(
+            "UPDATE fortunes SET grade=?, score=?, payload=?,"
+            " card_path=COALESCE(?, card_path) WHERE user_id=? AND date=?",
+            (
+                str(result.get("grade", "")),
+                int(result.get("score", 0)),
+                json.dumps(result, ensure_ascii=False),
+                card_path,
+                user_id,
+                date,
+            ),
+        )
+        self._db.commit()
+
     def list_active_group_ids(self, days: int = 7) -> list:
         """近 N 天有过抽签的群（group_id, platform）——每日推送的目标集。"""
         since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -185,6 +202,51 @@ class Store:
             (user_id, date),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # ---------- 道具经济（M7，D8） ----------
+
+    def get_balance(self, user_id: str) -> int:
+        """星尘余额 = ledger 流水合计。"""
+        row = self._db.execute(
+            "SELECT COALESCE(SUM(delta), 0) AS total FROM ledger WHERE user_id=?",
+            (user_id,),
+        ).fetchone()
+        return int(row["total"] or 0)
+
+    def add_ledger(self, user_id: str, delta: int, reason: str, ref_date: str = "") -> None:
+        """每一笔星尘增减都必须走这里（D8：全流水可审计）。"""
+        self._db.execute(
+            "INSERT INTO ledger (user_id, delta, reason, ref_date, created_at)"
+            " VALUES (?,?,?,?,?)",
+            (user_id, int(delta), reason, ref_date,
+             datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        )
+        self._db.commit()
+
+    def has_ledger(self, user_id: str, ref_date: str, reason: str) -> bool:
+        """当日是否已有某类记录（护身符/香烛佩戴标记、防重复使用）。"""
+        row = self._db.execute(
+            "SELECT 1 FROM ledger WHERE user_id=? AND ref_date=? AND reason=? LIMIT 1",
+            (user_id, ref_date, reason),
+        ).fetchone()
+        return row is not None
+
+    def get_item(self, user_id: str, item_id: str) -> int:
+        row = self._db.execute(
+            "SELECT count FROM items WHERE user_id=? AND item_id=?",
+            (user_id, item_id),
+        ).fetchone()
+        return int(row["count"] or 0) if row else 0
+
+    def add_item(self, user_id: str, item_id: str, delta: int) -> int:
+        """增减道具持有量（delta 可负），返回新数量。"""
+        self._db.execute(
+            "INSERT INTO items (user_id, item_id, count) VALUES (?,?,?)"
+            " ON CONFLICT(user_id, item_id) DO UPDATE SET count = count + ?",
+            (user_id, item_id, int(delta), int(delta)),
+        )
+        self._db.commit()
+        return self.get_item(user_id, item_id)
 
     def list_day(self, date: str) -> list[dict]:
         """当日全部抽签记录（榜单/PK 用，M3 接线）。"""

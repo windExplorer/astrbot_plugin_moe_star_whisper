@@ -32,13 +32,29 @@ _STREAK_BADGES = {
     30: "三十日连签达成，星语者的挚友 🎇",
 }
 
+# 道具经济（M7/D8）：id -> (名称, 效果一句话)；星尘不可转账不可兑换
+ITEM_DEFS = {
+    "reroll": ("换签卡", "当日重抽一次，新结果覆盖旧结果（运势与底图完整重做）"),
+    "amulet": ("厄运护身符", "佩戴后当日抽签保底小吉（抽签前使用）"),
+    "streak_guard": ("连签保护卡", "断签 3 天内 /运势补签 补回昨天"),
+    "candle": ("幸运香烛", "当日幸运指数 +8（抽签前使用）"),
+}
+DEFAULT_PRICES = {"reroll": 80, "amulet": 50, "streak_guard": 30, "candle": 20}
+_ITEM_ALIASES = {
+    "reroll": "reroll", "换签卡": "reroll", "换签": "reroll", "改运卡": "reroll",
+    "amulet": "amulet", "厄运护身符": "amulet", "护身符": "amulet", "护身": "amulet",
+    "streak_guard": "streak_guard", "连签保护卡": "streak_guard",
+    "保护卡": "streak_guard", "补签卡": "streak_guard",
+    "candle": "candle", "幸运香烛": "candle", "香烛": "candle",
+}
+
 try:  # M2 起提供图卡；缺失/失败时回退纯文本
     from .card import render_card
 except Exception:  # pragma: no cover
     render_card = None
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "0.7.0")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "0.8.0")
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -265,6 +281,71 @@ class StarWhisperPlugin(Star):
             job["error"] = str(e)[:200]
             return None, job
 
+    def _roll_daily(self, uid: str, date: str, salt: str, profile: dict,
+                    nonce: int = 0, streak=None) -> dict:
+        """确定性掷出当日签（M7 重构）：生日特权 / 佩戴道具 / 彩蛋 / 首抽星尘。
+
+        nonce>0 为换签重掷（跳过 streak 推进与星尘发放）；
+        streak 传值时沿用（补签/换签场景），缺省时按首签推进。
+        """
+        weights = self._grade_weights()
+        birthday_today = str(profile.get("birthday") or "") == date[5:]
+        if birthday_today:
+            weights = {"大吉": 100}  # 生日特权（F14）
+        wearing_amulet = self._store.has_ledger(uid, date, "use:amulet")
+        if wearing_amulet:
+            weights = fortune.amulet_weights(weights)
+        lex = lexicon.load_lexicon()
+        seed = fortune.derive_seed(date, uid, salt, nonce)
+        result = fortune.roll_fortune(seed, lex, weights)
+        result["date"] = date
+        if streak is None:
+            streak = self._store.bump_streak(uid, date, fortune.prev_date(date))
+        result["streak"] = streak
+        if profile.get("constellation"):
+            result["constellation"] = profile["constellation"]
+        if birthday_today:
+            result["birthday_today"] = True
+        result["boosts"]["amulet"] = wearing_amulet
+        if self._store.has_ledger(uid, date, "use:candle"):
+            fortune.apply_candle(result)
+        # 特殊日期彩蛋（F14），写进 payload 保证回放一致
+        mmdd = date[5:]
+        if mmdd == "04-01":
+            result["grade_display"] = f"{result['grade']}（？）"
+            if result["grade"] == "大吉":
+                result["sign_text"] += "（真的是大吉，星星发誓——今天可是愚人节。）"
+            else:
+                result["sign_text"] += "（愚人节快乐，以上运势真假自辨。）"
+        else:
+            extras = []
+            fest = lex.get("festivals") or {}
+            if mmdd in fest:
+                extras.append(fortune.pick_text(seed, "festival", fest[mmdd]))
+            if datetime.strptime(date, "%Y-%m-%d").weekday() == 4:
+                extras.append(fortune.pick_text(seed, "friday", lex["friday"]))
+            if extras:
+                result["sign_text"] = result["sign_text"] + "".join(extras)
+        if nonce == 0 and self._economy_on():
+            reward = fortune.stardust_reward(
+                result["grade"], streak, int(self._cfg("draw_reward_base", 10))
+            )
+            self._store.add_ledger(uid, reward, "draw", date)
+            result["stardust"] = reward
+        return result
+
+    def _economy_on(self) -> bool:
+        return bool(self._cfg("economy_enabled", True))
+
+    def _price_of(self, item_id: str) -> int:
+        raw = self._cfg("item_prices", None)
+        if isinstance(raw, dict) and raw.get(item_id) is not None:
+            try:
+                return max(0, int(raw[item_id]))
+            except Exception:
+                pass
+        return DEFAULT_PRICES[item_id]
+
     async def _try_llm_sign(self, result: dict) -> None:
         """LLM 星语（F16，可选增强默认关）：当日首次抽签改写签文；失败静默回退本地模板。"""
         try:
@@ -420,6 +501,9 @@ class StarWhisperPlugin(Star):
             badge = _STREAK_BADGES.get(streak)
             if badge:
                 lines.append(badge)
+        stardust = payload.get("stardust")
+        if stardust:
+            lines.append(f"星尘 +{stardust}（/星尘 查看背包）")
         lines.append("—— 星语者")
         if repeat:
             lines.insert(0, "（今天已经抽过啦，这是你今天的星语签～）")
@@ -457,39 +541,9 @@ class StarWhisperPlugin(Star):
                 yield event.plain_result(self._format_result(payload, repeat=True))
             return
 
-        # 首次抽签
+        # 首次抽签（生日特权/佩戴道具/彩蛋/星尘奖励统一在 _roll_daily）
         profile = self._store.get_profile(uid) or {}
-        weights = self._grade_weights()
-        birthday_today = str(profile.get("birthday") or "") == date[5:]
-        if birthday_today:
-            # 生日特权（F14）：当天必得大吉
-            weights = {"大吉": 100}
-        seed = fortune.derive_seed(date, uid, salt, nonce=0)
-        lex = lexicon.load_lexicon()
-        result = fortune.roll_fortune(seed, lex, weights)
-        result["date"] = date
-        result["streak"] = self._store.bump_streak(uid, date, fortune.prev_date(date))
-        if profile.get("constellation"):
-            result["constellation"] = profile["constellation"]
-        if birthday_today:
-            result["birthday_today"] = True
-        # 特殊日期彩蛋（F14）：愚人节整活 / 节日池 / 周五摸鱼加成（写进 payload，回放一致）
-        mmdd = date[5:]
-        if mmdd == "04-01":
-            result["grade_display"] = f"{result['grade']}（？）"
-            if result["grade"] == "大吉":
-                result["sign_text"] += "（真的是大吉，星星发誓——今天可是愚人节。）"
-            else:
-                result["sign_text"] += "（愚人节快乐，以上运势真假自辨。）"
-        else:
-            extras = []
-            fest = lex.get("festivals") or {}
-            if mmdd in fest:
-                extras.append(fortune.pick_text(seed, "festival", fest[mmdd]))
-            if datetime.strptime(date, "%Y-%m-%d").weekday() == 4:
-                extras.append(fortune.pick_text(seed, "friday", lex["friday"]))
-            if extras:
-                result["sign_text"] = result["sign_text"] + "".join(extras)
+        result = self._roll_daily(uid, date, salt, profile)
 
         await self._try_llm_sign(result)
 
@@ -713,3 +767,222 @@ class StarWhisperPlugin(Star):
         if (prof.get("birthday") or "") == today[5:]:
             line += " ｜ 🎂 今天是生日！"
         yield event.plain_result(line)
+
+    # ---------- 道具经济指令（M7/D8） ----------
+
+    @filter.command("星尘", alias={"运势背包"})
+    async def wallet_cmd(self, event: AstrMessageEvent):
+        """查星尘余额与道具背包"""
+        if self._store is None or not self._economy_on():
+            yield event.plain_result("道具经济未开放～")
+            return
+        uid = str(event.get_sender_id() or "").strip()
+        balance = self._store.get_balance(uid)
+        lines = [f"✨ 星尘余额：{balance}", "—— 背包 ——"]
+        for item_id, (name, _desc) in ITEM_DEFS.items():
+            count = self._store.get_item(uid, item_id)
+            lines.append(f"{name} ×{count}")
+        lines.append("用 /运势商店 看看有什么好东西～")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command("运势商店", alias={"星语商店"})
+    async def shop_cmd(self, event: AstrMessageEvent):
+        """道具与价格一览"""
+        if self._store is None or not self._economy_on():
+            yield event.plain_result("道具经济未开放～")
+            return
+        uid = str(event.get_sender_id() or "").strip()
+        lines = ["🛒 萌萌星语 · 道具商店", ""]
+        for item_id, (name, desc) in ITEM_DEFS.items():
+            lines.append(
+                f"【{name}】{self._price_of(item_id)} 星尘\n　{desc}\n　持有 ×{self._store.get_item(uid, item_id)}"
+            )
+        lines.append("\n购买：/运势购买 <名称> [数量]")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command("运势购买", alias={"星语购买"})
+    async def buy_cmd(self, event: AstrMessageEvent):
+        """购买道具：/运势购买 <名称> [数量]"""
+        if self._store is None or not self._economy_on():
+            yield event.plain_result("道具经济未开放～")
+            return
+        uid = str(event.get_sender_id() or "").strip()
+        raw = str(event.message_str or "").replace(" ", "")
+        for w in ("运势购买", "星语购买", "/"):
+            raw = raw.replace(w, "")
+        m_num = re.search(r"(\d+)", raw)
+        count = 1
+        if m_num:
+            count = max(1, min(10, int(m_num.group(1))))
+            raw = raw[:m_num.start()] + raw[m_num.end():]
+        item_id = _ITEM_ALIASES.get(raw.strip())
+        if item_id is None:
+            yield event.plain_result("要买什么？/运势商店 看看货架～")
+            return
+        cap = max(1, int(self._cfg("item_hold_cap", 3)))
+        held = self._store.get_item(uid, item_id)
+        if held + count > cap:
+            yield event.plain_result(
+                f"持有已达上限（{cap}）——现在 ×{held}，最多再买 {max(0, cap - held)} 张。"
+            )
+            return
+        price = self._price_of(item_id) * count
+        balance = self._store.get_balance(uid)
+        if balance < price:
+            yield event.plain_result(
+                f"星尘不够啦：需要 {price}，你还差 {price - balance}。明天记得来抽签攒星尘～"
+            )
+            return
+        self._store.add_ledger(uid, -price, f"buy:{item_id}")
+        new_count = self._store.add_item(uid, item_id, count)
+        name = ITEM_DEFS[item_id][0]
+        yield event.plain_result(
+            f"购买成功：{name} ×{count}（-{price} 星尘）\n当前持有 ×{new_count}，余额 {balance - price}。"
+        )
+
+    @filter.command("运势使用", alias={"星语使用"})
+    async def use_cmd(self, event: AstrMessageEvent):
+        """使用道具：/运势使用 <换签卡|厄运护身符|幸运香烛>"""
+        if self._store is None or not self._economy_on():
+            yield event.plain_result("道具经济未开放～")
+            return
+        uid = str(event.get_sender_id() or "").strip()
+        raw = str(event.message_str or "").replace(" ", "")
+        for w in ("运势使用", "星语使用", "/"):
+            raw = raw.replace(w, "")
+        item_id = _ITEM_ALIASES.get(raw.strip())
+        if item_id is None:
+            yield event.plain_result("要使用哪个道具？背包见 /星尘")
+            return
+        tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
+        date = fortune.local_today(tz_name)
+        salt = str(self._cfg("salt", "moe-star-whisper"))
+
+        if item_id == "reroll":
+            existing = self._store.get_fortune(uid, date)
+            if existing is None:
+                yield event.plain_result("今天还没抽签，不用换——先 /运势 抽一支吧～")
+                return
+            payload = existing.get("payload") or {}
+            used = int(payload.get("reroll_count", 0) or 0)
+            if used >= 1:
+                yield event.plain_result("今天已经换过一次签了，命运不接受讨价还价～")
+                return
+            if self._store.get_item(uid, "reroll") < 1:
+                yield event.plain_result("背包里没有换签卡（/运势商店 有售）。")
+                return
+            self._store.add_item(uid, "reroll", -1)
+            new_result = self._roll_daily(
+                uid, date, salt, self._store.get_profile(uid) or {},
+                nonce=used + 1, streak=int(payload.get("streak") or 1),
+            )
+            new_result["reroll_count"] = used + 1
+            bg_path, job = await self._try_draw_background(event, new_result, uid, date, salt)
+            card_path = self._try_render_card(
+                new_result, uid,
+                nickname=existing.get("nickname") or "", avatar=existing.get("avatar") or "",
+                bg_image=bg_path,
+            )
+            if job is not None:
+                job["card_path"] = card_path or ""
+                try:
+                    self._store.record_draw_job(uid, date, **job)
+                except Exception:
+                    logger.error(f"[{PLUGIN_NAME}] draw_jobs 落库失败\n{traceback.format_exc()}")
+            self._store.update_fortune_payload(uid, date, new_result, card_path or "")
+            if card_path:
+                yield event.image_result(card_path)
+            else:
+                yield event.plain_result(self._format_result(new_result))
+            return
+
+        if item_id in ("amulet", "candle"):
+            if self._store.get_fortune(uid, date) is not None:
+                yield event.plain_result("今天的签已经出来了，这个道具明天再用吧～")
+                return
+            if self._store.has_ledger(uid, date, f"use:{item_id}"):
+                yield event.plain_result("今天已经佩戴过了，不用重复使用～")
+                return
+            if self._store.get_item(uid, item_id) < 1:
+                yield event.plain_result(f"背包里没有{ITEM_DEFS[item_id][0]}（/运势商店 有售）。")
+                return
+            self._store.add_item(uid, item_id, -1)
+            self._store.add_ledger(uid, 0, f"use:{item_id}", date)
+            yield event.plain_result(f"已使用{ITEM_DEFS[item_id][0]}：今天抽签时生效 ✨")
+            return
+
+        yield event.plain_result("这个道具不需要手动使用（见 /运势商店 说明）。")
+
+    @filter.command("运势补签", alias={"星语补签"})
+    async def makeup_cmd(self, event: AstrMessageEvent):
+        """断签 3 天内消耗连签保护卡补回昨天的签"""
+        if self._store is None or not self._economy_on():
+            yield event.plain_result("道具经济未开放～")
+            return
+        uid = str(event.get_sender_id() or "").strip()
+        tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
+        today = fortune.local_today(tz_name)
+        salt = str(self._cfg("salt", "moe-star-whisper"))
+        prev = fortune.prev_date(today)
+        profile = self._store.get_profile(uid) or {}
+        last = str(profile.get("last_draw_date") or "")
+        if not last:
+            yield event.plain_result("还没抽过签就谈不上补签——先 /运势 抽第一支吧～")
+            return
+        if last == today:
+            yield event.plain_result("今天已经抽过啦，不用补签～")
+            return
+        if self._store.get_fortune(uid, prev) is not None:
+            yield event.plain_result("昨天的签还在，没有缺口可补。")
+            return
+        if self._store.get_fortune(uid, today) is not None:
+            yield event.plain_result("今天已经抽过，补签窗口关闭（明天断签再来）。")
+            return
+        gap_days = (datetime.strptime(today, "%Y-%m-%d") - datetime.strptime(last, "%Y-%m-%d")).days
+        if gap_days > 3:
+            yield event.plain_result("断签超过 3 天，连不上啦——从今天重新开始连签吧。")
+            return
+        if self._store.get_item(uid, "streak_guard") < 1:
+            yield event.plain_result("背包里没有连签保护卡（/运势商店 有售）。")
+            return
+        self._store.add_item(uid, "streak_guard", -1)
+        result = self._roll_daily(uid, prev, salt, profile)
+        nickname = profile.get("nickname") or "旅行者"
+        self._store.save_fortune(
+            uid, prev, result, nickname=nickname,
+            avatar=profile.get("avatar") or "", platform=self._sender_platform(event),
+        )
+        yield event.plain_result(
+            f"补签成功（{prev}）✨ 连签恢复到 {result['streak']} 天\n\n" + self._format_result(result)
+        )
+
+    @filter.command("运势发放", alias={"星语发放"})
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def grant_cmd(self, event: AstrMessageEvent):
+        """手动调整星尘：/运势发放 @用户 <±n>（必走流水）"""
+        if self._store is None or not self._economy_on():
+            yield event.plain_result("道具经济未开放～")
+            return
+        target = None
+        for seg in event.get_messages():
+            if isinstance(seg, At):
+                q = str(getattr(seg, "qq", "") or "")
+                if q and q != "all":
+                    target = q
+                    break
+        if not target:
+            yield event.plain_result("请 @ 要发放（或扣除）星尘的用户。")
+            return
+        raw = str(event.message_str or "")
+        m = re.search(r"([+-]?\d+)", raw)
+        if not m:
+            yield event.plain_result("格式：/运势发放 @用户 <±n>")
+            return
+        delta = int(m.group(1))
+        if delta == 0:
+            yield event.plain_result("0 颗星尘？星星当你是空气。")
+            return
+        self._store.add_ledger(target, delta, "admin")
+        yield event.plain_result(
+            f"已{'发放' if delta > 0 else '扣除'} {abs(delta)} 颗星尘，当前余额 {self._store.get_balance(target)}。"
+        )

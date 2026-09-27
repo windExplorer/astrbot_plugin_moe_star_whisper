@@ -303,3 +303,23 @@ def parse_draw_response(raw) -> list:
         if isinstance(p, str) and p.strip():
             out.append(p.strip())
     return out
+
+
+# ---------- M7：道具经济（F22/D8，口径见 PRD「道具经济明细」） ----------
+
+STARDUST_GRADE_BONUS = {
+    "大吉": 20, "吉": 15, "中吉": 12, "小吉": 10, "凶": 14, "大凶": 18,
+}
+
+
+def stardust_reward(grade: str, streak: int, base: int = 10) -> int:
+    """每日抽签的星尘奖励：基础 + 吉凶修正（越倒霉补偿越多）+ 连签加成（2/4/6 档）。"""
+    if streak >= 30:
+        streak_bonus = 6
+    elif streak >= 7:
+        streak_bonus = 4
+    elif streak >= 3:
+        streak_bonus = 2
+    else:
+        streak_bonus = 0
+    return int(base) + STARDUST_GRADE_BONUS.get(grade, 10) + streak_bonus
