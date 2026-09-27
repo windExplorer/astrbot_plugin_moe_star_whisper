@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS draw_jobs (
   card_path   TEXT,
   created_at  TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_fortunes_date ON fortunes(date);
 """
 
 

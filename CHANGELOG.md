@@ -2,6 +2,13 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.2.1 (2026-09-27)
+
+M1 代码审查修复：
+
+- **词库深度校验**：原实现只查顶层键存在——池被清空/档位缺失要到用户抽签时才以 ZeroDivisionError/KeyError 炸掉。抽出 `validate_lexicon()`（池非空、宜忌池 ≥2、点评/祝语覆盖六档、lucky_colors 含 name/hex、phases 含 name/text），加载期即拦截；新增 `tests/test_lexicon.py` 8 组负例。
+- **榜单索引**：`list_day` 按 date 查询但主键 (user_id, date) 帮不上忙，补 `idx_fortunes_date` 索引（M3 榜单/PK 的前置准备）。
+
 ## v0.2.0 (2026-09-27)
 
 M1 核心抽签：从骨架到可用的纯文本出签。
