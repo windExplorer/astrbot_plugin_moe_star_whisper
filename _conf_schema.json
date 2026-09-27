@@ -27,6 +27,12 @@
     "options": ["图卡", "纯文本", "图卡+文本"],
     "default": "图卡"
   },
+  "card_theme": {
+    "description": "卡面主题（auto 目前等同 light；dark 为暗色卡面）",
+    "type": "string",
+    "options": ["auto", "light", "dark"],
+    "default": "auto"
+  },
   "card_font_path": {
     "description": "图卡字体路径（留空则按 插件data/fonts→data/plugin_data/fonts→data/fonts→系统 顺序查找）",
     "type": "string",

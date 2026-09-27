@@ -57,6 +57,19 @@ def main() -> int:
                           width=512, height=768, nickname="小", uid="2")
     check(Image.open(p3).size == (512, 768), "小尺寸应按比例渲染")
 
+    # 3.5) M4：暗色主题 / 生日描边 / 星座角标 / grade_display 渲染冒烟
+    r4 = dict(r)
+    r4["birthday_today"] = True
+    r4["grade_display"] = "大吉（？）"
+    r4["constellation"] = "天秤座"
+    p4 = card.render_card(r4, Path(tempfile.mkdtemp(prefix="moe_card_")),
+                          theme="dark", nickname="夜旅人", uid="4")
+    img4 = Image.open(p4)
+    img4.load()
+    check(img4.size == (1024, 1536), "暗色卡尺寸一致")
+    lo4, hi4 = img4.convert("L").getextrema()
+    check(hi4 - lo4 > 30, "暗色卡应有明暗层次")
+
     # 4) 长签文换行：每行不超宽（允许单字超宽的容差）
     f40 = card._font(ff, 40)
     lines = card._wrap("星" * 120, f40, 800)

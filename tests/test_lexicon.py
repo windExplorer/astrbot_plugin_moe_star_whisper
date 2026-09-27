@@ -37,6 +37,9 @@ def main() -> int:
         ("月相缺 text", lambda d: d["phases"][0].pop("text")),
         ("缺 pk 池", lambda d: d.pop("pk")),
         ("pk.tie 为空", lambda d: d["pk"].__setitem__("tie", [])),
+        ("缺 festivals", lambda d: d.pop("festivals")),
+        ("festival 池为空", lambda d: d["festivals"].__setitem__("01-01", [])),
+        ("缺 friday", lambda d: d.pop("friday")),
     ]
     for name, mutate in cases:
         try:

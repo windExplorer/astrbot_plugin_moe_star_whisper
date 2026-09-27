@@ -134,10 +134,14 @@ def _circle_img(img: Image.Image, diameter: int) -> Image.Image:
     return out
 
 
-def _gradient(w: int, h: int, base_rgb: tuple) -> Image.Image:
-    """幸运色纵向淡彩渐变：白底为主，幸运色只做轻微氛围。"""
-    top = _mix(base_rgb, (255, 255, 255), 0.74)
-    bottom = _mix(base_rgb, (255, 255, 255), 0.92)
+def _gradient(w: int, h: int, base_rgb: tuple, dark: bool = False) -> Image.Image:
+    """纵向渐变：light=白底为主幸运色氛围；dark=暗夜底混入幸运色。"""
+    if dark:
+        top = _mix(base_rgb, (24, 25, 38), 0.86)
+        bottom = _mix(base_rgb, (24, 25, 38), 0.94)
+    else:
+        top = _mix(base_rgb, (255, 255, 255), 0.74)
+        bottom = _mix(base_rgb, (255, 255, 255), 0.92)
     img = Image.new("RGB", (1, h))
     px = img.load()
     for y in range(h):
@@ -168,6 +172,7 @@ def render_card(
     avatar_url: str = "",
     uid: str = "",
     bg_image=None,
+    theme: str = "light",
 ) -> str:
     """渲染当日星语签，落盘 cards_root/<date>.png 并返回路径。失败抛异常由调用方回退。"""
     font_file = find_font(font_path, extra_font_dirs)
@@ -179,15 +184,20 @@ def render_card(
     lucky = result.get("lucky_color") or {}
     lucky_rgb = _hex_rgb(lucky.get("hex", "#F6C6D3"))
     grade_rgb = _hex_rgb(result.get("grade_color", "#E86A8A"))
-    ink = (74, 74, 96)
-    sub = (150, 150, 168)
+    dark = str(theme or "light").lower() == "dark"
+    if dark:
+        ink, sub = (230, 230, 240), (158, 160, 178)
+        panel_fill, divider_rgb = (30, 31, 44, 240), (62, 63, 80, 255)
+    else:
+        ink, sub = (74, 74, 96), (150, 150, 168)
+        panel_fill, divider_rgb = (255, 255, 255, 236), (238, 236, 242, 255)
 
     if bg_image:
         base = _cover(Image.open(bg_image).convert("RGB"), W, H)
         scrim = Image.new("RGBA", (W, H), (255, 255, 255, 170))
         base = Image.alpha_composite(base.convert("RGBA"), scrim)
     else:
-        base = _gradient(W, H, lucky_rgb).convert("RGBA")
+        base = _gradient(W, H, lucky_rgb, dark=dark).convert("RGBA")
 
     # 背景装饰：几颗四角星（淡）
     deco = Image.new("RGBA", (W, H), (0, 0, 0, 0))
@@ -202,10 +212,19 @@ def render_card(
     panel = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     ImageDraw.Draw(panel).rounded_rectangle(
         [margin, margin, W - margin, H - margin],
-        radius=int(44 * u), fill=(255, 255, 255, 236),
+        radius=int(44 * u), fill=panel_fill,
     )
     img = Image.alpha_composite(img, panel)
     draw = ImageDraw.Draw(img)
+
+    # 生日特权（F14）：金环描边
+    if result.get("birthday_today"):
+        draw.rounded_rectangle(
+            [margin - int(10 * u), margin - int(10 * u),
+             W - margin + int(10 * u), H - margin + int(10 * u)],
+            radius=int(54 * u), outline=(240, 184, 96, 230),
+            width=max(2, int(5 * u)),
+        )
 
     pad = int(48 * u)
     left = margin + pad
@@ -231,18 +250,21 @@ def render_card(
     draw.text((tx, y + int(8 * u)), nickname or "旅行者",
               font=_font(font_file, int(50 * u)), fill=ink)
     if uid:
-        draw.text((tx, y + int(74 * u)), f"QQ {uid}",
+        qq_line = f"QQ {uid}"
+        if result.get("constellation"):
+            qq_line += f" · {result['constellation']}"
+        draw.text((tx, y + int(74 * u)), qq_line,
                   font=_font(font_file, int(34 * u)), fill=sub)
     draw.text((right, y + int(8 * u)), str(result.get("date", "")),
               font=_font(font_file, int(34 * u)), fill=sub, anchor="ra")
     y += av_d + int(34 * u)
 
     # 分隔线
-    draw.line([(left, y), (right, y)], fill=(238, 236, 242, 255), width=max(1, int(2 * u)))
+    draw.line([(left, y), (right, y)], fill=divider_rgb, width=max(1, int(2 * u)))
     y += int(30 * u)
 
-    # ② 吉凶大字（主题色随档位，粗体更有签的分量）
-    grade = str(result.get("grade", "？"))
+    # ② 吉凶大字（主题色随档位，粗体更有签的分量；愚人节等显示态用 grade_display）
+    grade = str(result.get("grade_display") or result.get("grade", "？"))
     draw.text((W // 2, y + int(78 * u)), grade,
               font=_font(_bold_variant(font_file), int(148 * u)), fill=grade_rgb, anchor="mm")
     y += int(182 * u)

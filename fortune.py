@@ -134,6 +134,40 @@ def pick_text(seed: bytes, tag: str, pool: list) -> str:
     return _pick(seed, tag, pool)
 
 
+# 星座区间（含跨年的摩羯）；MM-DD -> 名称
+CONSTELLATION_RANGES = (
+    ("摩羯座", (12, 22), (1, 19)),
+    ("水瓶座", (1, 20), (2, 18)),
+    ("双鱼座", (2, 19), (3, 20)),
+    ("白羊座", (3, 21), (4, 19)),
+    ("金牛座", (4, 20), (5, 20)),
+    ("双子座", (5, 21), (6, 21)),
+    ("巨蟹座", (6, 22), (7, 22)),
+    ("狮子座", (7, 23), (8, 22)),
+    ("处女座", (8, 23), (9, 22)),
+    ("天秤座", (9, 23), (10, 23)),
+    ("天蝎座", (10, 24), (11, 22)),
+    ("射手座", (11, 23), (12, 21)),
+)
+
+
+def constellation_of(mmdd: str) -> str:
+    """MM-DD -> 星座名；非法日期返回空串（绑定入口已先行校验，此处双保险）。"""
+    try:
+        m, d = int(str(mmdd)[:2]), int(str(mmdd)[3:5])
+        datetime(2000, m, d)  # 日历合法性（拦截 13-40 之类，防跨年 or 误判）
+    except Exception:
+        return ""
+    for name, (m1, d1), (m2, d2) in CONSTELLATION_RANGES:
+        if (m1, d1) <= (m2, d2):
+            hit = (m1, d1) <= (m, d) <= (m2, d2)
+        else:  # 跨年（摩羯）
+            hit = (m, d) >= (m1, d1) or (m, d) <= (m2, d2)
+        if hit:
+            return name
+    return ""
+
+
 def amulet_weights(weights: dict | None = None) -> dict:
     """厄运护身符（F22，M7 使用）：凶/大凶的权重并入小吉，实现「保底小吉」。"""
     base = dict(weights) if weights else dict(DEFAULT_GRADE_WEIGHTS)

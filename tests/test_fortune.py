@@ -99,6 +99,20 @@ def main() -> int:
     check(fortune.local_today("Not/AZone") == fortune.local_today("Asia/Shanghai"),
           "非法时区应回退 Asia/Shanghai")
 
+    # 8) 星座边界（M4）
+    cases = (
+        ("03-21", "白羊座"), ("04-19", "白羊座"), ("03-20", "双鱼座"), ("02-19", "双鱼座"),
+        ("12-22", "摩羯座"), ("01-19", "摩羯座"), ("01-20", "水瓶座"), ("02-18", "水瓶座"),
+        ("06-21", "双子座"), ("06-22", "巨蟹座"), ("05-20", "金牛座"), ("07-22", "巨蟹座"),
+        ("08-23", "处女座"), ("09-22", "处女座"), ("09-23", "天秤座"), ("10-23", "天秤座"),
+        ("10-24", "天蝎座"), ("11-22", "天蝎座"), ("11-23", "射手座"), ("12-21", "射手座"),
+    )
+    for mmdd, expect in cases:
+        check(fortune.constellation_of(mmdd) == expect,
+              f"星座 {mmdd} 应为 {expect}，实际 {fortune.constellation_of(mmdd)}")
+    check(fortune.constellation_of("abc") == "", "非法输入返回空串")
+    check(fortune.constellation_of("13-40") == "", "越界日期返回空串")
+
     if FAILED:
         print(f"\n{len(FAILED)} 项失败")
         return 1

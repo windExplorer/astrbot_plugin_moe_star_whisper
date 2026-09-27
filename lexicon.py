@@ -10,6 +10,7 @@ LEXICON_FILE = Path(__file__).resolve().parent / "data" / "lexicon" / "fortune_l
 REQUIRED_KEYS = (
     "grades", "grade_colors", "comments", "wishes", "item_lines",
     "lucky_items", "lucky_colors", "directions", "yi", "ji", "phases", "pk",
+    "festivals", "friday",
 )
 
 _cache: dict | None = None
@@ -50,6 +51,14 @@ def validate_lexicon(data: dict) -> None:
     for key in ("win", "lose", "tie"):
         if not isinstance(pk.get(key), list) or not pk[key]:
             raise ValueError(f"词库 pk.{key} 必须是非空列表")
+    fest = data.get("festivals")
+    if not isinstance(fest, dict):
+        raise ValueError("词库 festivals 必须是对象（MM-DD -> 文案数组）")
+    for k, v in fest.items():
+        if not isinstance(v, list) or not v:
+            raise ValueError(f"词库 festivals.{k} 必须是非空数组")
+    if not isinstance(data.get("friday"), list) or not data["friday"]:
+        raise ValueError("词库 friday 必须是非空数组")
 
 
 def load_lexicon(force_reload: bool = False) -> dict:

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """萌萌星语：每日运势签插件入口。"""
 import importlib
+import re
 import sys
 import traceback
 from datetime import datetime, timedelta
@@ -28,8 +29,7 @@ except Exception:  # pragma: no cover
     render_card = None
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "0.4.0")
-
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "0.5.0")
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -131,6 +131,7 @@ class StarWhisperPlugin(Star):
                 nickname=nickname,
                 avatar_url=avatar,
                 uid=uid,
+                theme=str(self._cfg("card_theme", "auto")),
             )
         except Exception:
             logger.error(
@@ -147,7 +148,7 @@ class StarWhisperPlugin(Star):
         phase = payload.get("phase") or {}
         lines = [
             "🌙 萌萌星语",
-            f"—— 星语签 · {payload.get('grade', '?')} ——",
+            f"—— 星语签 · {payload.get('grade_display') or payload.get('grade', '?')} ——",
             payload.get("sign_text", ""),
             "",
             dim_line,
@@ -206,13 +207,38 @@ class StarWhisperPlugin(Star):
             return
 
         # 首次抽签
+        profile = self._store.get_profile(uid) or {}
+        weights = self._grade_weights()
+        birthday_today = str(profile.get("birthday") or "") == date[5:]
+        if birthday_today:
+            # 生日特权（F14）：当天必得大吉
+            weights = {"大吉": 100}
         seed = fortune.derive_seed(date, uid, salt, nonce=0)
-        result = fortune.roll_fortune(
-            seed, lexicon.load_lexicon(), self._grade_weights()
-        )
+        lex = lexicon.load_lexicon()
+        result = fortune.roll_fortune(seed, lex, weights)
         result["date"] = date
-        streak = self._store.bump_streak(uid, date, fortune.prev_date(date))
-        result["streak"] = streak
+        result["streak"] = self._store.bump_streak(uid, date, fortune.prev_date(date))
+        if profile.get("constellation"):
+            result["constellation"] = profile["constellation"]
+        if birthday_today:
+            result["birthday_today"] = True
+        # 特殊日期彩蛋（F14）：愚人节整活 / 节日池 / 周五摸鱼加成（写进 payload，回放一致）
+        mmdd = date[5:]
+        if mmdd == "04-01":
+            result["grade_display"] = f"{result['grade']}（？）"
+            if result["grade"] == "大吉":
+                result["sign_text"] += "（真的是大吉，星星发誓——今天可是愚人节。）"
+            else:
+                result["sign_text"] += "（愚人节快乐，以上运势真假自辨。）"
+        else:
+            extras = []
+            fest = lex.get("festivals") or {}
+            if mmdd in fest:
+                extras.append(fortune.pick_text(seed, "festival", fest[mmdd]))
+            if datetime.strptime(date, "%Y-%m-%d").weekday() == 4:
+                extras.append(fortune.pick_text(seed, "friday", lex["friday"]))
+            if extras:
+                result["sign_text"] = result["sign_text"] + "".join(extras)
 
         nickname = event.get_sender_name() or "旅行者"
         avatar = self._sender_avatar(event, uid)
@@ -361,3 +387,62 @@ class StarWhisperPlugin(Star):
         else:
             state = "停用" if gid in self._disabled_groups() else "开启"
             yield event.plain_result(f"本群星语签当前：{state}（/运势开关 on|off）")
+
+    @filter.command("星语绑定", alias={"运势绑定", "绑定生日"})
+    async def bind_cmd(self, event: AstrMessageEvent):
+        """绑定生日（MM-DD，不存年份）以解锁星座与生日彩蛋"""
+        if self._store is None:
+            yield event.plain_result("星语者还没整理好星盘，稍后再试～")
+            return
+        uid = str(event.get_sender_id() or "").strip()
+        raw = str(event.message_str or "").replace(" ", "")
+        for w in ("星语绑定", "运势绑定", "绑定生日", "/"):
+            raw = raw.replace(w, "")
+        m = re.search(r"(\d{1,2})[月./\-](\d{1,2})", raw)
+        if not m:
+            yield event.plain_result("格式：/星语绑定 08-15（月-日，不用年份）")
+            return
+        mo, dy = int(m.group(1)), int(m.group(2))
+        try:
+            datetime(2000, mo, dy)  # 2000 为闰年，2/29 允许
+        except ValueError:
+            yield event.plain_result(f"{mo} 月 {dy} 日？星星翻遍日历也没找到这一天。")
+            return
+        mmdd = f"{mo:02d}-{dy:02d}"
+        cons = fortune.constellation_of(mmdd)
+        self._store.upsert_profile(uid, birthday=mmdd, constellation=cons)
+        extra = "（2 月 29 日的稀有生日！只在闰年的今天生效哦）" if (mo, dy) == (2, 29) else ""
+        yield event.plain_result(
+            f"绑定成功：{mmdd} · {cons}{extra}\n生日当天你会收到必中大吉的生日签 🎂"
+        )
+
+    @filter.command("星座", alias={"查询星座", "星语星座"})
+    async def constellation_cmd(self, event: AstrMessageEvent):
+        """查看自己或被 @ 的人的星座与今日吉凶（不展示生日）"""
+        if self._store is None:
+            yield event.plain_result("星语者还没整理好星盘，稍后再试～")
+            return
+        uid = str(event.get_sender_id() or "").strip()
+        target = None
+        for seg in event.get_messages():
+            if isinstance(seg, At):
+                q = str(getattr(seg, "qq", "") or "")
+                if q and q != "all":
+                    target = q
+                    break
+        target_id = target or uid
+        prof = self._store.get_profile(target_id) or {}
+        if not prof.get("constellation"):
+            name = "你" if target_id == uid else "TA"
+            yield event.plain_result(f"{name}还没绑定生日，/星语绑定 MM-DD 即可解锁～")
+            return
+        today = fortune.local_today(str(self._cfg("timezone", "Asia/Shanghai")))
+        line = f"星座：{prof['constellation']}"
+        row = self._store.get_fortune(target_id, today)
+        if row is not None:
+            line += f" ｜ 今日：{row['grade']}（{row['score']}）"
+        else:
+            line += " ｜ 今日：还没抽签"
+        if (prof.get("birthday") or "") == today[5:]:
+            line += " ｜ 🎂 今天是生日！"
+        yield event.plain_result(line)
