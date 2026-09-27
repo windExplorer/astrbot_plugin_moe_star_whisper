@@ -51,6 +51,12 @@
     "type": "string",
     "default": "星语者"
   },
+  "tarot_label_on_image": {
+    "description": "牌面左下角文字",
+    "hint": "在 AI 牌面左下角叠加塔罗牌名与正逆位（右侧面板已有同样信息）；关闭可完整欣赏牌面不受遮挡",
+    "type": "bool",
+    "default": false
+  },
   "grade_weights": {
     "description": "吉凶权重",
     "hint": "六档的相对权重（合计任意）。大吉占比约两成，比传统求签更欢乐；改成全 0 的档位不会再抽到",

@@ -201,6 +201,7 @@ def render_card(
     uid: str = "",
     bg_image=None,
     theme: str = "light",
+    tarot_label_on_image: bool = False,
 ) -> str:
     """渲染当日星语签，落盘 cards_root/<date>.png 并返回路径。失败抛异常由调用方回退。"""
     font_file = find_font(font_path, extra_font_dirs)
@@ -215,6 +216,7 @@ def render_card(
             signer=str(signer), nickname=str(nickname or ""),
             avatar_data=avatar_data, uid=str(uid or ""),
             theme=str(theme or "light"),
+            tarot_label_on_image=bool(tarot_label_on_image),
         )
 
     SW, H = int(width), int(height)
@@ -400,6 +402,7 @@ def render_tarot_card(
     avatar_data: bytes | None = None,
     uid: str = "",
     theme: str = "light",
+    tarot_label_on_image: bool = False,
 ) -> str:
     """塔罗双联版式（M8/M8.5）：左联 AI 牌面 + 右联运势面板。
 
@@ -432,18 +435,19 @@ def render_tarot_card(
     sdraw.rectangle([int(12 * u), int(12 * u), SW - int(13 * u), H - int(13 * u)],
                     outline=gold + (150,), width=1)
     tarot = result.get("tarot") or {}
-    band_h = int(96 * u)
-    band = Image.new("RGBA", (SW, band_h), (0, 0, 0, 0))
-    bdraw = ImageDraw.Draw(band)
-    for yy in range(band_h):
-        bdraw.line([(0, yy), (SW, yy)], fill=(10, 10, 18, int(150 * yy / max(1, band_h))))
-    canvas.paste(band, (0, H - band_h), band)
-    sdraw.text((int(24 * u), H - band_h + int(14 * u)),
-               f"{tarot.get('name_cn', '？')} · {tarot.get('label', '')}",
-               font=_font(_display_font_file(font_file), int(38 * u)), fill=(255, 255, 255, 255))
-    sdraw.text((int(24 * u), H - band_h + int(58 * u)),
-               f"{tarot.get('name_en', '')} ｜ {tarot.get('keywords', '')}",
-               font=_font(font_file, int(22 * u)), fill=(228, 226, 236, 255))
+    if tarot_label_on_image:
+        band_h = int(96 * u)
+        band = Image.new("RGBA", (SW, band_h), (0, 0, 0, 0))
+        bdraw = ImageDraw.Draw(band)
+        for yy in range(band_h):
+            bdraw.line([(0, yy), (SW, yy)], fill=(10, 10, 18, int(150 * yy / max(1, band_h))))
+        canvas.paste(band, (0, H - band_h), band)
+        sdraw.text((int(24 * u), H - band_h + int(14 * u)),
+                   f"{tarot.get('name_cn', '？')} · {tarot.get('label', '')}",
+                   font=_font(_display_font_file(font_file), int(38 * u)), fill=(255, 255, 255, 255))
+        sdraw.text((int(24 * u), H - band_h + int(58 * u)),
+                   f"{tarot.get('name_en', '')} ｜ {tarot.get('keywords', '')}",
+                   font=_font(font_file, int(22 * u)), fill=(228, 226, 236, 255))
     _sparkle(sdraw, SW * 0.86, H * 0.08, 13 * u, gold, 200)
 
     # ---- 右联：幸运色渐变面板（顶浓底淡） ----

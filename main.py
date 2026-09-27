@@ -56,7 +56,7 @@ except Exception:  # pragma: no cover
     render_card = None
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.7.1")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.7.2")
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         # ⚠️ 必须接受 config kwarg：star_manager 注入 AstrBotConfig 时若构造函数
@@ -201,6 +201,7 @@ class StarWhisperPlugin(Star):
                 uid=uid,
                 bg_image=bg_image,
                 theme=str(self._cfg("card_theme", "auto")),
+                tarot_label_on_image=bool(self._cfg("tarot_label_on_image", False)),
             )
         except Exception:
             logger.error(
