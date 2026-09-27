@@ -120,11 +120,21 @@ def _cover(img: Image.Image, w: int, h: int) -> Image.Image:
 
 
 def _fetch_avatar(url: str, timeout: float = 5.0) -> Image.Image | None:
-    """下载头像；失败降级为不校验证书重试一次（容器缺 CA 证书常见），仍失败返回 None。"""
+    """下载头像；多候选依次尝试：原地址 → http 变体（qlogo 支持 http，绕开证书问题）
+    → https 跳过证书校验。全部失败返回 None 并把原因写日志。"""
+    candidates = [url]
+    if url.startswith("https://"):
+        candidates.append("http://" + url[len("https://"):])
+    attempts = []
+    for cand in candidates:
+        if cand.startswith("https://"):
+            attempts += [(cand, None), (cand, _insecure_ssl())]
+        else:
+            attempts.append((cand, None))
     last_error = ""
-    for attempt, ctx in (("默认", None), ("跳过证书校验", _insecure_ssl())):
+    for cand, ctx in attempts:
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            req = urllib.request.Request(cand, headers={"User-Agent": "Mozilla/5.0"})
             kwargs = {"timeout": timeout}
             if ctx is not None:
                 kwargs["context"] = ctx
@@ -132,7 +142,7 @@ def _fetch_avatar(url: str, timeout: float = 5.0) -> Image.Image | None:
                 return Image.open(io.BytesIO(resp.read())).convert("RGBA")
         except Exception as e:
             last_error = f"{type(e).__name__}: {e}"
-            _log.warning(f"[moe_star_whisper] 头像下载失败（{attempt}）：{last_error}")
+            _log.warning(f"[moe_star_whisper] 头像下载失败（{cand}）：{last_error}")
     _log.warning(f"[moe_star_whisper] 头像最终不可用，使用占位头像：{url} → {last_error}")
     return None
 

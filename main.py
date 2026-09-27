@@ -54,7 +54,7 @@ except Exception:  # pragma: no cover
     render_card = None
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.3.2")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.3.3")
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -187,7 +187,7 @@ class StarWhisperPlugin(Star):
 
     # ---------- anima 底图联动（F23/D6/D11，契约见 PRD §7.6） ----------
 
-    async def _try_build_image_prompt(self, result: dict, event: AstrMessageEvent):
+    async def _try_build_image_prompt(self, result: dict, event: AstrMessageEvent | None = None):
         """生图提示词：LLM 生成（受语言/形式约束）→ 失败回退本地模板（PRD §7.6-4）。"""
         lang = str(self._cfg("draw_prompt_lang", "en"))
         fmt = str(self._cfg("draw_prompt_format", "tags"))
@@ -196,7 +196,7 @@ class StarWhisperPlugin(Star):
         )
         prompt = template.replace("{facts}", fortune.llm_facts(result))
         try:
-            umo = getattr(event, "unified_msg_origin", None)
+            umo = getattr(event, "unified_msg_origin", None) if event is not None else None
             provider = self.context.get_using_provider(umo)
             if provider is not None:
                 resp = await asyncio.wait_for(
@@ -365,13 +365,16 @@ class StarWhisperPlugin(Star):
                 pass
         return DEFAULT_PRICES[item_id]
 
-    async def _try_llm_sign(self, result: dict, event: AstrMessageEvent) -> None:
-        """LLM 星语（F16，可选增强默认关）：当日首次抽签改写签文；失败静默回退本地模板。"""
+    async def _try_llm_sign(self, result: dict, event: AstrMessageEvent | None = None) -> None:
+        """LLM 星语（F16，可选增强默认关）：当日首次抽签改写签文；失败静默回退本地模板。
+
+        event 缺省（WebUI 触发）时用全局默认提供商。
+        """
         try:
             if not bool(self._cfg("llm_enabled", False)):
                 result["llm_note"] = "LLM 星语未开启"
                 return
-            umo = getattr(event, "unified_msg_origin", None)
+            umo = getattr(event, "unified_msg_origin", None) if event is not None else None
             provider = self.context.get_using_provider(umo)
             if provider is None:
                 result["llm_note"] = "当前会话未绑定可用 LLM（提供商为空）"
