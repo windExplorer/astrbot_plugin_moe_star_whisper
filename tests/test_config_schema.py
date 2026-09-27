@@ -36,6 +36,16 @@ def main() -> int:
             t = item.get("type")
             check(t in KNOWN_TYPES,
                   f"{where}: 非法类型 {t!r}（合法：{sorted(KNOWN_TYPES)}）")
+            # label 约定：description 是表单字段名（短），长说明放 hint
+            desc = item.get("description")
+            check(isinstance(desc, str) and 0 < len(desc) <= 40,
+                  f"{where}: description 应为简短字段名（≤40 字），长说明请放 hint")
+            # options 枚举：labels 必须是与 options 等长的数组
+            # （labels 为字符串时是 i18n 键，不按逗号拆分——真机显示会退回英文值）
+            if t == "string" and item.get("options"):
+                labels = item.get("labels")
+                check(isinstance(labels, list) and len(labels) == len(item["options"]),
+                      f"{where}: options 的 labels 必须是等长数组（字符串是 i18n 键，不会按逗号拆分）")
             if t == "object":
                 sub = item.get("items")
                 check(isinstance(sub, dict) and bool(sub),

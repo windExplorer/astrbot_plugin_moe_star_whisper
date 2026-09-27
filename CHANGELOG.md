@@ -2,6 +2,16 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v1.3.0 (2026-09-27)
+
+配置页重做：按 Dashboard 实际渲染规则修正表单组件与文案分层（对照 `dashboard/src/components/shared/ConfigItemRenderer.vue` 源码）。
+
+- **label / hint 分层**：`description` 是表单字段名（全部改为一行短名，如「种子盐值」「出图超时」），原先塞在里面的格式说明、注意事项、默认行为全部移入 `hint`（字段下方灰色说明）——之前 24 个键全是长句 description、无 hint，label 与描述混为一谈。
+- **组件修正**：LLM 人设与底图提示词模板从 `string`（单行框）改为 **`text`**（多行 textarea）；`draw_timeout` 加滑条（30~600 秒）；`disabled_groups` 从逗号分隔字符串改为 **`list`** 动态条目列表（加一行删一行，main 读取兼容新旧两种类型，群开关写回同步改为列表）。
+- **下拉中文显示**：四个枚举（出签方式/卡面主题/提示词语言/形式）加 `labels` 数组——渲染器按 index 与 options 配对显示中文名，存储值不变。注意 labels 写字符串是 i18n 键不会按逗号拆分，必须用数组。
+- **守卫升级**：`test_config_schema` 新增两条——description 必填且 ≤40 字（逼短 label）、string+options 的 labels 必须是与 options 等长的数组。
+- 配置兼容：旧档的字符串型 `disabled_groups` 仍可读（类型不匹配时 AstrBot 会按新 schema 自动回填默认空列表）。
+
 ## v1.2.3 (2026-09-27)
 
 修复调试面板报错：`'StarWhisperPlugin' object has no attribute 'store'`。

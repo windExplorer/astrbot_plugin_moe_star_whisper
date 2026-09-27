@@ -54,7 +54,7 @@ except Exception:  # pragma: no cover
     render_card = None
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.2.3")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.3.0")
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -128,17 +128,20 @@ class StarWhisperPlugin(Star):
         return dict(fortune.DEFAULT_GRADE_WEIGHTS)
 
     def _disabled_groups(self) -> set:
-        raw = str(self._cfg("disabled_groups", "") or "")
-        return {g.strip() for g in raw.replace("，", ",").split(",") if g.strip()}
+        """停用群集合；兼容 list（schema v1.3.0 起）与旧版逗号分隔字符串。"""
+        raw = self._cfg("disabled_groups", "")
+        if isinstance(raw, (list, tuple)):
+            return {str(g).strip() for g in raw if str(g).strip()}
+        return {g.strip() for g in str(raw or "").replace("，", ",").split(",") if g.strip()}
 
     def _set_group_disabled(self, group_id: str, disabled: bool) -> None:
-        """群开关落回配置（disabled_groups 逗号串），持久化并在配置页可见。"""
+        """群开关落回配置（disabled_groups 列表），持久化并在配置页可见。"""
         groups = self._disabled_groups()
         if disabled:
             groups.add(group_id)
         else:
             groups.discard(group_id)
-        self.config["disabled_groups"] = ",".join(sorted(groups))
+        self.config["disabled_groups"] = sorted(groups)
         self.config.save_config()
 
     @staticmethod

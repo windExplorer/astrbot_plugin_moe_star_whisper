@@ -1,16 +1,59 @@
 {
   "timezone": {
-    "description": "「今天」的时区（影响每日换签时刻），IANA 名称",
+    "description": "时区",
+    "hint": "「今天」按此时区计算（每日零点换签）。IANA 名称，如 Asia/Shanghai、UTC",
     "type": "string",
     "default": "Asia/Shanghai"
   },
   "salt": {
-    "description": "运势种子盐值（改动即全员重掷，请勿随意变更）",
+    "description": "种子盐值",
+    "hint": "与日期、用户号一起派生运势。⚠️ 修改后所有人当天的运势会重新洗牌，请勿随意变更",
     "type": "string",
     "default": "moe-star-whisper"
   },
+  "output_mode": {
+    "description": "出签方式",
+    "hint": "图卡渲染失败会自动回退纯文本，不会无回复",
+    "type": "string",
+    "options": ["图卡", "纯文本", "图卡+文本"],
+    "labels": ["萌系图卡", "仅文字", "图卡加文字"],
+    "default": "图卡"
+  },
+  "card_theme": {
+    "description": "卡面主题",
+    "hint": "auto 目前等同 light；dark 为墨蓝夜色卡面",
+    "type": "string",
+    "options": ["auto", "light", "dark"],
+    "labels": ["跟随默认", "亮色", "暗色"],
+    "default": "auto"
+  },
+  "card_font_path": {
+    "description": "卡面字体路径",
+    "hint": "留空按顺序查找：本配置 → 插件 data 目录 fonts/ → AstrBot data/fonts/ → 系统字体（微软雅黑/Noto CJK）",
+    "type": "string",
+    "default": ""
+  },
+  "card_width": {
+    "description": "卡面宽度",
+    "hint": "像素。同时透传给 anima 作为 AI 底图出图宽度，两者尺寸一致无需裁切",
+    "type": "int",
+    "default": 1024
+  },
+  "card_height": {
+    "description": "卡面高度",
+    "hint": "像素。同时透传给 anima 作为 AI 底图出图高度",
+    "type": "int",
+    "default": 1536
+  },
+  "fortune_signer": {
+    "description": "卡面落款",
+    "hint": "运势卡右下角的署名人设名",
+    "type": "string",
+    "default": "星语者"
+  },
   "grade_weights": {
-    "description": "吉凶档权重：大吉/吉/中吉/小吉/凶/大凶（相对权重，合计任意）",
+    "description": "吉凶权重",
+    "hint": "六档的相对权重（合计任意）。大吉占比约两成，比传统求签更欢乐；改成全 0 的档位不会再抽到",
     "type": "dict",
     "default": {
       "大吉": 20,
@@ -21,112 +64,106 @@
       "大凶": 5
     }
   },
-  "output_mode": {
-    "description": "回复方式（图卡渲染失败自动回退纯文本）",
-    "type": "string",
-    "options": ["图卡", "纯文本", "图卡+文本"],
-    "default": "图卡"
-  },
-  "card_theme": {
-    "description": "卡面主题（auto 目前等同 light；dark 为暗色卡面）",
-    "type": "string",
-    "options": ["auto", "light", "dark"],
-    "default": "auto"
-  },
-  "card_font_path": {
-    "description": "图卡字体路径（留空则按 插件data/fonts→data/plugin_data/fonts→data/fonts→系统 顺序查找）",
-    "type": "string",
-    "default": ""
-  },
-  "card_width": {
-    "description": "卡面画布宽（同时透传给 anima 作为出图宽）",
-    "type": "int",
-    "default": 1024
-  },
-  "card_height": {
-    "description": "卡面画布高（同时透传给 anima 作为出图高）",
-    "type": "int",
-    "default": 1536
-  },
-  "fortune_signer": {
-    "description": "卡面落款人设名",
-    "type": "string",
-    "default": "星语者"
+  "disabled_groups": {
+    "description": "停用的群",
+    "hint": "这些群内不出签；也可在群内用 /运势开关 on|off 切换（与此处同步）",
+    "type": "list",
+    "items": {
+      "type": "string",
+      "description": "群号"
+    },
+    "default": []
   },
   "llm_enabled": {
-    "description": "LLM 星语：对当日签文做个性化扩写（可选增强，默认关；M5 上线）",
+    "description": "LLM 星语",
+    "hint": "开启后当天首次抽签用当前启用的 LLM 按运势事实改写签文（约 20 秒超时），失败自动回退内置词库，不影响出签",
     "type": "bool",
     "default": false
   },
   "llm_prompt_persona": {
-    "description": "LLM 星语人设提示词（留空用内置模板）",
-    "type": "string",
+    "description": "LLM 人设提示词",
+    "hint": "LLM 星语的 system prompt。留空使用内置「星语者」人设；仅在上方开关开启后生效",
+    "type": "text",
     "default": ""
   },
   "daily_push_enabled": {
-    "description": "每日群推送（M5 上线）",
+    "description": "每日群推送",
+    "hint": "每天定时向近 7 天有抽签记录、且未停用的群推送今日星象卡",
     "type": "bool",
     "default": false
   },
   "daily_push_time": {
-    "description": "每日推送时刻 HH:MM",
+    "description": "推送时刻",
+    "hint": "HH:MM（24 小时制），按上方时区计算；改动即时生效",
     "type": "string",
     "default": "08:00"
   },
-  "disabled_groups": {
-    "description": "默认停用的群号（逗号分隔；群内也可用 /运势开关 切换）",
-    "type": "string",
-    "default": ""
-  },
   "draw_enabled": {
-    "description": "绘图联动总开关（M6 上线，需安装 astrbot-comfyui-anima）",
+    "description": "AI 底图联动",
+    "hint": "需已安装 astrbot-comfyui-anima：抽签时由 LLM 生成提示词、anima 出图作为卡面底图；anima 不可用或超时自动回退渐变底图",
     "type": "bool",
     "default": false
   },
   "draw_workflow": {
-    "description": "anima 工作流名（留空=anima 默认；用 anima 的 /绘图工作流 查名后填）",
+    "description": "anima 工作流名",
+    "hint": "留空用 anima 的默认工作流；填写真实工作流名（可在 anima 里用 /绘图工作流 查询）",
     "type": "string",
     "default": ""
   },
   "draw_prompt_lang": {
-    "description": "绘图提示词语言（en=动漫标签 / zh=真人自然语言）",
+    "description": "底图提示词语言",
+    "hint": "遵循 anima 提示词规范：动漫工作流必须英文标签，真人工作流选中文自然语言",
     "type": "string",
     "options": ["en", "zh"],
+    "labels": ["英文标签（动漫）", "中文描述（真人）"],
     "default": "en"
   },
   "draw_prompt_format": {
-    "description": "提示词形式（tags=英文标签 / natural=自然语言）",
+    "description": "底图提示词形式",
+    "hint": "tags=逗号分隔的标签；natural=完整自然语言句子。通常与上方语言搭配：en+tags 或 zh+natural",
     "type": "string",
     "options": ["tags", "natural"],
+    "labels": ["标签式", "自然语言"],
     "default": "tags"
   },
   "draw_llm_prompt": {
-    "description": "生成绘图提示词的 LLM 模板（留空用内置模板，注入当日运势事实）",
-    "type": "string",
+    "description": "底图提示词模板",
+    "hint": "让 LLM 写生图提示词的指令模板，{facts} 会替换为当日运势事实。留空用内置模板（已按语言/形式约束）",
+    "type": "text",
     "default": ""
   },
   "draw_negative_prompt": {
-    "description": "附加负向提示词（透传 anima）",
+    "description": "负向提示词",
+    "hint": "附加给 anima 的 negative_prompt，如低质量标签；留空不传",
     "type": "string",
     "default": ""
   },
   "draw_timeout": {
-    "description": "等待出图上限（秒）",
+    "description": "出图超时",
+    "hint": "等待 anima 出图的秒数上限；anima 单张实测约 20-25 秒，超时后静默回退默认底图",
     "type": "int",
+    "slider": {
+      "min": 30,
+      "max": 600,
+      "step": 10
+    },
     "default": 120
   },
   "draw_fail_hint": {
-    "description": "底图生成失败回退默认底图时附加的提示（默认空=静默）",
+    "description": "底图失败提示语",
+    "hint": "底图生成失败时随卡附送的一句话；留空则静默降级不打扰",
     "type": "string",
     "default": ""
   },
   "economy_enabled": {
-    "description": "道具经济（星尘/商店，M7 上线）",
+    "description": "道具经济",
+    "hint": "星尘与四道具体系总开关；关闭后抽签不发星尘、经济类指令提示未开放",
     "type": "bool",
     "default": true
   },
   "item_prices": {
-    "description": "道具价格：reroll/amulet/streak_guard/candle",
+    "description": "道具价格",
+    "hint": "四种道具的星尘售价：换签卡 / 厄运护身符 / 连签保护卡 / 幸运香烛",
     "type": "dict",
     "default": {
       "reroll": 80,
@@ -136,12 +173,14 @@
     }
   },
   "draw_reward_base": {
-    "description": "每日抽签基础星尘",
+    "description": "抽签基础星尘",
+    "hint": "每日抽签固定获得的星尘，另按吉凶与连签天数加成（见 PRD 明细）",
     "type": "int",
     "default": 10
   },
   "item_hold_cap": {
-    "description": "单道具持有上限",
+    "description": "道具持有上限",
+    "hint": "每种道具最多同时持有几张，防囤积破坏经济循环",
     "type": "int",
     "default": 3
   }
