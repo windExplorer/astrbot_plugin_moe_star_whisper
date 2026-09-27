@@ -756,63 +756,95 @@ def render_help_card(
     extra_font_dirs=None,
     width: int = 900,
     signer: str = "星语者",
-    subtitle: str = "每日运势签 · 塔罗牌面 · 道具经济",
+    subtitle: str = "萌萌星语 · 每日运势签",
     footer: str = "更多设置见 AstrBot 插件配置页",
+    accent_hex: str = "#F6C6D3",
+    theme: str = "light",
 ) -> str:
-    """帮助图（黑金塔罗风）：分组列出全部指令，高度随内容自适应。"""
+    """帮助图（v1.8.1 重写）：与提示卡同族版式——渐变底座 + 分组节面板。
+
+    groups: [(组名, [(指令, 说明), ...]), ...]；
+    行内指令列按节内最宽指令对齐（强调色粗体），说明按剩余宽度折行；
+    高度随内容自适应，文件名固定 help.png。
+    """
     font_file = find_font(font_path, extra_font_dirs)
     if not font_file:
         raise RuntimeError("未找到可用中文字体")
-    u = width / 900.0
-    disp = _display_font_file(font_file)
-    ink, sub = (232, 230, 240), (158, 160, 178)
-    gold = (212, 175, 55)
+    dark = str(theme or "light").lower() == "dark"
+    u0 = width / 900.0
+    probe = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
+    f_cmd = _font(_bold_variant(font_file), int(15.5 * u0))
+    f_desc = _font(font_file, int(13.5 * u0))
+    f_lab = _font(_display_font_file(font_file), int(19 * u0))
 
-    row_h = int(46 * u)
-    group_h = int(56 * u)
-    n_rows = sum(len(rows) for _, rows in groups)
-    W = int(width)
-    margin = int(26 * u)
-    H = int(210 * u) + group_h * len(groups) + row_h * n_rows + int(96 * u)
+    sec_pad, head_h, row_lh, row_gap, sec_gap = int(14 * u0), int(30 * u0), int(20 * u0), int(6 * u0), int(14 * u0)
+    inner_w = int((width - (44 + 42) * 2 * u0))
+    cmd_col_cap = int(inner_w * 0.55)
 
-    img = Image.new("RGBA", (W, H), (8, 8, 12, 255))
-    draw = ImageDraw.Draw(img)
-    draw.rectangle([6, 6, W - 7, H - 7], outline=gold + (235,), width=max(2, int(3 * u)))
-    draw.rectangle([int(12 * u), int(12 * u), W - int(13 * u), H - int(13 * u)],
-                   outline=gold + (150,), width=1)
-    _sparkle(draw, W * 0.88, int(40 * u), int(11 * u), gold, 220)
-    _sparkle(draw, W * 0.10, int(64 * u), int(8 * u), gold, 180)
-
-    left, right = margin + int(34 * u), W - margin - int(34 * u)
-    y = int(46 * u)
-    draw.text(((left + right) // 2, y), "萌萌星语",
-              font=_font(disp, int(64 * u)), fill=gold, anchor="ma")
-    draw.text(((left + right) // 2, y + int(84 * u)), subtitle,
-              font=_font(font_file, int(24 * u)), fill=sub, anchor="ma")
-    y += int(140 * u)
-
+    # ---- 逐节实测：指令列宽取节内最宽指令，说明按剩余宽度折行 ----
+    sec_geo: list[tuple[int, str, list[tuple[str, str, list[str]]], int]] = []
     for title, rows in groups:
-        draw.text((left, y), f"— {title} —",
-                  font=_font(disp, int(30 * u)), fill=gold, anchor="ma")
-        y += group_h
+        col = 0
+        for cmd, _desc in rows:
+            cmd = str(cmd or "").strip()
+            if cmd:
+                col = max(col, probe.textlength(cmd, font=f_cmd) / u0)
+        col = min(int(col * u0) + int(20 * u0), cmd_col_cap)
+        rows_geo: list[tuple[str, str, list[str]]] = []
         for cmd, desc in rows:
-            draw.text((left, y), cmd,
-                      font=_font(_bold_variant(font_file), int(26 * u)), fill=ink)
-            draw.text((right, y + int(3 * u)), desc,
-                      font=_font(font_file, int(21 * u)), fill=sub, anchor="ra")
-            y += row_h
-        y += int(10 * u)
+            cmd, desc = str(cmd or "").strip(), str(desc or "").strip()
+            if cmd and desc:
+                lines = _wrap(desc, f_desc, inner_w - col)
+            elif desc:
+                lines = _wrap(desc, f_desc, inner_w)
+            else:
+                lines = []
+            rows_geo.append((cmd, desc, lines))
+        h = sec_pad + head_h
+        for _cmd, _desc, lines in rows_geo:
+            h += max(int(26 * u0), row_lh * max(1, len(lines)) + int(6 * u0)) + row_gap
+        h += sec_pad - row_gap
+        sec_geo.append((h, title, rows_geo, col))
 
-    draw.text(((left + right) // 2, H - int(64 * u)), footer,
-              font=_font(font_file, int(21 * u)), fill=sub, anchor="ma")
-    draw.text((right, H - int(34 * u)), f"—— {signer}",
-              font=_font(font_file, int(24 * u)), fill=sub, anchor="rs")
+    H = int((218 + 12) * u0 + sum(h for h, _t, _r, _c in sec_geo)
+            + sec_gap * max(0, len(sec_geo) - 1) + (96 + 14) * u0)
+    ctx = _utility_card_base(width, H, accent_hex, font_file,
+                             subtitle=subtitle, title="运势帮助", dark=dark)
+    draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
+    left, right = ctx["left"], ctx["right"]
+    y = ctx["y"]
+    disp = ctx["disp"]
+    sec_bg = _mix(ctx["accent"], (255, 255, 255) if not dark else (30, 30, 48),
+                  0.6 if not dark else 0.86) + (190,)
+    sec_border = _mix(ctx["accent"], (74, 74, 96) if not dark else (232, 230, 240), 0.6) + (255,)
+    cmd_rgb = _mix(ctx["accent"], (232, 230, 240) if dark else (56, 48, 66), 0.45)
+    badge_rgb = _mix(ctx["accent"], (74, 74, 96) if not dark else (232, 230, 240), 0.4) + (255,)
 
-    cards_root = Path(cards_root)
-    cards_root.mkdir(parents=True, exist_ok=True)
-    out = cards_root / "help.png"
-    img.convert("RGB").save(out, "PNG")
-    return str(out)
+    for h, title, rows_geo, col in sec_geo:
+        draw.rounded_rectangle([left, y, right, y + h], radius=int(14 * u),
+                               fill=sec_bg, outline=sec_border, width=1)
+        # 组头：强调色竖条 + 组名（展示字体）+ 细分隔线
+        iy = y + sec_pad
+        draw.rounded_rectangle([left + int(16 * u), iy + int(2 * u),
+                                left + int(22 * u), iy + int(24 * u)],
+                               radius=int(3 * u), fill=badge_rgb)
+        draw.text((left + int(32 * u), iy), str(title), font=f_lab, fill=ctx["ink"])
+        lab_w = draw_len(str(title), f_lab)
+        ly = iy + int(13 * u)
+        draw.line([(left + int(44 * u) + lab_w, ly), (right - int(16 * u), ly)],
+                  fill=sec_border, width=1)
+        ry = iy + head_h
+        for cmd, _desc, lines in rows_geo:
+            row_h = max(int(26 * u0), row_lh * max(1, len(lines)) + int(6 * u0))
+            if cmd:
+                draw.text((left + int(18 * u), ry), cmd, font=f_cmd, fill=cmd_rgb)
+            dx = left + int(18 * u) + (col if cmd else 0)
+            for i, ln in enumerate(lines):
+                draw.text((dx, ry + i * row_lh), ln, font=f_desc, fill=ctx["sub"])
+            ry += row_h + row_gap
+        y += h + sec_gap
+
+    return _utility_card_save(ctx, cards_root, "help.png", signer, footer=footer)
 
 
 # ---------------------------------------------------------------------- #
