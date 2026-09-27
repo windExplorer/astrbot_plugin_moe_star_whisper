@@ -271,6 +271,33 @@ class Store:
         ).fetchone()
         return row is not None
 
+    def day_stardust(self, user_id: str, date: str) -> int:
+        """当日抽签获得的星尘（reason='draw' 流水合计；换签卡不重复发奖，天然幂等）。"""
+        row = self._db.execute(
+            "SELECT COALESCE(SUM(delta), 0) AS total FROM ledger"
+            " WHERE user_id=? AND ref_date=? AND reason='draw'",
+            (user_id, date),
+        ).fetchone()
+        return int(row["total"] or 0)
+
+    def month_fortunes(self, user_id: str, month_prefix: str) -> list[dict]:
+        """某月全部签记录（运势日历用）：date/grade/score，按日期升序。"""
+        rows = self._db.execute(
+            "SELECT date, grade, score FROM fortunes"
+            " WHERE user_id=? AND date LIKE ? ORDER BY date",
+            (user_id, month_prefix + "%"),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def last_nickname(self, user_id: str) -> str:
+        """最近一次抽签用的昵称（日历等场景的身份展示；profiles.nickname 从未回填）。"""
+        row = self._db.execute(
+            "SELECT nickname FROM fortunes WHERE user_id=? AND nickname!=''"
+            " ORDER BY date DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+        return str(row["nickname"] or "") if row else ""
+
     def get_item(self, user_id: str, item_id: str) -> int:
         row = self._db.execute(
             "SELECT count FROM items WHERE user_id=? AND item_id=?",

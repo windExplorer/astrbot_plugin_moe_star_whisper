@@ -110,6 +110,24 @@ def main() -> int:
     check(st.has_ledger("e1", "2026-09-28", "use:amulet"), "佩戴标记可查")
     check(not st.has_ledger("e1", "2026-09-28", "use:candle"), "未佩戴不误报")
 
+    # 星尘展示与运势日历（M9）：当日抽签星尘 / 月签记录 / 最近昵称
+    check(st.day_stardust("e1", "2026-09-27") == 30,
+          f"当日 draw 流水合计 30，实际 {st.day_stardust('e1', '2026-09-27')}")
+    check(st.day_stardust("e1", "2026-09-28") == 0, "非 draw 流水不计入当日星尘")
+    check(st.day_stardust("nobody", "2026-09-27") == 0, "无记录用户当日星尘 0")
+    st.save_fortune("e1", "2026-09-05", {"grade": "大吉", "score": 88})
+    st.save_fortune("e1", "2026-09-26", {"grade": "小吉", "score": 55})
+    st.save_fortune("e1", "2026-09-27", {"grade": "吉", "score": 66})
+    month = st.month_fortunes("e1", "2026-09")
+    check([r["date"] for r in month] == ["2026-09-05", "2026-09-26", "2026-09-27"],
+          f"月签记录按日期升序，实际 {[r['date'] for r in month]}")
+    check(all({"date", "grade", "score"} <= set(r.keys()) for r in month), "月签记录字段齐备")
+    check(st.month_fortunes("e1", "2026-10") == [], "无记录月份返回空表")
+    check(st.last_nickname("w1") == "甲", f"最近昵称可查，实际 {st.last_nickname('w1')!r}")
+    check(st.last_nickname("u1") == "" or st.last_nickname("u1") == "测试君",
+          f"已删记录用户的最近昵称不误报，实际 {st.last_nickname('u1')!r}")
+    check(st.last_nickname("nobody") == "", "无记录用户最近昵称为空")
+
     # 调试历史（v1.6.3）：记录/去重/按最近排序
     st.record_debug_uid("10086")
     st.record_debug_uid("23456")

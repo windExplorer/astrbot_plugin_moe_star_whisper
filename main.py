@@ -22,11 +22,21 @@ from . import fortune, lexicon, store
 PLUGIN_NAME = "astrbot_plugin_moe_star_whisper"
 
 try:  # M2 起提供图卡；缺失/失败时回退纯文本
-    from .card import render_card, render_push_card, render_help_card
+    from .card import (
+        render_card, render_push_card, render_help_card,
+        render_wallet_card, render_shop_card, render_rank_card,
+        render_pk_card, render_notice_card, render_calendar_card,
+    )
 except Exception:  # pragma: no cover
     render_card = None
     render_push_card = None
     render_help_card = None
+    render_wallet_card = None
+    render_shop_card = None
+    render_rank_card = None
+    render_pk_card = None
+    render_notice_card = None
+    render_calendar_card = None
 
 _STREAK_BADGES = {
     3: "三星连签达成，运势开始聚拢 ✨",
@@ -51,14 +61,8 @@ _ITEM_ALIASES = {
     "candle": "candle", "幸运香烛": "candle", "香烛": "candle",
 }
 
-try:  # M2 起提供图卡；缺失/失败时回退纯文本
-    from .card import render_card
-except Exception:  # pragma: no cover
-    render_card = None
-    render_help_card = None
 
-
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.7.4")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.8.0")
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         # ⚠️ 必须接受 config kwarg：star_manager 注入 AstrBotConfig 时若构造函数
@@ -190,6 +194,16 @@ class StarWhisperPlugin(Star):
             return None
         try:
             data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
+            # 星尘展示（M9）：当日获得（reason='draw' 流水）+ 累计余额；经济关/无库时不画
+            sd_today = sd_total = None
+            if self._store is not None and self._economy_on():
+                try:
+                    draw_date = str(result.get("date") or "")
+                    if draw_date:
+                        sd_today = self._store.day_stardust(uid, draw_date)
+                    sd_total = self._store.get_balance(uid)
+                except Exception:
+                    sd_today = sd_total = None
             return render_card(
                 result,
                 data_dir / "cards" / uid,
@@ -204,10 +218,43 @@ class StarWhisperPlugin(Star):
                 bg_image=bg_image,
                 theme=str(self._cfg("card_theme", "auto")),
                 tarot_label_on_image=bool(self._cfg("tarot_label_on_image", False)),
+                stardust_today=sd_today,
+                stardust_total=sd_total,
             )
         except Exception:
             logger.error(
                 f"[{PLUGIN_NAME}] 卡片渲染失败，回退纯文本\n{traceback.format_exc()}"
+            )
+            return None
+
+    # ---------- 提示卡（M9）：星尘/商店/榜单/PK/通知/日历 ----------
+
+    def _utility_cards_on(self) -> bool:
+        """提示卡跟随出签方式：纯文本模式下所有提示一并回到文字。"""
+        return str(self._cfg("output_mode", "图卡")) != "纯文本"
+
+    def _accent_hex(self, uid: str, date: str) -> str:
+        """提示卡主题色：优先用当日签的幸运色，没抽签则用默认粉。"""
+        row = self._store.get_fortune(uid, date) if self._store is not None else None
+        color = ((row or {}).get("payload") or {}).get("lucky_color") or {}
+        hexv = str(color.get("hex") or "")
+        return hexv if hexv.startswith("#") else "#F6C6D3"
+
+    def _try_utility_card(self, render_fn, *args, **kwargs):
+        """渲染提示卡，失败返回 None（调用方回退纯文本）。字体/落款/主题统一注入。"""
+        if render_fn is None:
+            return None
+        try:
+            data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
+            kwargs.setdefault("cards_root", data_dir / "cards" / "_misc")
+            kwargs.setdefault("font_path", self._cfg("card_font_path", "") or None)
+            kwargs.setdefault("extra_font_dirs", [data_dir / "fonts", Path("data/fonts")])
+            kwargs.setdefault("signer", str(self._cfg("fortune_signer", "星语者")))
+            kwargs.setdefault("theme", str(self._cfg("card_theme", "auto")))
+            return render_fn(*args, **kwargs)
+        except Exception:
+            logger.error(
+                f"[{PLUGIN_NAME}] 提示卡渲染失败，回退纯文本\n{traceback.format_exc()}"
             )
             return None
 
@@ -388,6 +435,7 @@ class StarWhisperPlugin(Star):
             )
             self._store.add_ledger(uid, reward, "draw", date)
             result["stardust"] = reward
+            result["stardust_total"] = self._store.get_balance(uid)
         return result
 
     def _economy_on(self) -> bool:
@@ -570,7 +618,9 @@ class StarWhisperPlugin(Star):
                 lines.append(badge)
         stardust = payload.get("stardust")
         if stardust:
-            lines.append(f"星尘 +{stardust}（/星尘 查看背包）")
+            total = payload.get("stardust_total")
+            tail = f"累计 {total}，" if total is not None else ""
+            lines.append(f"星尘 +{stardust}（{tail}/星尘 查看背包）")
         lines.append("—— 星语者")
         if repeat:
             lines.insert(0, "（今天已经抽过啦，这是你今天的星语签～）")
@@ -664,7 +714,7 @@ class StarWhisperPlugin(Star):
 
     @filter.command("运势榜", alias={"星语榜"})
     async def rank_cmd(self, event: AstrMessageEvent):
-        """群内幸运指数排行（/运势榜 日|周，默认日）"""
+        """群内幸运指数排行（/运势榜 日|周，默认日；榜单卡）"""
         if self._store is None:
             yield event.plain_result("星语者还没整理好星盘，稍后再试～")
             return
@@ -676,25 +726,40 @@ class StarWhisperPlugin(Star):
         span = "周" if ("周" in arg or "week" in arg.lower()) else "日"
         tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
         today = fortune.local_today(tz_name)
-        lines = ["🌙 萌萌星语"]
+        title, rows_src = "", []
         if span == "周":
             d = datetime.strptime(today, "%Y-%m-%d").date()
             monday = (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
-            rows = self._store.list_group_range_avg(gid, monday)
-            lines.append(f"—— 本周星语榜（{monday[5:]} 起）——")
-            if rows:
-                for i, r in enumerate(rows, 1):
-                    lines.append(
-                        f"{i}. {r.get('nickname') or '旅人'} · "
-                        f"均分 {r['avg_score']:.0f}（{r['days']} 天）"
-                    )
+            rows_src = self._store.list_group_range_avg(gid, monday)
+            title = f"本周星语榜（{monday[5:]} 起）"
+            rows = [
+                (i, r.get("nickname") or "旅人", f"{r['avg_score']:.0f}", f"均分 · {r['days']} 天")
+                for i, r in enumerate(rows_src, 1)
+            ]
         else:
-            rows = self._store.list_group_day(gid, today)
-            lines.append("—— 今日星语榜 ——")
-            if rows:
-                for i, r in enumerate(rows, 1):
-                    lines.append(f"{i}. {r.get('nickname') or '旅人'} · {r['score']}")
-        if not rows:
+            rows_src = self._store.list_group_day(gid, today)
+            title = "今日星语榜"
+            rows = [
+                (i, r.get("nickname") or "旅人", str(r["score"]), "")
+                for i, r in enumerate(rows_src, 1)
+            ]
+        card_path = None
+        if self._utility_cards_on():
+            card_path = self._try_utility_card(
+                render_rank_card, title=title, rows=rows,
+                date_str=today, file_key=f"{span}_{gid}_{today}",
+            )
+        if card_path:
+            yield event.image_result(card_path)
+            return
+        lines = ["🌙 萌萌星语", f"—— {title} ——"]
+        if rows:
+            for i, r in enumerate(rows, 1):
+                rank, name, main_text, sub_text = r
+                lines.append(
+                    f"{i}. {name} · {main_text}" + (f"（{sub_text}）" if sub_text else "")
+                )
+        else:
             lines.append("还没有人抽签，快来当第一个！")
         yield event.plain_result("\n".join(lines))
 
@@ -740,12 +805,31 @@ class StarWhisperPlugin(Star):
         if m_score > t_score:
             line = fortune.pick_text(seed, "pk", pk["win"])
             verdict = f"{m_name} 胜！"
+            winner = "left"
         elif m_score < t_score:
             line = fortune.pick_text(seed, "pk", pk["lose"])
             verdict = f"{t_name} 胜！"
+            winner = "right"
         else:
             line = fortune.pick_text(seed, "pk", pk["tie"])
             verdict = "平局！"
+            winner = "tie"
+
+        def _hex_of(row):
+            return str(((row or {}).get("payload") or {}).get("lucky_color") or {}).get("hex") or ""
+
+        card_path = None
+        if self._utility_cards_on():
+            # 主题色用胜者（平局用发起人）的当日幸运色
+            accent = _hex_of(mine if winner != "right" else theirs) or "#F6C6D3"
+            card_path = self._try_utility_card(
+                render_pk_card,
+                m_name, m_score, t_name, t_score, verdict, line,
+                winner=winner, accent_hex=accent, file_key=f"{uid}_{today}",
+            )
+        if card_path:
+            yield event.image_result(card_path)
+            return
         yield event.plain_result(
             "—— 星语 PK ——\n"
             f"{m_name} {m_score} vs {t_name} {t_score}\n"
@@ -803,6 +887,22 @@ class StarWhisperPlugin(Star):
         cons = fortune.constellation_of(mmdd)
         self._store.upsert_profile(uid, birthday=mmdd, constellation=cons)
         extra = "（2 月 29 日的稀有生日！只在闰年的今天生效哦）" if (mo, dy) == (2, 29) else ""
+        card_path = None
+        if self._utility_cards_on():
+            card_path = self._try_utility_card(
+                render_notice_card,
+                title="生日绑定成功",
+                lines=[
+                    f"生日：{mmdd} · {cons}",
+                    extra,
+                    "生日当天会收到必中大吉的生日签",
+                ],
+                subtitle="萌萌星语 · 星座档案", accent_hex=self._accent_hex(uid, fortune.local_today(str(self._cfg("timezone", "Asia/Shanghai")))),
+                file_key=f"{uid}_bind",
+            )
+        if card_path:
+            yield event.image_result(card_path)
+            return
         yield event.plain_result(
             f"绑定成功：{mmdd} · {cons}{extra}\n生日当天你会收到必中大吉的生日签 🎂"
         )
@@ -830,24 +930,122 @@ class StarWhisperPlugin(Star):
         today = fortune.local_today(str(self._cfg("timezone", "Asia/Shanghai")))
         line = f"星座：{prof['constellation']}"
         row = self._store.get_fortune(target_id, today)
-        if row is not None:
-            line += f" ｜ 今日：{row['grade']}（{row['score']}）"
-        else:
-            line += " ｜ 今日：还没抽签"
+        today_line = (
+            f"今日：{row['grade']}（{row['score']}）" if row is not None else "今日：还没抽签（/运势 抽一支）"
+        )
         if (prof.get("birthday") or "") == today[5:]:
-            line += " ｜ 🎂 今天是生日！"
-        yield event.plain_result(line)
+            today_line += " ｜ 🎂 今天是生日！"
+        card_path = None
+        if self._utility_cards_on():
+            lines = [f"星座：{prof['constellation']}", today_line]
+            if (prof.get("birthday") or "") == today[5:]:
+                lines.append("今天是生日！生日签已就位")
+            card_path = self._try_utility_card(
+                render_notice_card,
+                title="星座查询",
+                lines=lines,
+                subtitle="萌萌星语 · 星座档案",
+                accent_hex=self._accent_hex(target_id, today),
+                file_key=f"{target_id}_const",
+            )
+        if card_path:
+            yield event.image_result(card_path)
+            return
+        yield event.plain_result(line + " ｜ " + today_line)
+
+    # ---------- 运势日历（M9） ----------
+
+    @filter.command("运势日历", alias={"星语日历", "运势月历"})
+    async def calendar_cmd(self, event: AstrMessageEvent):
+        """当月运势日历：每日吉凶与分数，未占卜的日子以小点标记"""
+        if self._store is None:
+            yield event.plain_result("星语者还没整理好星盘，稍后再试～")
+            return
+        uid = str(event.get_sender_id() or "").strip()
+        if not uid:
+            yield event.plain_result("星语者没看清你是谁，稍后再试一次～")
+            return
+        tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
+        today = fortune.local_today(tz_name)
+        arg = str(event.message_str or "").replace(" ", "")
+        for w in ("运势日历", "星语日历", "运势月历", "/"):
+            arg = arg.replace(w, "")
+        year, month = int(today[:4]), int(today[5:7])
+        m = re.search(r"(\d{4})[-./年](\d{1,2})", arg)
+        if m:
+            year, month = int(m.group(1)), int(m.group(2))
+        else:
+            m2 = re.search(r"(\d{1,2})", arg)
+            if m2:
+                month = int(m2.group(1))
+        if not (1 <= month <= 12) or not (2000 <= year <= 2100):
+            yield event.plain_result(
+                "格式：/运势日历 [月份]——/运势日历、/运势日历 8、/运势日历 2026-08"
+            )
+            return
+        month_prefix = f"{year:04d}-{month:02d}"
+        rows = self._store.month_fortunes(uid, month_prefix)
+        days = {r["date"]: (r["grade"], int(r["score"])) for r in rows}
+        nickname = self._store.last_nickname(uid) or "旅行者"
+        stats = {
+            "drawn": len(rows),
+            "daji": sum(1 for g, _s in days.values() if g == "大吉"),
+            "avg": round(sum(s for _g, s in days.values()) / len(rows)) if rows else 0,
+            "stardust": self._store.get_balance(uid) if self._economy_on() else None,
+        }
+        card_path = None
+        if self._utility_cards_on():
+            card_path = self._try_utility_card(
+                render_calendar_card,
+                year, month, days,
+                file_key=f"{uid}_{month_prefix}",
+                today=today, nickname=nickname,
+                accent_hex=self._accent_hex(uid, today),
+                grade_colors=lexicon.load_lexicon().get("grade_colors") or {},
+                stats=stats,
+            )
+        if card_path:
+            yield event.image_result(card_path)
+            return
+        lines = [f"🌙 萌萌星语 · {year} 年 {month} 月运势日历"]
+        for r in rows:
+            lines.append(f"{r['date'][8:]} 日：{r['grade']}（{r['score']}）")
+        if not rows:
+            lines.append("本月还没有占卜记录，/运势 抽一支吧～")
+        if stats["stardust"] is not None:
+            lines.append(f"累计星尘 {stats['stardust']}")
+        yield event.plain_result("\n".join(lines))
 
     # ---------- 道具经济指令（M7/D8） ----------
 
     @filter.command("星尘", alias={"运势背包"})
     async def wallet_cmd(self, event: AstrMessageEvent):
-        """查星尘余额与道具背包"""
+        """查星尘余额与道具背包（星尘钱包卡）"""
         if self._store is None or not self._economy_on():
             yield event.plain_result("道具经济未开放～")
             return
         uid = str(event.get_sender_id() or "").strip()
+        tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
+        today = fortune.local_today(tz_name)
         balance = self._store.get_balance(uid)
+        items = [
+            (name, self._store.get_item(uid, item_id))
+            for item_id, (name, _desc) in ITEM_DEFS.items()
+        ]
+        card_path = None
+        if self._utility_cards_on():
+            card_path = self._try_utility_card(
+                render_wallet_card,
+                nickname=event.get_sender_name() or "旅行者",
+                balance=balance, items=items,
+                today_gain=max(0, self._store.day_stardust(uid, today)),
+                uid=uid, avatar_data=await self._fetch_avatar_bytes(uid),
+                date_str=today, accent_hex=self._accent_hex(uid, today),
+                file_key=f"{uid}_{today}",
+            )
+        if card_path:
+            yield event.image_result(card_path)
+            return
         lines = [f"✨ 星尘余额：{balance}", "—— 背包 ——"]
         for item_id, (name, _desc) in ITEM_DEFS.items():
             count = self._store.get_item(uid, item_id)
@@ -857,16 +1055,33 @@ class StarWhisperPlugin(Star):
 
     @filter.command("运势商店", alias={"星语商店"})
     async def shop_cmd(self, event: AstrMessageEvent):
-        """道具与价格一览"""
+        """道具与价格一览（商店卡）"""
         if self._store is None or not self._economy_on():
             yield event.plain_result("道具经济未开放～")
             return
         uid = str(event.get_sender_id() or "").strip()
-        lines = ["🛒 萌萌星语 · 道具商店", ""]
-        for item_id, (name, desc) in ITEM_DEFS.items():
-            lines.append(
-                f"【{name}】{self._price_of(item_id)} 星尘\n　{desc}\n　持有 ×{self._store.get_item(uid, item_id)}"
+        tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
+        today = fortune.local_today(tz_name)
+        entries = [
+            (name, self._price_of(item_id), desc, self._store.get_item(uid, item_id))
+            for item_id, (name, desc) in ITEM_DEFS.items()
+        ]
+        card_path = None
+        if self._utility_cards_on():
+            card_path = self._try_utility_card(
+                render_shop_card,
+                nickname=event.get_sender_name() or "旅行者",
+                entries=entries, uid=uid,
+                avatar_data=await self._fetch_avatar_bytes(uid),
+                accent_hex=self._accent_hex(uid, today),
+                file_key=f"{uid}_{today}",
             )
+        if card_path:
+            yield event.image_result(card_path)
+            return
+        lines = ["🛒 萌萌星语 · 道具商店", ""]
+        for name, price, desc, held in entries:
+            lines.append(f"【{name}】{price} 星尘\n　{desc}\n　持有 ×{held}")
         lines.append("\n购买：/运势购买 <名称> [数量]")
         yield event.plain_result("\n".join(lines))
 
@@ -906,6 +1121,25 @@ class StarWhisperPlugin(Star):
         self._store.add_ledger(uid, -price, f"buy:{item_id}")
         new_count = self._store.add_item(uid, item_id, count)
         name = ITEM_DEFS[item_id][0]
+        tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
+        today = fortune.local_today(tz_name)
+        card_path = None
+        if self._utility_cards_on():
+            card_path = self._try_utility_card(
+                render_notice_card,
+                title="购买成功",
+                lines=[
+                    f"{name} ×{count}",
+                    f"花费 {price} 星尘，余额 {balance - price}",
+                    f"当前持有 ×{new_count}",
+                ],
+                subtitle="萌萌星语 · 道具经济", accent_hex=self._accent_hex(uid, today),
+                file_key=f"{uid}_{today}_buy",
+                footer="使用：/运势使用 <名称>",
+            )
+        if card_path:
+            yield event.image_result(card_path)
+            return
         yield event.plain_result(
             f"购买成功：{name} ×{count}（-{price} 星尘）\n当前持有 ×{new_count}，余额 {balance - price}。"
         )
@@ -978,6 +1212,23 @@ class StarWhisperPlugin(Star):
                 return
             self._store.add_item(uid, item_id, -1)
             self._store.add_ledger(uid, 0, f"use:{item_id}", date)
+            card_path = None
+            if self._utility_cards_on():
+                card_path = self._try_utility_card(
+                    render_notice_card,
+                    title="道具已使用",
+                    lines=[
+                        ITEM_DEFS[item_id][0],
+                        "佩戴成功，今天抽签时生效 ✨" if item_id == "amulet"
+                        else "已点燃，今天抽签时幸运指数 +8",
+                        "抽签：/运势",
+                    ],
+                    subtitle="萌萌星语 · 道具经济", accent_hex=self._accent_hex(uid, date),
+                    file_key=f"{uid}_{date}_use",
+                )
+            if card_path:
+                yield event.image_result(card_path)
+                return
             yield event.plain_result(f"已使用{ITEM_DEFS[item_id][0]}：今天抽签时生效 ✨")
             return
 
@@ -1017,13 +1268,19 @@ class StarWhisperPlugin(Star):
             return
         self._store.add_item(uid, "streak_guard", -1)
         result = self._roll_daily(uid, prev, salt, profile)
-        nickname = profile.get("nickname") or "旅行者"
+        nickname = profile.get("nickname") or self._store.last_nickname(uid) or "旅行者"
+        card_path = None
+        if str(self._cfg("output_mode", "图卡")) != "纯文本":
+            card_path = self._try_render_card(result, uid, nickname=nickname)
         self._store.save_fortune(
             uid, prev, result, nickname=nickname,
             avatar=profile.get("avatar") or "", platform=self._sender_platform(event),
+            card_path=card_path or "",
         )
+        if card_path:
+            yield event.image_result(card_path)
         yield event.plain_result(
-            f"补签成功（{prev}）✨ 连签恢复到 {result['streak']} 天\n\n" + self._format_result(result)
+            f"补签成功（{prev}）✨ 连签恢复到 {result['streak']} 天"
         )
 
     @filter.command("运势发放", alias={"星语发放"})
@@ -1067,6 +1324,7 @@ class StarWhisperPlugin(Star):
         groups = [
             ("占卜", [
                 ("/运势", "抽当日专属星语签（别名 /今日运势 /星语 /占卜）"),
+                ("/运势日历 [月份]", "当月运势日历：每日吉凶与分数"),
                 ("/运势帮助", "查看本帮助图"),
             ]),
             ("群玩法", [

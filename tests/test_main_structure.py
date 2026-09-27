@@ -73,10 +73,10 @@ def main() -> int:
     }
     required = {
         "fortune_cmd", "rank_cmd", "pk_cmd", "switch_cmd",
-        "bind_cmd", "constellation_cmd",
+        "bind_cmd", "constellation_cmd", "calendar_cmd",
         "wallet_cmd", "shop_cmd", "buy_cmd", "use_cmd", "makeup_cmd", "grant_cmd",
         "_roll_daily", "_economy_on", "_price_of",
-        "_try_render_card", "_try_llm_sign",
+        "_try_render_card", "_try_utility_card", "_accent_hex", "_try_llm_sign",
         "_try_draw_background", "_try_build_image_prompt",
         "_push_loop", "_do_daily_push", "_next_push_delay",
         "initialize", "terminate",
@@ -85,7 +85,8 @@ def main() -> int:
     check(not missing, f"类缺少方法: {missing or '无'}")
 
     names = _module_level_names(tree)
-    for must in ("render_card", "render_push_card", "PLUGIN_NAME",
+    for must in ("render_card", "render_push_card", "render_wallet_card",
+                 "render_calendar_card", "PLUGIN_NAME",
                  "MessageChain", "Plain", "Image", "At"):
         check(must in names, f"模块级缺少名字定义: {must}（import 块可能被误删）")
 

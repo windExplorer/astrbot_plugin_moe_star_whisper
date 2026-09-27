@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """萌萌星语 · Pillow 图卡渲染（纯 Pillow，无 astrbot 依赖，可独立测试）。
 
-两种版式（M8/M8.5）：
+运势卡两种版式（M8/M8.5）：
   单联：无 AI 牌面时的竖版运势卡（含塔罗行）；
   塔罗双联：有 AI 牌面时左图右文的 2:1 横图（左 = anima 牌面 + 塔罗框，
   右 = 幸运色渐变面板 + 全部运势信息，弹性间隙等分布局）。
-字体分层：展示文字（吉凶/牌名）用楷体系，正文用基础字体；均不打包、多级查找。
+提示卡（M9）：星尘钱包 / 道具商店 / 星语榜 / PK / 通用通知 / 运势日历，
+共用 _utility_card_base 底座（渐变背景 + 圆角面板 + 标题区），风格与运势卡一致。
+字体分层：展示文字（吉凶/牌名/大数字）用楷体系，正文用基础字体；均不打包、多级查找。
 """
 from __future__ import annotations
 
@@ -202,6 +204,8 @@ def render_card(
     bg_image=None,
     theme: str = "light",
     tarot_label_on_image: bool = False,
+    stardust_today: int | None = None,
+    stardust_total: int | None = None,
 ) -> str:
     """渲染当日星语签，落盘 cards_root/<date>.png 并返回路径。失败抛异常由调用方回退。"""
     font_file = find_font(font_path, extra_font_dirs)
@@ -217,9 +221,10 @@ def render_card(
             avatar_data=avatar_data, uid=str(uid or ""),
             theme=str(theme or "light"),
             tarot_label_on_image=bool(tarot_label_on_image),
+            stardust_today=stardust_today, stardust_total=stardust_total,
         )
 
-    SW, H = int(width), int(height)
+    SW, H_cfg = int(width), int(height)
     u = SW / 700.0
     W = SW
     lucky = result.get("lucky_color") or {}
@@ -236,6 +241,21 @@ def render_card(
         panel_fill = _mix(lucky_rgb, (255, 255, 255), 0.88) + (233,)
         divider_rgb = (238, 236, 242, 255)
 
+    # 内容感知画布（M9 布局修复）：塔罗行/四件套/星尘行叠加后块高常超出配置高度，
+    # 先按各区块标称高度实测，画布不够就自动加高（配置值仍是最小高度），不再截断。
+    margin = int(56 * u)
+    pad = int(48 * u)
+    inner_w = W - 2 * margin - 2 * pad
+    _tarot_row = result.get("tarot")
+    _sign_n = min(5, len(_wrap(str(result.get("sign_text", "")),
+                               _font(font_file, int(40 * u)), inner_w)))
+    _dims = result.get("dims") or {}
+    _dims_rows = (len(_dims) + 1) // 2
+    _est = u * (28 + 162 + 20 + (78 if _tarot_row else 0) + 168 + _sign_n * 58 + 20
+                + _dims_rows * 58 + 18 + 140 + 126 + 180 + (44 if stardust_total is not None else 0)
+                + 132)  # 132 = 脚注区（96 单行基准 + 36 预留第二行）
+    H = max(H_cfg, 2 * margin + int(_est) + int(96 * u) + int(14 * u))
+
     base = _gradient(W, H, lucky_rgb, dark=dark).convert("RGBA")
     deco = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     dd = ImageDraw.Draw(deco)
@@ -244,7 +264,6 @@ def render_card(
     _sparkle(dd, W * 0.10, H * 0.30, 9 * u, lucky_rgb, 70)
     img = Image.alpha_composite(base, deco)
 
-    margin = int(56 * u)
     panel = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     ImageDraw.Draw(panel).rounded_rectangle(
         [margin, margin, W - margin, H - margin],
@@ -253,7 +272,6 @@ def render_card(
     img = Image.alpha_composite(img, panel)
     draw = ImageDraw.Draw(img)
 
-    pad = int(48 * u)
     left = margin + pad
     right = W - margin - pad
     inner_w = right - left
@@ -313,7 +331,7 @@ def render_card(
 
     # ④ 签文话语区（主体文字，居中，最多 5 行）
     sign_lines = _wrap(str(result.get("sign_text", "")), _font(font_file, int(40 * u)), inner_w)[:5]
-    line_h = int(62 * u)
+    line_h = int(58 * u)
     for line in sign_lines:
         draw.text((W // 2, y), line, font=_font(font_file, int(40 * u)), fill=ink, anchor="ma")
         y += line_h
@@ -324,32 +342,32 @@ def render_card(
     cell_w = inner_w / 2
     for i, (k, v) in enumerate(dims.items()):
         cx = left + cell_w * (i % 2) + int(16 * u)
-        cy = y + (i // 2) * int(62 * u)
+        cy = y + (i // 2) * int(58 * u)
         draw.text((cx, cy), k, font=_font(font_file, int(32 * u)), fill=sub)
         stars = "★" * v + "☆" * (5 - v)
         draw.text((cx + int(140 * u), cy), stars,
                   font=_font(font_file, int(34 * u)), fill=grade_rgb)
     rows = (len(dims) + 1) // 2
-    y += int(62 * u) * rows + int(18 * u)
+    y += int(58 * u) * rows + int(18 * u)
 
     # ⑥ 幸运指数（大数字，档位色）
     draw.text((W // 2, y + int(6 * u)), "幸运指数",
               font=_font(font_file, int(30 * u)), fill=sub, anchor="ma")
     draw.text((W // 2, y + int(44 * u)), str(result.get("score", "？")),
               font=_font(_bold_variant(font_file), int(92 * u)), fill=grade_rgb, anchor="ma")
-    y += int(152 * u)
+    y += int(140 * u)
 
     # ⑦ 宜忌（彩色圆角章 + 内容）
     for label, items, rgb in (("宜", result.get("yi") or [], (122, 178, 138)),
                               ("忌", result.get("ji") or [], (216, 128, 128))):
-        chip_w, chip_h = int(76 * u), int(52 * u)
+        chip_w, chip_h = int(76 * u), int(48 * u)
         draw.rounded_rectangle([left, y, left + chip_w, y + chip_h],
                                radius=int(14 * u), fill=_mix(rgb, (255, 255, 255), 0.35) + (255,))
         draw.text((left + chip_w / 2, y + chip_h / 2), label,
-                  font=_font(font_file, int(36 * u)), fill=(255, 255, 255, 255), anchor="mm")
+                  font=_font(font_file, int(34 * u)), fill=(255, 255, 255, 255), anchor="mm")
         draw.text((left + chip_w + int(28 * u), y + chip_h / 2), "、".join(items),
                   font=_font(font_file, int(36 * u)), fill=ink, anchor="lm")
-        y += chip_h + int(14 * u)
+        y += chip_h + int(12 * u)
     y += int(6 * u)
 
     # ⑧ 幸运物 / 色 / 数字 / 方位（2×2 网格）
@@ -361,20 +379,35 @@ def render_card(
     ]
     for i, (label, value) in enumerate(grid):
         cx = left + cell_w * (i % 2) + int(16 * u)
-        cy = y + (i // 2) * int(82 * u)
+        cy = y + (i // 2) * int(88 * u)
         draw.text((cx, cy), label, font=_font(font_file, int(28 * u)), fill=sub)
         draw.text((cx, cy + int(34 * u)), value,
                   font=_font(font_file, int(38 * u)), fill=ink)
-    y += int(82 * u) * 2 + int(4 * u)
+    y += int(88 * u) * 2 + int(4 * u)
 
-    # ⑨ 脚注 + 落款
+    # ⑧.5 星尘行（M9：今日获得 + 累计；经济关闭或调用方未传时不画）
+    gold_soft = (176, 142, 48) if not dark else (222, 186, 84)
+    if stardust_total is not None:
+        y = min(y, H - margin - int(134 * u))
+        sd_line = (
+            f"★ 今日星尘 +{stardust_today} ｜ 累计 {stardust_total}"
+            if (stardust_today or 0) > 0 else f"★ 累计星尘 {stardust_total}"
+        )
+        draw.text((W // 2, y), sd_line,
+                  font=_font(font_file, int(30 * u)), fill=gold_soft, anchor="ma")
+        y += int(44 * u)
+
+    # ⑨ 脚注（超宽自动换行，最多两行）+ 落款
     phase = result.get("phase") or {}
     foot = f"月相：{phase.get('name', '？')}——{phase.get('text', '')}"
     streak = result.get("streak") or 0
     if streak >= 2:
         foot += f" ｜ 连签 {streak} 天"
-    y = min(y, H - margin - int(96 * u))
-    draw.text((W // 2, y), foot, font=_font(font_file, int(28 * u)), fill=sub, anchor="ma")
+    foot_lines = _wrap(foot, _font(font_file, int(26 * u)), inner_w)[:2]
+    y = min(y, H - margin - int(96 * u) - int(34 * u) * (len(foot_lines) - 1))
+    for i, line in enumerate(foot_lines):
+        draw.text((W // 2, y + i * int(34 * u)), line,
+                  font=_font(font_file, int(26 * u)), fill=sub, anchor="ma")
     draw.text((right, H - margin - int(30 * u)), f"—— {signer}",
               font=_font(font_file, int(34 * u)), fill=sub, anchor="rs")
     mr = int(16 * u)
@@ -403,6 +436,8 @@ def render_tarot_card(
     uid: str = "",
     theme: str = "light",
     tarot_label_on_image: bool = False,
+    stardust_today: int | None = None,
+    stardust_total: int | None = None,
 ) -> str:
     """塔罗双联版式（M8/M8.5）：左联 AI 牌面 + 右联运势面板。
 
@@ -595,6 +630,21 @@ def render_tarot_card(
                       font=_font(font_file, int(17 * u)), fill=sub, anchor="ra")
     block(int(2 * (64 * u + 10 * u)), b_lucky)
 
+    # ⑧.5 星尘（M9：今日获得 + 累计；经济关闭或调用方未传时不画）
+    gold_soft = (222, 186, 84) if dark else (176, 142, 48)
+    if stardust_total is not None:
+        def b_stardust(y):
+            cy = y + int(30 * u)
+            draw.text((left, cy), "星尘", font=_font(font_file, int(24 * u)), fill=sub, anchor="lm")
+            if (stardust_today or 0) > 0:
+                draw.text((left + int(84 * u), cy), f"+{stardust_today}",
+                          font=_font(disp, int(46 * u)), fill=gold_soft, anchor="lm")
+                draw.text((left + int(84 * u) + draw_len(f"+{stardust_today}", _font(disp, int(46 * u))) + int(14 * u), cy),
+                          "今日获得", font=_font(font_file, int(20 * u)), fill=sub, anchor="lm")
+            draw.text((right, cy), f"累计 {stardust_total}",
+                      font=_font(font_file, int(26 * u)), fill=ink, anchor="rm")
+        block(int(60 * u), b_stardust)
+
     # ⑨ 脚注（月相/连签）
     phase = result.get("phase") or {}
     foot = f"月相·{phase.get('name', '？')}：{phase.get('text', '')}"
@@ -763,3 +813,530 @@ def render_help_card(
     out = cards_root / "help.png"
     img.convert("RGB").save(out, "PNG")
     return str(out)
+
+
+# ---------------------------------------------------------------------- #
+# 提示卡（M9）：星尘钱包 / 道具商店 / 星语榜 / PK / 通用通知 / 运势日历
+# 共用底座：渐变背景 + 圆角面板 + 星饰 + 标题区，风格与运势卡同源
+# ---------------------------------------------------------------------- #
+
+# 日历格的吉凶配色（与词库 grade_colors 同值；调用方会传词库覆盖）
+_CALENDAR_GRADE_COLORS = {
+    "大吉": "#E86A8A", "吉": "#F0A0B8", "中吉": "#E8C46A",
+    "小吉": "#A8C8E8", "凶": "#9BA8B8", "大凶": "#7A86A8",
+}
+
+
+def _utility_card_base(
+    width: int,
+    height: int,
+    accent_hex: str,
+    font_file: str,
+    subtitle: str,
+    title: str,
+    dark: bool = False,
+    title_right: str = "",
+) -> dict:
+    """提示卡通用底座：渐变背景 + 圆角面板 + 星饰 + 标题区。
+
+    返回 ctx 字典（img/draw/left/right/y/u/ink/sub/disp/accent/line/W/H/margin/
+    font_file），内容从 ctx["y"] 起画，收尾调 _utility_card_save。
+    """
+    W, H = int(width), int(height)
+    u = W / 900.0
+    accent = _hex_rgb(accent_hex)
+    if dark:
+        ink, sub = (232, 230, 240), (158, 160, 178)
+        line_rgb = (62, 63, 80, 255)
+    else:
+        ink, sub = (74, 74, 96), (150, 150, 168)
+        line_rgb = (238, 236, 242, 255)
+    img = _gradient(W, H, accent, dark=dark).convert("RGBA")
+    deco = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    dd = ImageDraw.Draw(deco)
+    # 星饰放在面板外的上下留白条里，避免被面板边缘切出一半像缺口
+    _sparkle(dd, W * 0.80, int(20 * u), 11 * u, accent, 110)
+    _sparkle(dd, W * 0.16, H - int(20 * u), 8 * u, accent, 90)
+    img = Image.alpha_composite(img, deco)
+    margin = int(44 * u)
+    panel = _panel_base(W - 2 * margin, H - 2 * margin, accent, dark, int(36 * u))
+    img.paste(panel, (margin, margin), panel)
+    draw = ImageDraw.Draw(img)
+    left, right = margin + int(42 * u), W - margin - int(42 * u)
+    y = margin + int(32 * u)
+    disp = _display_font_file(font_file)
+    draw.text((left, y), subtitle, font=_font(font_file, int(25 * u)), fill=sub)
+    if title_right:
+        draw.text((right, y + int(44 * u)), title_right,
+                  font=_font(font_file, int(28 * u)), fill=sub, anchor="ra")
+    draw.text((left, y + int(34 * u)), title,
+              font=_font(disp, int(56 * u)), fill=ink)
+    y += int(116 * u)
+    draw.line([(left, y), (right, y)], fill=line_rgb, width=max(1, int(2 * u)))
+    y += int(24 * u)
+    return {
+        "img": img, "draw": draw, "left": left, "right": right, "y": y, "u": u,
+        "ink": ink, "sub": sub, "disp": disp, "accent": accent,
+        "line": line_rgb, "W": W, "H": H, "margin": margin, "font_file": font_file,
+    }
+
+
+def _utility_card_save(ctx: dict, cards_root, filename: str, signer: str,
+                       footer: str = "") -> str:
+    """提示卡收尾：左下脚注（可选）+ 右下落款 + 落盘，返回路径。"""
+    draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
+    fy = ctx["H"] - ctx["margin"] - int(24 * u)
+    if footer:
+        draw.text((ctx["left"], fy), footer,
+                  font=_font(ff, int(22 * u)), fill=ctx["sub"], anchor="ls")
+    draw.text((ctx["right"], fy), f"—— {signer}",
+              font=_font(ff, int(26 * u)), fill=ctx["sub"], anchor="rs")
+    cards_root = Path(cards_root)
+    cards_root.mkdir(parents=True, exist_ok=True)
+    out = cards_root / filename
+    ctx["img"].convert("RGB").save(out, "PNG")
+    return str(out)
+
+
+def _identity_row(ctx: dict, nickname: str, uid: str, avatar_data) -> None:
+    """提示卡身份行：圆头像 + 昵称 + QQ 号（推进 ctx["y"]）。"""
+    img, draw, u, ff = ctx["img"], ctx["draw"], ctx["u"], ctx["font_file"]
+    left, y = ctx["left"], ctx["y"]
+    av_d = int(88 * u)
+    av = None
+    if avatar_data:
+        try:
+            av = Image.open(io.BytesIO(avatar_data)).convert("RGBA")
+        except Exception:
+            av = None
+    if av is not None:
+        avatar_img = _circle_img(av, av_d)
+    else:
+        placeholder = Image.new("RGBA", (av_d * 2, av_d * 2),
+                                _mix(ctx["accent"], (255, 255, 255), 0.35) + (255,))
+        ImageDraw.Draw(placeholder).text(
+            (av_d, av_d), (nickname or "星")[0],
+            font=_font(ff, int(60 * u)), fill=(255, 255, 255, 255), anchor="mm")
+        avatar_img = _circle_img(placeholder, av_d)
+    img.paste(avatar_img, (left, y), avatar_img)
+    tx = left + av_d + int(26 * u)
+    draw.text((tx, y + int(4 * u)), nickname or "旅行者",
+              font=_font(ff, int(38 * u)), fill=ctx["ink"])
+    if uid:
+        draw.text((tx, y + int(54 * u)), f"QQ {uid}",
+                  font=_font(ff, int(22 * u)), fill=ctx["sub"])
+    ctx["y"] = y + av_d + int(24 * u)
+
+
+def render_wallet_card(
+    nickname: str,
+    balance: int,
+    items: list,
+    cards_root,
+    file_key: str = "wallet",
+    uid: str = "",
+    avatar_data: bytes | None = None,
+    today_gain: int | None = None,
+    date_str: str = "",
+    accent_hex: str = "#F6C6D3",
+    hint: str = "购买与使用：/运势商店 · /运势使用",
+    font_path: str | None = None,
+    extra_font_dirs=None,
+    signer: str = "星语者",
+    width: int = 900,
+    theme: str = "light",
+) -> str:
+    """星尘钱包卡：余额大数字 + 今日获得 + 背包 2×2 持有格。items=[(名称, 数量)]。"""
+    font_file = find_font(font_path, extra_font_dirs)
+    if not font_file:
+        raise RuntimeError("未找到可用中文字体")
+    dark = str(theme or "light").lower() == "dark"
+    u0 = width / 900.0
+    grid_rows = (len(items) + 1) // 2
+    # 版式高度 = 标题区 218 + 身份行 112 + 余额块 171 + 小标题 44 + 网格 + 底部 96
+    H = int((218 + 112 + 171 + 44 + grid_rows * 100 + 96) * u0)
+    ctx = _utility_card_base(width, H, accent_hex, font_file,
+                             subtitle="萌萌星语 · 道具经济", title="星尘钱包",
+                             dark=dark, title_right=date_str)
+    _identity_row(ctx, nickname, uid, avatar_data)
+    draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
+    left, right = ctx["left"], ctx["right"]
+    y = ctx["y"]
+    gold_soft = (222, 186, 84) if dark else (176, 142, 48)
+
+    draw.line([(left, y), (right, y)], fill=ctx["line"], width=1)
+    y += int(21 * u)
+    draw.text((left, y), "星尘余额", font=_font(ff, int(26 * u)), fill=ctx["sub"])
+    big_font = _font(ctx["disp"], int(84 * u))
+    draw.text((left, y + int(38 * u)), str(balance), font=big_font, fill=ctx["ink"])
+    draw.text((left + draw_len(str(balance), big_font) + int(16 * u), y + int(102 * u)),
+              "颗", font=_font(ff, int(28 * u)), fill=ctx["sub"])
+    if today_gain:
+        draw.text((right, y + int(58 * u)), f"+{today_gain}",
+                  font=_font(ctx["disp"], int(48 * u)), fill=gold_soft, anchor="ra")
+        draw.text((right, y + int(116 * u)), "今日抽签所得",
+                  font=_font(ff, int(20 * u)), fill=ctx["sub"], anchor="ra")
+    y += int(150 * u)
+
+    draw.text((left, y), "—— 背包 ——", font=_font(ff, int(26 * u)), fill=ctx["sub"])
+    y += int(44 * u)
+    cw = (right - left) / 2 - int(8 * u)
+    ch = int(88 * u)
+    tint = _mix(ctx["accent"], (255, 255, 255) if not dark else (30, 30, 48),
+                0.55 if not dark else 0.86) + (210,)
+    for i, (name, count) in enumerate(items):
+        cx = left + (cw + int(16 * u)) * (i % 2)
+        cy = y + (ch + int(12 * u)) * (i // 2)
+        draw.rounded_rectangle([cx, cy, cx + cw, cy + ch], radius=int(12 * u), fill=tint)
+        draw.text((cx + int(16 * u), cy + int(12 * u)), name,
+                  font=_font(ff, int(23 * u)), fill=ctx["sub"])
+        draw.text((cx + int(16 * u), cy + int(38 * u)), f"×{count}",
+                  font=_font(ctx["disp"], int(36 * u)), fill=ctx["ink"])
+    return _utility_card_save(ctx, cards_root, f"wallet_{file_key}.png", signer, footer=hint)
+
+
+def render_shop_card(
+    nickname: str,
+    entries: list,
+    cards_root,
+    file_key: str = "shop",
+    uid: str = "",
+    avatar_data: bytes | None = None,
+    accent_hex: str = "#F6C6D3",
+    hint: str = "购买：/运势购买 <名称> [数量]",
+    font_path: str | None = None,
+    extra_font_dirs=None,
+    signer: str = "星语者",
+    width: int = 900,
+    theme: str = "light",
+) -> str:
+    """道具商店卡：每道具一栏（名称+说明+售价+持有）。entries=[(名称, 价格, 说明, 持有)]。"""
+    font_file = find_font(font_path, extra_font_dirs)
+    if not font_file:
+        raise RuntimeError("未找到可用中文字体")
+    dark = str(theme or "light").lower() == "dark"
+    u0 = width / 900.0
+    # 预测量每行说明行数（售价右栏约占 190u 宽）
+    row_hs = []
+    for _name, _price, desc, _held in entries:
+        n_desc = len(_wrap(str(desc), _font(font_file, int(22 * u0)), int((width - 88 - 88 - 190) * u0)))
+        row_hs.append(int((84 + max(1, n_desc) * 30) * u0))
+    H = int((218 + 96 + sum(row_hs) + len(row_hs) * 14 * u0 + 96) * u0)
+    ctx = _utility_card_base(width, H, accent_hex, font_file,
+                             subtitle="萌萌星语 · 道具经济", title="道具商店",
+                             dark=dark)
+    _identity_row(ctx, nickname, uid, avatar_data)
+    draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
+    left, right = ctx["left"], ctx["right"]
+    y = ctx["y"]
+    gold_soft = (222, 186, 84) if dark else (176, 142, 48)
+    row_bg = _mix(ctx["accent"], (255, 255, 255) if not dark else (30, 30, 48),
+                  0.6 if not dark else 0.86) + (185,)
+    inner_w = right - left
+
+    for (name, price, desc, held), rh in zip(entries, row_hs):
+        draw.rounded_rectangle([left, y, right, y + rh], radius=int(14 * u), fill=row_bg)
+        draw.text((left + int(20 * u), y + int(14 * u)), str(name),
+                  font=_font(ff, int(30 * u)), fill=ctx["ink"])
+        draw.text((right - int(20 * u), y + int(16 * u)), f"★ {price}",
+                  font=_font(ctx["disp"], int(32 * u)), fill=gold_soft, anchor="ra")
+        draw.text((right - int(20 * u), y + int(56 * u)), f"持有 ×{held}",
+                  font=_font(ff, int(20 * u)), fill=ctx["sub"], anchor="ra")
+        dy = y + int(54 * u)
+        for line in _wrap(str(desc), _font(ff, int(22 * u)), inner_w - int(230 * u))[:3]:
+            draw.text((left + int(20 * u), dy), line,
+                      font=_font(ff, int(22 * u)), fill=ctx["sub"])
+            dy += int(30 * u)
+        y += rh + int(14 * u)
+    return _utility_card_save(ctx, cards_root, f"shop_{file_key}.png", signer, footer=hint)
+
+
+def render_rank_card(
+    title: str,
+    rows: list,
+    cards_root,
+    file_key: str = "rank",
+    empty_text: str = "还没有人抽签，快来当第一个！",
+    date_str: str = "",
+    accent_hex: str = "#F6C6D3",
+    font_path: str | None = None,
+    extra_font_dirs=None,
+    signer: str = "星语者",
+    width: int = 900,
+    theme: str = "light",
+) -> str:
+    """星语榜卡：rows=[(名次, 昵称, 右侧主文本, 右侧小注)]，前三名奖牌色。"""
+    font_file = find_font(font_path, extra_font_dirs)
+    if not font_file:
+        raise RuntimeError("未找到可用中文字体")
+    dark = str(theme or "light").lower() == "dark"
+    u0 = width / 900.0
+    row_h = int(78 * u0)
+    H = int((218 + 30 + max(1, len(rows)) * row_h + 96 + 16) * u0)
+    ctx = _utility_card_base(width, H, accent_hex, font_file,
+                             subtitle="萌萌星语 · 群玩法", title=title,
+                             dark=dark, title_right=date_str)
+    draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
+    left, right = ctx["left"], ctx["right"]
+    y = ctx["y"]
+    medal = [(212, 175, 55), (176, 180, 196), (205, 140, 100)]
+
+    if not rows:
+        box_h = int(120 * u)
+        draw.rounded_rectangle([left, y, right, y + box_h], radius=int(14 * u),
+                               fill=_mix(ctx["accent"], (255, 255, 255) if not dark else (30, 30, 48),
+                                         0.6 if not dark else 0.86) + (185,))
+        draw.text(((left + right) // 2, y + box_h / 2), empty_text,
+                  font=_font(ff, int(30 * u)), fill=ctx["sub"], anchor="mm")
+        return _utility_card_save(ctx, cards_root, f"rank_{file_key}.png", signer)
+
+    for i, (rank, name, main_text, sub_text) in enumerate(rows):
+        cy = y + row_h * i
+        rank_rgb = medal[rank - 1] if isinstance(rank, int) and 1 <= rank <= 3 else ctx["sub"]
+        draw.text((left, cy + row_h / 2), str(rank),
+                  font=_font(ctx["disp"], int(44 * u)), fill=rank_rgb, anchor="lm")
+        draw.text((left + int(74 * u), cy + row_h / 2), str(name),
+                  font=_font(ff, int(32 * u)), fill=ctx["ink"], anchor="lm")
+        if sub_text:
+            draw.text((right, cy + int(14 * u)), str(main_text),
+                      font=_font(ctx["disp"], int(40 * u)), fill=ctx["ink"], anchor="ra")
+            draw.text((right, cy + row_h - int(14 * u)), str(sub_text),
+                      font=_font(ff, int(20 * u)), fill=ctx["sub"], anchor="ra")
+        else:
+            draw.text((right, cy + row_h / 2), str(main_text),
+                      font=_font(ctx["disp"], int(42 * u)), fill=ctx["ink"], anchor="rm")
+        if i < len(rows) - 1:
+            draw.line([(left, cy + row_h), (right, cy + row_h)], fill=ctx["line"], width=1)
+    return _utility_card_save(ctx, cards_root, f"rank_{file_key}.png", signer)
+
+
+def render_pk_card(
+    left_name: str,
+    left_score: int,
+    right_name: str,
+    right_score: int,
+    verdict: str,
+    flavor: str,
+    cards_root,
+    file_key: str = "pk",
+    winner: str = "left",
+    accent_hex: str = "#F6C6D3",
+    font_path: str | None = None,
+    extra_font_dirs=None,
+    signer: str = "星语者",
+    width: int = 1000,
+    theme: str = "light",
+) -> str:
+    """星语 PK 卡：左右分数对撞 + 中央 VS 徽 + 判词与碎碎念。winner: left/right/tie。"""
+    font_file = find_font(font_path, extra_font_dirs)
+    if not font_file:
+        raise RuntimeError("未找到可用中文字体")
+    dark = str(theme or "light").lower() == "dark"
+    u0 = width / 900.0
+    flavor_lines = _wrap(str(flavor), _font(font_file, int(28 * u0)), int((width - 88 - 88) * u0))[:3]
+    H = int((218 + 260 + 36 + 78 + len(flavor_lines) * 44 + 96) * u0)
+    ctx = _utility_card_base(width, H, accent_hex, font_file,
+                             subtitle="萌萌星语 · 群玩法", title="星语 PK",
+                             dark=dark)
+    draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
+    left, right = ctx["left"], ctx["right"]
+    y = ctx["y"]
+    gold_soft = (222, 186, 84) if dark else (176, 142, 48)
+    panel_w = (right - left - int(72 * u)) / 2
+    panel_h = int(240 * u)
+    score_font = _font(ctx["disp"], int(96 * u))
+
+    for side, (px, name, score) in enumerate((
+            (left, left_name, left_score), (left + panel_w + int(72 * u), right_name, right_score))):
+        draw.rounded_rectangle([px, y, px + panel_w, y + panel_h], radius=int(18 * u),
+                               fill=_mix(ctx["accent"], (255, 255, 255) if not dark else (30, 30, 48),
+                                         0.6 if not dark else 0.86) + (200,))
+        draw.text((px + panel_w / 2, y + int(34 * u)), str(name)[:8],
+                  font=_font(ff, int(30 * u)), fill=ctx["ink"], anchor="ma")
+        is_win = (winner == "left" and side == 0) or (winner == "right" and side == 1)
+        score_rgb = gold_soft if is_win else (ctx["sub"] if winner != "tie" else ctx["ink"])
+        draw.text((px + panel_w / 2, y + int(148 * u)), str(score),
+                  font=score_font, fill=score_rgb, anchor="mm")
+        draw.text((px + panel_w / 2, y + panel_h - int(20 * u)), "幸运指数",
+                  font=_font(ff, int(20 * u)), fill=ctx["sub"], anchor="ms")
+
+    vs_cx = (left + right) / 2
+    vs_cy = y + panel_h / 2
+    vs_r = int(46 * u)
+    draw.ellipse([vs_cx - vs_r, vs_cy - vs_r, vs_cx + vs_r, vs_cy + vs_r],
+                 fill=_mix(ctx["accent"], (74, 74, 96) if not dark else (232, 230, 240), 0.55) + (255,))
+    draw.text((vs_cx, vs_cy), "VS", font=_font(ctx["disp"], int(40 * u)),
+              fill=(255, 255, 255, 255) if not dark else (30, 30, 44, 255), anchor="mm")
+    y += panel_h + int(36 * u)
+
+    draw.text(((left + right) / 2, y), str(verdict),
+              font=_font(ctx["disp"], int(46 * u)), fill=ctx["ink"], anchor="ma")
+    y += int(78 * u)
+    for line in flavor_lines:
+        draw.text(((left + right) / 2, y), line,
+                  font=_font(ff, int(28 * u)), fill=ctx["sub"], anchor="ma")
+        y += int(44 * u)
+    return _utility_card_save(ctx, cards_root, f"pk_{file_key}.png", signer)
+
+
+def render_notice_card(
+    title: str,
+    lines: list,
+    cards_root,
+    file_key: str = "notice",
+    subtitle: str = "萌萌星语",
+    accent_hex: str = "#F6C6D3",
+    footer: str = "",
+    font_path: str | None = None,
+    extra_font_dirs=None,
+    signer: str = "星语者",
+    width: int = 860,
+    theme: str = "light",
+) -> str:
+    """通用通知卡（购买/使用/绑定/星座等结果提示）：标题 + 若干行正文，高度自适应。"""
+    font_file = find_font(font_path, extra_font_dirs)
+    if not font_file:
+        raise RuntimeError("未找到可用中文字体")
+    dark = str(theme or "light").lower() == "dark"
+    u0 = width / 900.0
+    inner_w = int((width - 88 - 84 - 40) * u0)
+    body = _font(font_file, int(32 * u0))
+    wrapped = []
+    for line in lines:
+        wrapped += _wrap(str(line), body, inner_w)[:3]
+    H = int((218 + len(wrapped) * 54 + 40 + 96) * u0)
+    ctx = _utility_card_base(width, H, accent_hex, font_file,
+                             subtitle=subtitle, title=title, dark=dark)
+    draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
+    left = ctx["left"]
+    y = ctx["y"]
+    for line in wrapped:
+        # 每行左侧的小色条，弱化 bullet 感
+        draw.rounded_rectangle([left, y + int(8 * u), left + int(6 * u), y + int(40 * u)],
+                               radius=int(3 * u),
+                               fill=_mix(ctx["accent"], (74, 74, 96) if not dark else (232, 230, 240), 0.4) + (255,))
+        draw.text((left + int(22 * u), y), line, font=body, fill=ctx["ink"])
+        y += int(54 * u)
+    return _utility_card_save(ctx, cards_root, f"notice_{file_key}.png", signer, footer=footer)
+
+
+def render_calendar_card(
+    year: int,
+    month: int,
+    days: dict,
+    cards_root,
+    file_key: str = "calendar",
+    today: str = "",
+    nickname: str = "",
+    accent_hex: str = "#F6C6D3",
+    grade_colors: dict | None = None,
+    stats: dict | None = None,
+    font_path: str | None = None,
+    extra_font_dirs=None,
+    signer: str = "星语者",
+    width: int = 1000,
+    theme: str = "light",
+) -> str:
+    """运势日历卡：当月真实月历网格，每日吉凶（档位色）+ 分数。
+
+    days: {"YYYY-MM-DD": (吉凶, 分数)}（仅已占卜的日子）；
+    stats: {"drawn": n, "daji": n, "avg": 均分, "stardust": 累计星尘或 None}。
+    未占卜的日子画小圆点；未来日期灰显；今日金框。
+    """
+    font_file = find_font(font_path, extra_font_dirs)
+    if not font_file:
+        raise RuntimeError("未找到可用中文字体")
+    dark = str(theme or "light").lower() == "dark"
+    u0 = width / 900.0
+    first = datetime(year, month, 1)
+    nxt = datetime(year + (1 if month == 12 else 0), 1 if month == 12 else month + 1, 1)
+    n_days = (nxt - first).days
+    offset = first.weekday()  # Monday=0
+    weeks = (offset + n_days + 6) // 7
+    cell_h = int(122 * u0)
+    H = int((218 + 50 + weeks * (cell_h + 10 * u0) + 88 + 96) * u0)
+    ctx = _utility_card_base(width, H, accent_hex, font_file,
+                             subtitle=f"{year} 年 {month} 月 · {nickname or '旅行者'}",
+                             title="运势日历", dark=dark)
+    draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
+    left, right = ctx["left"], ctx["right"]
+    y = ctx["y"]
+    gold = (212, 175, 55)
+    gcolors = dict(_CALENDAR_GRADE_COLORS)
+    if grade_colors:
+        gcolors.update(grade_colors)
+    inner_w = right - left
+    gap = int(9 * u)
+    cell_w = (inner_w - gap * 6) / 7
+    faint = _mix(ctx["sub"], (255, 255, 255) if not dark else (30, 30, 48), 0.45)
+
+    # 星期表头（周末染主色）
+    for i, name in enumerate(("一", "二", "三", "四", "五", "六", "日")):
+        cx = left + (cell_w + gap) * i + cell_w / 2
+        color = ctx["sub"] if i < 5 else _mix(ctx["accent"], ctx["ink"], 0.35)
+        draw.text((cx, y), name, font=_font(ff, int(26 * u)), fill=color, anchor="ma")
+    y += int(50 * u)
+
+    for wk in range(weeks):
+        for i in range(7):
+            day_num = wk * 7 + i - offset + 1
+            if not (1 <= day_num <= n_days):
+                continue
+            date_str = f"{year:04d}-{month:02d}-{day_num:02d}"
+            cx = left + (cell_w + gap) * i
+            cy = y + wk * (cell_h + gap)
+            box = [cx, cy, cx + cell_w, cy + cell_h]
+            is_today = bool(today) and date_str == str(today)
+            is_future = bool(today) and date_str > str(today)
+            entry = days.get(date_str)
+            radius = int(14 * u)
+            if entry is not None:
+                grade, score = entry
+                g_rgb = _hex_rgb(gcolors.get(grade, "#E86A8A"))
+                if dark:
+                    g_rgb = _mix(g_rgb, (255, 255, 255), 0.35)
+                draw.rounded_rectangle(box, radius=radius,
+                                       fill=_mix(ctx["accent"], (255, 255, 255) if not dark else (30, 30, 48),
+                                                 0.55 if not dark else 0.84) + (215,))
+                draw.text((cx + int(12 * u), cy + int(9 * u)), str(day_num),
+                          font=_font(ff, int(22 * u)), fill=ctx["sub"])
+                draw.text((cx + cell_w / 2, cy + int(62 * u)), str(grade),
+                          font=_font(ctx["disp"], int(34 * u)), fill=g_rgb, anchor="mm")
+                draw.text((cx + cell_w / 2, cy + cell_h - int(18 * u)), str(score),
+                          font=_font(ff, int(23 * u)), fill=ctx["ink"], anchor="ms")
+            elif is_future:
+                draw.text((cx + int(12 * u), cy + int(9 * u)), str(day_num),
+                          font=_font(ff, int(22 * u)), fill=faint)
+            else:
+                # 未占卜：细描边 + 居中小圆点；今天未抽则写「未抽」
+                draw.rounded_rectangle(box, radius=radius, outline=ctx["line"], width=1)
+                draw.text((cx + int(12 * u), cy + int(9 * u)), str(day_num),
+                          font=_font(ff, int(22 * u)), fill=faint)
+                if is_today:
+                    draw.text((cx + cell_w / 2, cy + int(62 * u)), "未抽",
+                              font=_font(ff, int(24 * u)), fill=ctx["sub"], anchor="mm")
+                else:
+                    dr = int(4 * u)
+                    draw.ellipse([cx + cell_w / 2 - dr, cy + int(58 * u),
+                                  cx + cell_w / 2 + dr, cy + int(58 * u) + 2 * dr], fill=ctx["sub"])
+            if is_today:
+                draw.rounded_rectangle(box, radius=radius, outline=gold + (255,),
+                                       width=max(2, int(3 * u)))
+    y += weeks * (cell_h + gap)
+
+    mid = (left + right) / 2
+    draw.text((mid, y + int(2 * u)), "底色 · 已占卜　小点 · 未占卜　金框 · 今日",
+              font=_font(ff, int(22 * u)), fill=ctx["sub"], anchor="ma")
+    y += int(44 * u)
+    st = stats or {}
+    parts = []
+    if st.get("drawn"):
+        parts.append(f"占卜 {st['drawn']} 天")
+        parts.append(f"大吉 {st.get('daji', 0)} 次")
+        parts.append(f"均分 {st.get('avg', 0)}")
+    if st.get("stardust") is not None:
+        parts.append(f"累计星尘 {st['stardust']}")
+    if parts:
+        draw.text((mid, y), " ｜ ".join(parts),
+                  font=_font(ff, int(26 * u)), fill=ctx["ink"], anchor="ma")
+    return _utility_card_save(ctx, cards_root, f"calendar_{file_key}.png", signer)
