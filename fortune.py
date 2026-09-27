@@ -205,6 +205,11 @@ def llm_facts(result: dict) -> str:
     dim_text = "、".join(f"{k}{v}星" for k, v in dims.items())
     color = (result.get("lucky_color") or {}).get("name", "")
     phase = result.get("phase") or {}
+    tarot = result.get("tarot") or {}
+    tarot_text = ""
+    if tarot:
+        tarot_text = (f"\n今日塔罗：{tarot.get('name_cn', '')}"
+                      f"（{tarot.get('label', '')}）——{tarot.get('keywords', '')}")
     return (
         f"吉凶：{result.get('grade', '')}（幸运指数 {result.get('score', '')}）\n"
         f"六维：{dim_text}\n"
@@ -212,6 +217,7 @@ def llm_facts(result: dict) -> str:
         f"幸运数字：{result.get('lucky_number', '')}；幸运方位：{result.get('lucky_dir', '')}\n"
         f"宜：{'、'.join(result.get('yi') or [])}；忌：{'、'.join(result.get('ji') or [])}\n"
         f"月相：{phase.get('name', '')}"
+        f"{tarot_text}"
     )
 
 
@@ -239,38 +245,46 @@ DRAW_GRADE_MOODS_ZH = {
 
 
 def builtin_draw_prompt(lang: str, fmt: str) -> str:
-    """生图提示词的 LLM 指令模板（含 anima 提示词语言规范约束，PRD §7.6-3）。"""
+    """生图提示词的 LLM 指令模板（塔罗牌牌面 + 动漫风格，PRD §7.6-3）。"""
     if lang == "zh":
         shape = "一段自然流畅的中文画面描述（不要标签堆砌）" if fmt == "natural" else "中文短语式描述"
         return (
-            "根据下面的事实清单，为一张萌系运势卡插画写{shape}："
-            "一位少女、结合幸运物入画、带星月氛围，不要出现文字。只输出描述本身。\n{facts}"
-        ).format(shape=shape, facts="{facts}")
+            "根据下面的事实清单，为一张**动漫风格的塔罗牌牌面**插画写" + shape + "："
+            "画面即清单中「今日塔罗」那张大阿卡纳的牌面演绎（牌面主题为中央构图），"
+            "配华丽塔罗牌边框、星月与神秘学纹样，动漫赛璐璐质感，不要出现任何文字。"
+            "只输出描述本身。\n{facts}"
+        )
     if fmt == "natural":
         return (
-            "Based on the fortune facts below, write ONE English sentence describing a moe "
-            "anime illustration (no Chinese, no explanations): a girl, the lucky item as a motif, "
-            "star and moon ambience, matching the mood. Output only the sentence.\n{facts}"
+            "Based on the fortune facts below, write ONE English sentence describing an "
+            "ANIME-STYLE TAROT CARD illustration: the major arcana card named in the facts "
+            "as the central motif, an ornate tarot card frame, mystical star-and-moon "
+            "ambience, cel-shaded anime art. No Chinese, no explanations, output only the "
+            "sentence.\n{facts}"
         )
     return (
-        "Based on the fortune facts below, write ONE line of English Danbooru-style tags for a "
-        "moe anime illustration: comma-separated lowercase tags, no sentences, no Chinese, no "
-        "explanations. Must include 1girl, solo, a mood-matching scene, the lucky item as a motif, "
-        "star and moon ambience, masterpiece, best quality. Output only the tags.\n{facts}"
+        "Based on the fortune facts below, write ONE line of English Danbooru-style tags for an "
+        "ANIME-STYLE TAROT CARD illustration: the major arcana card named in the facts as the "
+        "central motif, ornate tarot card frame, mystical symbols, star and crescent moon "
+        "background, anime style, cel shading, masterpiece, best quality. Comma-separated "
+        "lowercase tags, no sentences, no Chinese, no explanations. Output only the tags.\n{facts}"
     )
 
 
 def local_draw_prompt(result: dict, lang: str, fmt: str) -> str:
-    """LLM 不可用时的本地兜底提示词（吉凶氛围 + 幸运物，PRD §7.6-4）。"""
+    """LLM 不可用时的本地兜底提示词（塔罗牌牌面 + 吉凶氛围，PRD §7.6-4）。"""
     grade = result.get("grade", "")
-    item = str(result.get("lucky_item", "星星"))
+    tarot = result.get("tarot") or {}
+    arcana = tarot.get("name_en") or "The Star"
     if lang == "zh":
         mood = DRAW_GRADE_MOODS_ZH.get(grade, "温柔")
-        return f"一张萌系运势插画：少女与「{item}」，{mood}，星月氛围，淡彩，画质精美"
+        return (f"动漫风格塔罗牌牌面：大阿卡纳「{tarot.get('name_cn', '星星')}」为主题的少女，"
+                f"{mood}，华丽塔罗牌边框，星月神秘氛围，淡彩，画质精美")
     mood = DRAW_GRADE_MOODS_EN.get(grade, "gentle smile")
     return (
-        f"1girl, solo, {mood}, holding a lucky charm ({item}), "
-        "stars, crescent moon, night sky, soft pastel colors, masterpiece, best quality"
+        f"tarot card design, anime style, 1girl, solo, {mood}, "
+        f"the {arcana} major arcana motif, ornate tarot card frame, "
+        "stars, crescent moon, mystical ambience, soft pastel colors, masterpiece, best quality"
     )
 
 

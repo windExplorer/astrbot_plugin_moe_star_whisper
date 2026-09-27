@@ -187,10 +187,12 @@ def render_card(
     dark = str(theme or "light").lower() == "dark"
     if dark:
         ink, sub = (230, 230, 240), (158, 160, 178)
-        panel_fill, divider_rgb = (30, 31, 44, 240), (62, 63, 80, 255)
+        panel_fill = _mix(lucky_rgb, (26, 27, 40), 0.92) + (238,)
+        divider_rgb = (62, 63, 80, 255)
     else:
         ink, sub = (74, 74, 96), (150, 150, 168)
-        panel_fill, divider_rgb = (255, 255, 255, 236), (238, 236, 242, 255)
+        panel_fill = _mix(lucky_rgb, (255, 255, 255), 0.88) + (233,)
+        divider_rgb = (238, 236, 242, 255)
 
     if bg_image:
         base = _cover(Image.open(bg_image).convert("RGB"), W, H)
@@ -471,10 +473,12 @@ def render_tarot_card(
     dark = str(theme or "light").lower() == "dark"
     if dark:
         ink, sub = (232, 230, 240), (158, 160, 178)
-        panel_fill, line_rgb = (30, 31, 44, 242), (70, 71, 88, 255)
+        panel_fill = _mix(lucky_rgb, (26, 27, 40), 0.90) + (238,)
+        line_rgb = (70, 71, 88, 255)
     else:
         ink, sub = (74, 74, 96), (150, 150, 168)
-        panel_fill, line_rgb = (255, 255, 255, 240), (238, 236, 242, 255)
+        panel_fill = _mix(lucky_rgb, (255, 255, 255), 0.86) + (235,)
+        line_rgb = (238, 236, 242, 255)
 
     canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
 

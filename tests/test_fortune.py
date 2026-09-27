@@ -117,6 +117,10 @@ def main() -> int:
     facts = fortune.llm_facts(r1)
     check("吉凶" in facts and "幸运物" in facts and str(r1["grade"]) in facts,
           "llm_facts 应含吉凶与幸运物等事实")
+    r1t = dict(r1)
+    r1t["tarot"] = {"name_cn": "审判", "label": "逆位", "keywords": "觉醒 · 召唤 · 重生"}
+    check("今日塔罗：审判（逆位）" in fortune.llm_facts(r1t),
+          "llm_facts 应含塔罗事实（v1.4.1 塔罗提示词）")
     check(fortune.DEFAULT_LLM_PERSONA and "星语者" in fortune.DEFAULT_LLM_PERSONA,
           "内置人设非空")
     now = fortune.now_in("UTC")
@@ -128,7 +132,8 @@ def main() -> int:
     tpl_zh = fortune.builtin_draw_prompt("zh", "natural")
     check("自然流畅" in tpl_zh and "{facts}" in tpl_zh, "zh+natural 模板应正确")
     lp = fortune.local_draw_prompt(r1, "en", "tags")
-    check("1girl" in lp and r1["lucky_item"] in lp, "本地兜底提示词应含少女与幸运物")
+    check("tarot card design" in lp and "1girl" in lp and "The Star" in lp,
+          "本地兜底提示词应为塔罗牌主题（v1.4.1）")
     check(fortune.local_draw_prompt(r1, "zh", "natural"), "中文兜底提示词非空")
     check(fortune.parse_draw_response('{"image_paths": ["a.png", " b.png "]}') == ["a.png", "b.png"],
           "解析 image_paths 列表")
