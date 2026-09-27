@@ -19,7 +19,7 @@ except Exception:  # pragma: no cover
     render_card = None
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "0.2.1")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "0.3.0")
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -90,19 +90,23 @@ class StarWhisperPlugin(Star):
             return f"https://q1.qlogo.cn/g?qq={uid}&s=640"
         return ""
 
-    def _try_render_card(self, result: dict, uid: str):
+    def _try_render_card(self, result: dict, uid: str, nickname: str = "", avatar: str = ""):
         """渲染卡图，失败返回 None（调用方回退纯文本，绝不吞错不回，PRD §7.3）。"""
         if render_card is None:
             return None
         try:
-            cards_root = Path(StarTools.get_data_dir(PLUGIN_NAME)) / "cards" / uid
+            data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
             return render_card(
                 result,
-                cards_root,
+                data_dir / "cards" / uid,
                 font_path=self._cfg("card_font_path", "") or None,
+                extra_font_dirs=[data_dir / "fonts", Path("data/fonts")],
                 width=int(self._cfg("card_width", 1024)),
                 height=int(self._cfg("card_height", 1536)),
                 signer=str(self._cfg("fortune_signer", "星语者")),
+                nickname=nickname,
+                avatar_url=avatar,
+                uid=uid,
             )
         except Exception:
             logger.error(
@@ -185,7 +189,7 @@ class StarWhisperPlugin(Star):
         mode = str(self._cfg("output_mode", "图卡"))
         card_path = None
         if mode != "纯文本":
-            card_path = self._try_render_card(result, uid)
+            card_path = self._try_render_card(result, uid, nickname, avatar)
 
         saved = self._store.save_fortune(
             uid, date, result,
