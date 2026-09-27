@@ -35,6 +35,8 @@ def main() -> int:
         ("幸运色缺 hex", lambda d: d["lucky_colors"][0].pop("hex")),
         ("grades 为空", lambda d: d.__setitem__("grades", [])),
         ("月相缺 text", lambda d: d["phases"][0].pop("text")),
+        ("缺 pk 池", lambda d: d.pop("pk")),
+        ("pk.tie 为空", lambda d: d["pk"].__setitem__("tie", [])),
     ]
     for name, mutate in cases:
         try:

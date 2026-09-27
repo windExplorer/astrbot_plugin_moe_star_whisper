@@ -3,15 +3,24 @@
 import importlib
 import sys
 import traceback
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, StarTools, register
 from astrbot.api import logger
+from astrbot.api.message_components import At
 
 from . import fortune, lexicon, store
 
 PLUGIN_NAME = "astrbot_plugin_moe_star_whisper"
+
+_STREAK_BADGES = {
+    3: "三星连签达成，运势开始聚拢 ✨",
+    7: "七日连签达成，星星记住你了 🌙",
+    14: "半月连签达成，毅力惊人 🌟",
+    30: "三十日连签达成，星语者的挚友 🎇",
+}
 
 try:  # M2 起提供图卡；缺失/失败时回退纯文本
     from .card import render_card
@@ -19,7 +28,8 @@ except Exception:  # pragma: no cover
     render_card = None
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "0.3.0")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "0.4.0")
+
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -78,6 +88,20 @@ class StarWhisperPlugin(Star):
             if sum(merged.values()) > 0:
                 return merged
         return dict(fortune.DEFAULT_GRADE_WEIGHTS)
+
+    def _disabled_groups(self) -> set:
+        raw = str(self._cfg("disabled_groups", "") or "")
+        return {g.strip() for g in raw.replace("，", ",").split(",") if g.strip()}
+
+    def _set_group_disabled(self, group_id: str, disabled: bool) -> None:
+        """群开关落回配置（disabled_groups 逗号串），持久化并在配置页可见。"""
+        groups = self._disabled_groups()
+        if disabled:
+            groups.add(group_id)
+        else:
+            groups.discard(group_id)
+        self.config["disabled_groups"] = ",".join(sorted(groups))
+        self.config.save_config()
 
     @staticmethod
     def _sender_avatar(event: AstrMessageEvent, uid: str) -> str:
@@ -141,6 +165,9 @@ class StarWhisperPlugin(Star):
         streak = payload.get("streak") or 0
         if streak >= 2:
             lines.append(f"连续抽签 {streak} 天 ✨")
+            badge = _STREAK_BADGES.get(streak)
+            if badge:
+                lines.append(badge)
         lines.append("—— 星语者")
         if repeat:
             lines.insert(0, "（今天已经抽过啦，这是你今天的星语签～）")
@@ -158,6 +185,11 @@ class StarWhisperPlugin(Star):
         if not uid:
             yield event.plain_result("星语者没看清你是谁，稍后再试一次～")
             return
+        if not event.is_private_chat():
+            gid = str(event.get_group_id() or "")
+            if gid and gid in self._disabled_groups():
+                yield event.plain_result("本群已停用星语签，管理员可用 /运势开关 on 开启～")
+                return
         tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
         date = fortune.local_today(tz_name)
         salt = str(self._cfg("salt", "moe-star-whisper"))
@@ -212,3 +244,120 @@ class StarWhisperPlugin(Star):
                 yield event.plain_result(self._format_result(result))
         else:
             yield event.plain_result(self._format_result(result))
+
+    @filter.command("运势榜", alias={"星语榜"})
+    async def rank_cmd(self, event: AstrMessageEvent):
+        """群内幸运指数排行（/运势榜 日|周，默认日）"""
+        if self._store is None:
+            yield event.plain_result("星语者还没整理好星盘，稍后再试～")
+            return
+        if event.is_private_chat():
+            yield event.plain_result("排行榜只在群聊里有意义，来群里玩吧～")
+            return
+        gid = str(event.get_group_id() or "")
+        arg = str(event.message_str or "").replace(" ", "")
+        span = "周" if ("周" in arg or "week" in arg.lower()) else "日"
+        tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
+        today = fortune.local_today(tz_name)
+        lines = ["🌙 萌萌星语"]
+        if span == "周":
+            d = datetime.strptime(today, "%Y-%m-%d").date()
+            monday = (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
+            rows = self._store.list_group_range_avg(gid, monday)
+            lines.append(f"—— 本周星语榜（{monday[5:]} 起）——")
+            if rows:
+                for i, r in enumerate(rows, 1):
+                    lines.append(
+                        f"{i}. {r.get('nickname') or '旅人'} · "
+                        f"均分 {r['avg_score']:.0f}（{r['days']} 天）"
+                    )
+        else:
+            rows = self._store.list_group_day(gid, today)
+            lines.append("—— 今日星语榜 ——")
+            if rows:
+                for i, r in enumerate(rows, 1):
+                    lines.append(f"{i}. {r.get('nickname') or '旅人'} · {r['score']}")
+        if not rows:
+            lines.append("还没有人抽签，快来当第一个！")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command("运势PK", alias={"星语PK", "运势pk", "星语pk"})
+    async def pk_cmd(self, event: AstrMessageEvent):
+        """与被 @ 的人比一比今日幸运指数（双方需已抽签）"""
+        if self._store is None:
+            yield event.plain_result("星语者还没整理好星盘，稍后再试～")
+            return
+        if event.is_private_chat():
+            yield event.plain_result("PK 只在群聊里有意义，来群里玩吧～")
+            return
+        uid = str(event.get_sender_id() or "").strip()
+        target = None
+        for seg in event.get_messages():
+            if isinstance(seg, At):
+                q = str(getattr(seg, "qq", "") or "")
+                if q and q != "all":
+                    target = q
+                    break
+        if not target:
+            yield event.plain_result("要和谁比？请 @ 一个群里的人～")
+            return
+        if target == uid:
+            yield event.plain_result("和自己 PK？星星表示这局你赢麻了，也输麻了。")
+            return
+        tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
+        today = fortune.local_today(tz_name)
+        salt = str(self._cfg("salt", "moe-star-whisper"))
+        mine = self._store.get_fortune(uid, today)
+        theirs = self._store.get_fortune(target, today)
+        if mine is None:
+            yield event.plain_result("你今天还没抽签，先 /运势 一下吧～")
+            return
+        if theirs is None:
+            yield event.plain_result("对方今天还没抽签，让 TA 先来一支吧～")
+            return
+        m_name = mine.get("nickname") or "你"
+        t_name = theirs.get("nickname") or "对方"
+        m_score, t_score = int(mine["score"]), int(theirs["score"])
+        pk = lexicon.load_lexicon()["pk"]
+        seed = fortune.derive_seed(f"{today}|pk", "|".join(sorted([uid, target])), salt)
+        if m_score > t_score:
+            line = fortune.pick_text(seed, "pk", pk["win"])
+            verdict = f"{m_name} 胜！"
+        elif m_score < t_score:
+            line = fortune.pick_text(seed, "pk", pk["lose"])
+            verdict = f"{t_name} 胜！"
+        else:
+            line = fortune.pick_text(seed, "pk", pk["tie"])
+            verdict = "平局！"
+        yield event.plain_result(
+            "—— 星语 PK ——\n"
+            f"{m_name} {m_score} vs {t_name} {t_score}\n"
+            f"{verdict}{line}"
+        )
+
+    @filter.command("运势开关", alias={"星语开关"})
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def switch_cmd(self, event: AstrMessageEvent):
+        """群内启停星语签（/运势开关 on|off，仅 AstrBot 管理员）"""
+        if event.is_private_chat():
+            yield event.plain_result("群开关请在群聊里使用～")
+            return
+        gid = str(event.get_group_id() or "")
+        arg = str(event.message_str or "").replace(" ", "")
+        for w in ("运势开关", "星语开关", "/"):
+            arg = arg.replace(w, "")
+        if arg.lower() in ("on", "开", "开启", "打开"):
+            try:
+                self._set_group_disabled(gid, False)
+                yield event.plain_result("已开启本群星语签 ✨")
+            except Exception:
+                yield event.plain_result("开启失败：配置保存出错，请看日志～")
+        elif arg.lower() in ("off", "关", "关闭"):
+            try:
+                self._set_group_disabled(gid, True)
+                yield event.plain_result("已停用本群星语签（/运势开关 on 可重新开启）")
+            except Exception:
+                yield event.plain_result("停用失败：配置保存出错，请看日志～")
+        else:
+            state = "停用" if gid in self._disabled_groups() else "开启"
+            yield event.plain_result(f"本群星语签当前：{state}（/运势开关 on|off）")

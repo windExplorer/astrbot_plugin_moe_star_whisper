@@ -58,6 +58,22 @@ def main() -> int:
     check(p2["nickname"] == "新昵称" and p2["avatar"] == "http://a/2", "档案昵称/头像更新")
     check(p2["streak"] == 1, "未提供的字段不被覆盖")
 
+    # 群榜聚合（M3）：用独立群号，避免与前面用例的 g1 数据互相污染
+    def fake(score):
+        return {"grade": "吉", "score": score, "date": "x"}
+
+    st.save_fortune("w1", "2026-09-27", fake(90), nickname="甲", group_id="wg1")
+    st.save_fortune("w2", "2026-09-27", fake(70), nickname="乙", group_id="wg1")
+    st.save_fortune("w3", "2026-09-27", fake(99), nickname="隔壁", group_id="wg2")
+    st.save_fortune("w1", "2026-09-28", fake(60), nickname="甲", group_id="wg1")
+    day = st.list_group_day("wg1", "2026-09-27")
+    check([r["user_id"] for r in day] == ["w1", "w2"],
+          f"日榜分数降序且只含本群，实际 {[r['user_id'] for r in day]}")
+    week = st.list_group_range_avg("wg1", "2026-09-22")
+    check(week[0]["user_id"] == "w1" and abs(week[0]["avg_score"] - 75) < 0.01,
+          f"周榜甲均分 75 应第一，实际 {week[0]}")
+    check(week[1]["user_id"] == "w2" and week[1]["days"] == 1, "周榜乙 1 天")
+
     st.close()
     if FAILED:
         print(f"\n{len(FAILED)} 项失败")

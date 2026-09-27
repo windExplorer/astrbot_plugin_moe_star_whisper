@@ -144,6 +144,28 @@ class Store:
             out.append(data)
         return out
 
+    def list_group_day(self, group_id: str, date: str, limit: int = 10) -> list[dict]:
+        """群内当日榜：分数降序，同分先抽在前。"""
+        rows = self._db.execute(
+            "SELECT user_id, nickname, grade, score FROM fortunes"
+            " WHERE group_id=? AND date=? ORDER BY score DESC, created_at ASC LIMIT ?",
+            (group_id, date, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_group_range_avg(
+        self, group_id: str, date_from: str, limit: int = 10
+    ) -> list[dict]:
+        """群内区间均分榜（周榜）：平均分降序，同分按抽签天数。"""
+        rows = self._db.execute(
+            "SELECT user_id, MAX(nickname) AS nickname, AVG(score) AS avg_score,"
+            " COUNT(*) AS days FROM fortunes"
+            " WHERE group_id=? AND date>=? GROUP BY user_id"
+            " ORDER BY avg_score DESC, days DESC LIMIT ?",
+            (group_id, date_from, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     # ---------- profiles ----------
 
     def get_profile(self, user_id: str) -> dict | None:

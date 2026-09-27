@@ -129,6 +129,11 @@ def roll_fortune(seed: bytes, lex: dict, grade_weights: dict | None = None) -> d
     }
 
 
+def pick_text(seed: bytes, tag: str, pool: list) -> str:
+    """从池中确定性取一条（公开接口，供 PK 文案等场景使用）。"""
+    return _pick(seed, tag, pool)
+
+
 def amulet_weights(weights: dict | None = None) -> dict:
     """厄运护身符（F22，M7 使用）：凶/大凶的权重并入小吉，实现「保底小吉」。"""
     base = dict(weights) if weights else dict(DEFAULT_GRADE_WEIGHTS)
