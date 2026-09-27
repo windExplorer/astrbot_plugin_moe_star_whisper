@@ -34,16 +34,16 @@
     "default": ""
   },
   "card_width": {
-    "description": "卡面宽度",
-    "hint": "像素。同时透传给 anima 作为 AI 底图出图宽度，两者尺寸一致无需裁切",
+    "description": "卡面单面宽度",
+    "hint": "塔罗牌式版式的单面宽度（比例参考经典塔罗 7:12）；同时透传给 anima 作为 AI 牌面出图宽。双联合成图总宽为两倍",
     "type": "int",
-    "default": 1024
+    "default": 700
   },
   "card_height": {
-    "description": "卡面高度",
-    "hint": "像素。同时透传给 anima 作为 AI 底图出图高度",
+    "description": "卡面单面高度",
+    "hint": "塔罗牌式版式的单面高度；同时透传给 anima 作为 AI 牌面出图高",
     "type": "int",
-    "default": 1536
+    "default": 1200
   },
   "fortune_signer": {
     "description": "卡面落款",

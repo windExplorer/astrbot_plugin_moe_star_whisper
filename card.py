@@ -167,7 +167,17 @@ def render_card(
     """渲染当日星语签，落盘 cards_root/<date>.png 并返回路径。失败抛异常由调用方回退。"""
     font_file = find_font(font_path, extra_font_dirs)
     if not font_file:
-        raise RuntimeError("未找到可用中文字体（card_font_path / extra_font_dirs / 系统）")
+        raise RuntimeError("未找到可用中文字体")
+
+    # 塔罗双联模式（M8）：有 AI 牌面图 + 塔罗信息时走左右合成版式
+    if bg_image and Path(bg_image).exists() and result.get("tarot"):
+        return render_tarot_card(
+            result, str(bg_image), cards_root, font_file,
+            width=int(width), height=int(height),
+            signer=str(signer), nickname=str(nickname or ""),
+            avatar_data=avatar_data, uid=str(uid or ""),
+            theme=str(theme or "light"),
+        )
 
     W, H = int(width), int(height)
     u = W / 1024.0
@@ -256,11 +266,24 @@ def render_card(
     draw.line([(left, y), (right, y)], fill=divider_rgb, width=max(1, int(2 * u)))
     y += int(30 * u)
 
-    # ② 吉凶大字（主题色随档位，粗体更有签的分量；愚人节等显示态用 grade_display）
+    # ② 塔罗行（M8：单联也展示今日大阿卡纳）
+    tarot = result.get("tarot")
+    if tarot:
+        gold = (212, 175, 55)
+        draw.text((left, y), f"{tarot.get('name_cn', '？')} · {tarot.get('label', '')}",
+                  font=_font(_bold_variant(font_file), int(34 * u)), fill=gold)
+        draw.text((right, y + int(4 * u)), tarot.get("name_en", ""),
+                  font=_font(font_file, int(22 * u)), fill=sub, anchor="ra")
+        y += int(44 * u)
+        draw.text((left, y), tarot.get("keywords", ""),
+                  font=_font(font_file, int(22 * u)), fill=sub)
+        y += int(34 * u)
+
+    # ③ 吉凶大字（主题色随档位，粗体更有签的分量；愚人节等显示态用 grade_display）
     grade = str(result.get("grade_display") or result.get("grade", "？"))
-    draw.text((W // 2, y + int(78 * u)), grade,
-              font=_font(_bold_variant(font_file), int(148 * u)), fill=grade_rgb, anchor="mm")
-    y += int(182 * u)
+    draw.text((W // 2, y + int(72 * u)), grade,
+              font=_font(_bold_variant(font_file), int(136 * u)), fill=grade_rgb, anchor="mm")
+    y += int(168 * u)
 
     # ③ 签文话语区（主体文字，居中，最多 5 行）
     sign_lines = _wrap(str(result.get("sign_text", "")), _font(font_file, int(40 * u)), inner_w)[:5]
@@ -417,4 +440,189 @@ def render_push_card(
     cards_root.mkdir(parents=True, exist_ok=True)
     out = cards_root / f"push_{date_str}.png"
     img.convert("RGB").save(out, "PNG")
+    return str(out)
+
+
+def render_tarot_card(
+    result: dict,
+    bg_image: str,
+    cards_root,
+    font_file: str,
+    width: int,
+    height: int,
+    signer: str = "星语者",
+    nickname: str = "",
+    avatar_data: bytes | None = None,
+    uid: str = "",
+    theme: str = "light",
+) -> str:
+    """塔罗双联版式（M8）：左联 = anima 绘制的牌面图，右联 = 运势面板。
+
+    单面比例按经典塔罗牌 70×120mm（约 7:12），整图为左图右文的双联横图；
+    无 AI 牌面时由 render_card 走单联路径，不会出现空白左联。
+    """
+    SW, H = int(width), int(height)
+    u = SW / 700.0
+    W = SW * 2
+    lucky = result.get("lucky_color") or {}
+    lucky_rgb = _hex_rgb(lucky.get("hex", "#F6C6D3"))
+    grade_rgb = _hex_rgb(result.get("grade_color", "#E86A8A"))
+    gold = (212, 175, 55)
+    dark = str(theme or "light").lower() == "dark"
+    if dark:
+        ink, sub = (232, 230, 240), (158, 160, 178)
+        panel_fill, line_rgb = (30, 31, 44, 242), (70, 71, 88, 255)
+    else:
+        ink, sub = (74, 74, 96), (150, 150, 168)
+        panel_fill, line_rgb = (255, 255, 255, 240), (238, 236, 242, 255)
+
+    canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+
+    # ---- 左联：AI 牌面（塔罗框 + 底部牌名条） ----
+    side = _cover(Image.open(bg_image).convert("RGB"), SW, H).convert("RGBA")
+    canvas.paste(side, (0, 0))
+    sdraw = ImageDraw.Draw(canvas)
+    sdraw.rectangle([6, 6, SW - 7, H - 7], outline=gold + (235,), width=max(2, int(3 * u)))
+    sdraw.rectangle([int(12 * u), int(12 * u), SW - int(13 * u), H - int(13 * u)],
+                    outline=gold + (150,), width=1)
+    tarot = result.get("tarot") or {}
+    band_h = int(96 * u)
+    band = Image.new("RGBA", (SW, band_h), (0, 0, 0, 0))
+    bdraw = ImageDraw.Draw(band)
+    for yy in range(band_h):
+        bdraw.line([(0, yy), (SW, yy)], fill=(10, 10, 18, int(150 * yy / max(1, band_h))))
+    canvas.paste(band, (0, H - band_h), band)
+    sdraw.text((int(24 * u), H - band_h + int(14 * u)),
+               f"{tarot.get('name_cn', '？')} · {tarot.get('label', '')}",
+               font=_font(_bold_variant(font_file), int(38 * u)), fill=(255, 255, 255, 255))
+    sdraw.text((int(24 * u), H - band_h + int(58 * u)),
+               f"{tarot.get('name_en', '')} ｜ {tarot.get('keywords', '')}",
+               font=_font(font_file, int(22 * u)), fill=(228, 226, 236, 255))
+    _sparkle(sdraw, SW * 0.86, H * 0.08, 13 * u, gold, 200)
+
+    # ---- 右联：运势面板 ----
+    img = _gradient(SW, H, lucky_rgb, dark=dark).convert("RGBA")
+    canvas.paste(img, (SW, 0))
+    panel = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    pdraw = ImageDraw.Draw(panel)
+    pdraw.rounded_rectangle([SW + 6, 6, W - 7, H - 7], radius=int(20 * u), fill=panel_fill)
+    canvas = Image.alpha_composite(canvas, panel)
+    draw = ImageDraw.Draw(canvas)
+    draw.rectangle([SW + 6, 6, W - 7, H - 7], outline=gold + (200,), width=max(1, int(2 * u)))
+
+    mx, pr = SW + int(30 * u), W - int(30 * u)
+    left, right = mx + int(22 * u), pr - int(22 * u)
+    y = int(34 * u)
+
+    # ① 身份头
+    av_d = int(84 * u)
+    av = None
+    if avatar_data:
+        try:
+            av = Image.open(io.BytesIO(avatar_data)).convert("RGBA")
+        except Exception:
+            av = None
+    if av is not None:
+        avatar_img = _circle_img(av, av_d)
+    else:
+        placeholder = Image.new("RGBA", (av_d * 2, av_d * 2),
+                                _mix(lucky_rgb, (255, 255, 255), 0.35) + (255,))
+        pdr = ImageDraw.Draw(placeholder)
+        pdr.text((av_d, av_d), (nickname or "星")[0],
+                 font=_font(font_file, int(64 * u)), fill=(255, 255, 255, 255), anchor="mm")
+        avatar_img = _circle_img(placeholder, av_d)
+    canvas.paste(avatar_img, (left, y), avatar_img)
+    tx = left + av_d + int(26 * u)
+    draw.text((tx, y), nickname or "旅行者", font=_font(font_file, int(42 * u)), fill=ink)
+    qq_line = f"QQ {uid}" if uid else ""
+    if result.get("constellation"):
+        qq_line += f" · {result['constellation']}"
+    draw.text((tx, y + int(58 * u)), qq_line,
+              font=_font(font_file, int(26 * u)), fill=sub)
+    draw.text((right, y), str(result.get("date", "")),
+              font=_font(font_file, int(26 * u)), fill=sub, anchor="ra")
+    y += av_d + int(22 * u)
+    draw.line([(left, y), (right, y)], fill=line_rgb, width=1)
+    y += int(20 * u)
+
+    # ② 塔罗行（牌名 + 正逆位 + 关键词）
+    draw.text((left, y), f"{tarot.get('name_cn', '？')}",
+              font=_font(_bold_variant(font_file), int(40 * u)), fill=gold)
+    tag = f"{tarot.get('label', '')} · {tarot.get('name_en', '')}"
+    draw.text((right, y + int(6 * u)), tag, font=_font(font_file, int(24 * u)), fill=sub, anchor="ra")
+    y += int(50 * u)
+    draw.text((left, y), tarot.get("keywords", ""),
+              font=_font(font_file, int(22 * u)), fill=sub)
+    y += int(36 * u)
+
+    # ③ 吉凶大字
+    grade = str(result.get("grade_display") or result.get("grade", "？"))
+    draw.text(((left + right) // 2, y + int(52 * u)), grade,
+              font=_font(_bold_variant(font_file), int(112 * u)), fill=grade_rgb, anchor="mm")
+    y += int(128 * u)
+
+    # ④ 签文话语区
+    sign_lines = _wrap(str(result.get("sign_text", "")), _font(font_file, int(32 * u)), right - left)[:4]
+    for line in sign_lines:
+        draw.text(((left + right) // 2, y), line,
+                  font=_font(font_file, int(32 * u)), fill=ink, anchor="ma")
+        y += int(50 * u)
+    y += int(14 * u)
+
+    # ⑤ 六维星数
+    dims = result.get("dims") or {}
+    cell_w = (right - left) / 2
+    for i, (k, v) in enumerate(dims.items()):
+        cx = left + cell_w * (i % 2) + int(10 * u)
+        cy = y + (i // 2) * int(48 * u)
+        draw.text((cx, cy), k, font=_font(font_file, int(26 * u)), fill=sub)
+        draw.text((cx + int(118 * u), cy), "★" * v + "☆" * (5 - v),
+                  font=_font(font_file, int(28 * u)), fill=grade_rgb)
+    rows = (len(dims) + 1) // 2
+    y += int(48 * u) * rows + int(12 * u)
+
+    # ⑥ 幸运指数（同行紧凑）
+    draw.text((left, y + int(10 * u)), "幸运指数", font=_font(font_file, int(24 * u)), fill=sub)
+    draw.text((left + int(110 * u), y), str(result.get("score", "？")),
+              font=_font(_bold_variant(font_file), int(56 * u)), fill=grade_rgb)
+    y += int(76 * u)
+
+    # ⑦ 宜忌
+    for label, items, rgb in (("宜", result.get("yi") or [], (122, 178, 138)),
+                              ("忌", result.get("ji") or [], (216, 128, 128))):
+        chip_w, chip_h = int(58 * u), int(40 * u)
+        draw.rounded_rectangle([left, y, left + chip_w, y + chip_h],
+                               radius=int(10 * u), fill=_mix(rgb, (255, 255, 255), 0.35) + (255,))
+        draw.text((left + chip_w / 2, y + chip_h / 2), label,
+                  font=_font(font_file, int(28 * u)), fill=(255, 255, 255, 255), anchor="mm")
+        draw.text((left + chip_w + int(20 * u), y + chip_h / 2), "、".join(items),
+                  font=_font(font_file, int(28 * u)), fill=ink, anchor="lm")
+        y += chip_h + int(12 * u)
+    y += int(6 * u)
+
+    # ⑧ 幸运四件套（两行文本）
+    draw.text((left, y),
+              f"幸运物：{result.get('lucky_item', '？')} ｜ 幸运色：{(result.get('lucky_color') or {}).get('name', '？')}",
+              font=_font(font_file, int(26 * u)), fill=ink)
+    y += int(36 * u)
+    draw.text((left, y),
+              f"幸运数字：{result.get('lucky_number', '？')} ｜ 幸运方位：{result.get('lucky_dir', '？')}",
+              font=_font(font_file, int(26 * u)), fill=ink)
+    y += int(44 * u)
+
+    # ⑨ 脚注 + 落款
+    phase = result.get("phase") or {}
+    foot = f"月相：{phase.get('name', '？')}"
+    streak = result.get("streak") or 0
+    if streak >= 2:
+        foot += f" ｜ 连签 {streak} 天"
+    y = min(y, H - int(86 * u))
+    draw.text(((left + right) // 2, y), foot, font=_font(font_file, int(24 * u)), fill=sub, anchor="ma")
+    draw.text((right, H - int(40 * u)), f"—— {signer}",
+              font=_font(font_file, int(26 * u)), fill=sub, anchor="rs")
+
+    cards_root = Path(cards_root)
+    cards_root.mkdir(parents=True, exist_ok=True)
+    out = cards_root / f"{result.get('date', 'unknown')}.png"
+    canvas.convert("RGB").save(out, "PNG")
     return str(out)

@@ -78,6 +78,21 @@ def main() -> int:
     )
     check(Image.open(p5).size == (1024, 620), "推送卡尺寸 1024x620")
 
+    # 3.7) M8：塔罗双联（有 AI 牌面 → 1400x1200 横图；无图 → 单联 700x1200 不留空白）
+    fake_side = Path(tempfile.mkdtemp(prefix="moe_card_")) / "ai.png"
+    Image.new("RGB", (700, 1200), (40, 36, 80)).save(fake_side)
+    r6 = dict(r)
+    r6["tarot"] = {"name_cn": "星星", "name_en": "The Star",
+                   "keywords": "希望 · 疗愈 · 星光", "reversed": False, "label": "正位"}
+    p6 = card.render_card(r6, Path(tempfile.mkdtemp(prefix="moe_card_")),
+                          width=700, height=1200, nickname="塔罗客", uid="6",
+                          bg_image=str(fake_side))
+    check(Image.open(p6).size == (1400, 1200), f"塔罗双联应 1400x1200，实际 {Image.open(p6).size}")
+    p7 = card.render_card(r6, Path(tempfile.mkdtemp(prefix="moe_card_")),
+                          width=700, height=1200, nickname="塔罗客", uid="6",
+                          bg_image=None)
+    check(Image.open(p7).size == (700, 1200), f"无图单联应 700x1200，实际 {Image.open(p7).size}")
+
     # 4) 长签文换行：每行不超宽（允许单字超宽的容差）
     f40 = card._font(ff, 40)
     lines = card._wrap("星" * 120, f40, 800)

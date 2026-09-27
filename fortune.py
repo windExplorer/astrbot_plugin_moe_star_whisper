@@ -323,3 +323,44 @@ def stardust_reward(grade: str, streak: int, base: int = 10) -> int:
     else:
         streak_bonus = 0
     return int(base) + STARDUST_GRADE_BONUS.get(grade, 10) + streak_bonus
+
+
+# ---------- M8：塔罗牌（22 张大阿卡纳，随种子每日一张） ----------
+
+TAROT_MAJOR = (
+    ("愚者", "The Fool", "新起点 · 冒险 · 无限可能"),
+    ("魔术师", "The Magician", "创造 · 行动 · 资源"),
+    ("女祭司", "The High Priestess", "直觉 · 静谧 · 内在之声"),
+    ("皇后", "The Empress", "丰饶 · 温柔 · 滋养"),
+    ("皇帝", "The Emperor", "秩序 · 稳固 · 掌控"),
+    ("教皇", "The Hierophant", "指引 · 传统 · 学习"),
+    ("恋人", "The Lovers", "选择 · 契合 · 心意"),
+    ("战车", "The Chariot", "前进 · 意志 · 胜利"),
+    ("力量", "Strength", "勇气 · 耐心 · 柔韧"),
+    ("隐士", "The Hermit", "沉思 · 独处 · 寻找"),
+    ("命运之轮", "Wheel of Fortune", "转机 · 周期 · 好运"),
+    ("正义", "Justice", "公平 · 权衡 · 因果"),
+    ("倒吊人", "The Hanged Man", "换个角度 · 暂停 · 释然"),
+    ("死神", "Death", "告别 · 蜕变 · 新生"),
+    ("节制", "Temperance", "平衡 · 调和 · 适度"),
+    ("恶魔", "The Devil", "觉察 · 破除执念 · 松绑"),
+    ("高塔", "The Tower", "骤变 · 崩塌 · 重建"),
+    ("星星", "The Star", "希望 · 疗愈 · 星光"),
+    ("月亮", "The Moon", "想象 · 梦境 · 潮汐"),
+    ("太阳", "The Sun", "喜悦 · 成功 · 活力"),
+    ("审判", "Judgement", "觉醒 · 召唤 · 重生"),
+    ("世界", "The World", "完成 · 圆满 · 远行"),
+)
+
+
+def tarot_of(seed: bytes) -> dict:
+    """由种子确定今日大阿卡纳（牌面与正逆位，纯函数可测）。"""
+    name_cn, name_en, keywords = TAROT_MAJOR[_sub_int(seed, "tarot", len(TAROT_MAJOR))]
+    reversed_card = bool(_sub_int(seed, "tarot_rev", 2))
+    return {
+        "name_cn": name_cn,
+        "name_en": name_en,
+        "keywords": keywords,
+        "reversed": reversed_card,
+        "label": "逆位" if reversed_card else "正位",
+    }

@@ -56,7 +56,7 @@ except Exception:  # pragma: no cover
     render_card = None
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.3.4")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.4.0")
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         # ⚠️ 必须接受 config kwarg：star_manager 注入 AstrBotConfig 时若构造函数
@@ -339,6 +339,7 @@ class StarWhisperPlugin(Star):
         result = fortune.roll_fortune(seed, lex, weights)
         result["date"] = date
         result["reroll_count"] = nonce
+        result["tarot"] = fortune.tarot_of(seed)  # 今日大阿卡纳（M8 塔罗卡面）
         if streak is None:
             streak = self._store.bump_streak(uid, date, fortune.prev_date(date))
         result["streak"] = streak
