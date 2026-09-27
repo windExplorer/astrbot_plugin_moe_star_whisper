@@ -92,6 +92,7 @@ def _fortune_summary(row) -> dict:
         "has_card": bool(card_path) and Path(card_path).exists(),
         "reroll_count": int(payload.get("reroll_count", 0) or 0),
         "llm_used": bool(payload.get("llm_used")),
+        "llm_note": str(payload.get("llm_note") or ""),
     }
 
 

@@ -10,11 +10,15 @@
 from __future__ import annotations
 
 import io
+import logging
+import ssl
 import urllib.request
 from datetime import datetime
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
+
+_log = logging.getLogger("moe_star_whisper")
 
 # 常见 CJK 字体候选（按优先级；Windows 在前，Linux Noto/文泉驿在后）
 _SYSTEM_FONT_CANDIDATES = [
@@ -116,13 +120,28 @@ def _cover(img: Image.Image, w: int, h: int) -> Image.Image:
 
 
 def _fetch_avatar(url: str, timeout: float = 5.0) -> Image.Image | None:
-    """下载头像；任何失败返回 None（调用方画占位头像）。"""
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return Image.open(io.BytesIO(resp.read())).convert("RGBA")
-    except Exception:
-        return None
+    """下载头像；失败降级为不校验证书重试一次（容器缺 CA 证书常见），仍失败返回 None。"""
+    last_error = ""
+    for attempt, ctx in (("默认", None), ("跳过证书校验", _insecure_ssl())):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            kwargs = {"timeout": timeout}
+            if ctx is not None:
+                kwargs["context"] = ctx
+            with urllib.request.urlopen(req, **kwargs) as resp:
+                return Image.open(io.BytesIO(resp.read())).convert("RGBA")
+        except Exception as e:
+            last_error = f"{type(e).__name__}: {e}"
+            _log.warning(f"[moe_star_whisper] 头像下载失败（{attempt}）：{last_error}")
+    _log.warning(f"[moe_star_whisper] 头像最终不可用，使用占位头像：{url} → {last_error}")
+    return None
+
+
+def _insecure_ssl() -> ssl.SSLContext:
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
 
 
 def _circle_img(img: Image.Image, diameter: int) -> Image.Image:

@@ -54,7 +54,7 @@ except Exception:  # pragma: no cover
     render_card = None
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.3.1")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.3.2")
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -187,7 +187,7 @@ class StarWhisperPlugin(Star):
 
     # ---------- anima 底图联动（F23/D6/D11，契约见 PRD §7.6） ----------
 
-    async def _try_build_image_prompt(self, result: dict):
+    async def _try_build_image_prompt(self, result: dict, event: AstrMessageEvent):
         """生图提示词：LLM 生成（受语言/形式约束）→ 失败回退本地模板（PRD §7.6-4）。"""
         lang = str(self._cfg("draw_prompt_lang", "en"))
         fmt = str(self._cfg("draw_prompt_format", "tags"))
@@ -196,7 +196,8 @@ class StarWhisperPlugin(Star):
         )
         prompt = template.replace("{facts}", fortune.llm_facts(result))
         try:
-            provider = self.context.get_using_provider()
+            umo = getattr(event, "unified_msg_origin", None)
+            provider = self.context.get_using_provider(umo)
             if provider is not None:
                 resp = await asyncio.wait_for(
                     provider.text_chat(prompt=prompt, system_prompt=fortune.DRAW_SYSTEM_HINT),
@@ -248,7 +249,7 @@ class StarWhisperPlugin(Star):
             job["status"] = "skipped_no_anima"
             return None, job
 
-        image_prompt, llm_prompt = await self._try_build_image_prompt(result)
+        image_prompt, llm_prompt = await self._try_build_image_prompt(result, event)
         job["image_prompt"] = image_prompt
         job["llm_prompt"] = llm_prompt
         seed_int = int.from_bytes(
@@ -364,13 +365,16 @@ class StarWhisperPlugin(Star):
                 pass
         return DEFAULT_PRICES[item_id]
 
-    async def _try_llm_sign(self, result: dict) -> None:
+    async def _try_llm_sign(self, result: dict, event: AstrMessageEvent) -> None:
         """LLM 星语（F16，可选增强默认关）：当日首次抽签改写签文；失败静默回退本地模板。"""
         try:
             if not bool(self._cfg("llm_enabled", False)):
+                result["llm_note"] = "LLM 星语未开启"
                 return
-            provider = self.context.get_using_provider()
+            umo = getattr(event, "unified_msg_origin", None)
+            provider = self.context.get_using_provider(umo)
             if provider is None:
+                result["llm_note"] = "当前会话未绑定可用 LLM（提供商为空）"
                 return
             persona = str(
                 self._cfg("llm_prompt_persona", "") or fortune.DEFAULT_LLM_PERSONA
@@ -391,10 +395,15 @@ class StarWhisperPlugin(Star):
                         parts.append(str(t))
                 text = "".join(parts).strip()
             if not text:
+                result["llm_note"] = "LLM 返回为空"
                 return
             result["sign_text"] = text[:160]
             result["llm_used"] = True
-        except Exception:
+        except asyncio.TimeoutError:
+            result["llm_note"] = "LLM 星语超时（20s），已用内置签文"
+            logger.warning(f"[{PLUGIN_NAME}] LLM 星语超时，回退本地签文")
+        except Exception as e:
+            result["llm_note"] = f"LLM 星语失败：{str(e)[:100]}"
             logger.error(
                 f"[{PLUGIN_NAME}] LLM 星语失败，回退本地签文\n{traceback.format_exc()}"
             )
@@ -563,7 +572,7 @@ class StarWhisperPlugin(Star):
         profile = self._store.get_profile(uid) or {}
         result = self._roll_daily(uid, date, salt, profile)
 
-        await self._try_llm_sign(result)
+        await self._try_llm_sign(result, event)
 
         nickname = event.get_sender_name() or "旅行者"
         avatar = self._sender_avatar(event, uid)

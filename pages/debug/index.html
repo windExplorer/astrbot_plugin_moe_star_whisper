@@ -168,6 +168,7 @@
         "<b>状态</b><span>" +
         (f.reroll_count > 0 ? "<span class='tag'>已换签 ×" + esc(f.reroll_count) + "</span>" : "") +
         (f.llm_used ? "<span class='tag ok'>LLM 签文</span>" : "") +
+        (f.llm_note ? "<span class='tag bad'>LLM：" + esc(f.llm_note) + "</span>" : "") +
         (f.has_card ? "<span class='tag ok'>卡已生成</span>" : "<span class='tag bad'>无卡文件</span>") +
         "</span>" +
         "<b>连签</b><span>" + esc(f.streak == null ? "？" : f.streak) + " 天</span>" +
