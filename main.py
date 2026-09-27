@@ -56,7 +56,7 @@ except Exception:  # pragma: no cover
     render_card = None
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.4.1")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.4.2")
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         # ⚠️ 必须接受 config kwarg：star_manager 注入 AstrBotConfig 时若构造函数
@@ -89,17 +89,6 @@ class StarWhisperPlugin(Star):
             lexicon.load_lexicon(force_reload=True)
             data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
             self._store = store.Store(data_dir / "star_whisper.db")
-            # 旧档迁移：disabled_groups 在 v1.2.x 是逗号串，schema v1.3.0 起为 list，
-            # 不迁移的话 Dashboard 保存配置会报「期望是 list, 得到了 str」
-            raw_groups = self._cfg("disabled_groups", "")
-            if isinstance(raw_groups, str) and raw_groups.strip():
-                groups = [g.strip() for g in raw_groups.replace("，", ",").split(",") if g.strip()]
-                try:
-                    self.config["disabled_groups"] = groups
-                    self.config.save_config()
-                    logger.info(f"[{PLUGIN_NAME}] disabled_groups 已由字符串迁移为列表: {groups}")
-                except Exception:
-                    logger.error(f"[{PLUGIN_NAME}] disabled_groups 迁移失败\n{traceback.format_exc()}")
             self._start_push_loop()
             try:  # WebUI 调试面板（Dashboard 登录墙内，仅管理员使用）
                 from . import webui_api
@@ -152,13 +141,13 @@ class StarWhisperPlugin(Star):
         return {g.strip() for g in str(raw or "").replace("，", ",").split(",") if g.strip()}
 
     def _set_group_disabled(self, group_id: str, disabled: bool) -> None:
-        """群开关落回配置（disabled_groups 列表），持久化并在配置页可见。"""
+        """群开关落回配置（disabled_groups 逗号串，与 string schema 一致），持久化并在配置页可见。"""
         groups = self._disabled_groups()
         if disabled:
             groups.add(group_id)
         else:
             groups.discard(group_id)
-        self.config["disabled_groups"] = sorted(groups)
+        self.config["disabled_groups"] = ",".join(sorted(groups))
         self.config.save_config()
 
     @staticmethod

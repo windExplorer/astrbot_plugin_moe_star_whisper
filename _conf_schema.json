@@ -66,13 +66,9 @@
   },
   "disabled_groups": {
     "description": "停用的群",
-    "hint": "这些群内不出签；也可在群内用 /运势开关 on|off 切换（与此处同步）",
-    "type": "list",
-    "items": {
-      "type": "string",
-      "description": "群号"
-    },
-    "default": []
+    "hint": "逗号分隔群号，如 123456,234567；也可在群内用 /运势开关 on|off 切换（与此处同步）",
+    "type": "string",
+    "default": ""
   },
   "llm_enabled": {
     "description": "LLM 星语",
