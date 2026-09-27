@@ -56,7 +56,7 @@ except Exception:  # pragma: no cover
     render_card = None
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.5.0")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.6.0")
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         # ⚠️ 必须接受 config kwarg：star_manager 注入 AstrBotConfig 时若构造函数

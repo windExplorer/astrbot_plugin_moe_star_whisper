@@ -32,9 +32,6 @@ _DISPLAY_CANDIDATES = (
     "C:/Windows/Fonts/simkai.ttf",
     "C:/Windows/Fonts/STKAITI.TTF",
     "C:/Windows/Fonts/KAIU.TTF",
-    "/usr/share/fonts/truetype/arphic/ukai.ttc",
-    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
-    "/usr/share/fonts/noto-cjk/NotoSerifCJK-Regular.ttc",
 )
 
 _font_cache: dict = {}
@@ -494,15 +491,19 @@ def render_tarot_card(
         draw.line([(left, y + int(4 * u)), (right, y + int(4 * u))], fill=line_rgb, width=1)
     block(int(10 * u), b_divider)
 
-    # ② 塔罗行
+    # ② 塔罗行（牌名/正逆位/关键词/解读，行距拉开避免重叠）
+    interp_lines = _wrap(str(tarot.get("interp", "")), _font(font_file, int(22 * u)), right - left)[:2]
     def b_tarot(y):
         draw.text((left, y), tarot.get("name_cn", "？"),
                   font=_font(disp, int(40 * u)), fill=gold)
-        draw.text((right, y + int(8 * u)), f"{tarot.get('label', '')} · {tarot.get('name_en', '')}",
+        draw.text((right, y + int(10 * u)), f"{tarot.get('label', '')} · {tarot.get('name_en', '')}",
                   font=_font(font_file, int(22 * u)), fill=sub, anchor="ra")
-        draw.text((left, y + int(46 * u)), tarot.get("keywords", ""),
-                  font=_font(font_file, int(20 * u)), fill=sub)
-    block(int(70 * u), b_tarot)
+        draw.text((left, y + int(56 * u)), tarot.get("keywords", ""),
+                  font=_font(font_file, int(21 * u)), fill=sub)
+        for i, line in enumerate(interp_lines):
+            draw.text((left, y + int(84 * u) + i * int(32 * u)), line,
+                      font=_font(font_file, int(22 * u)), fill=ink)
+    block(int(84 * u) + int(32 * u) * len(interp_lines) + int(10 * u), b_tarot)
 
     # ③ 吉凶大字
     grade = str(result.get("grade_display") or result.get("grade", "？"))
@@ -532,13 +533,14 @@ def render_tarot_card(
                       font=_font(font_file, int(26 * u)), fill=grade_rgb)
     block(int(46 * u) * ((len(dims) + 1) // 2), b_dims)
 
-    # ⑥ 幸运指数
+    # ⑥ 幸运指数（label 与数字同一中线，不再错位）
     def b_score(y):
-        draw.text((left, y + int(14 * u)), "幸运指数",
-                  font=_font(font_file, int(22 * u)), fill=sub)
-        draw.text((left + int(104 * u), y), str(result.get("score", "？")),
-                  font=_font(disp, int(54 * u)), fill=grade_rgb)
-    block(int(62 * u), b_score)
+        cy = y + int(28 * u)
+        draw.text((left, cy), "幸运指数", font=_font(font_file, int(24 * u)), fill=sub, anchor="lm")
+        draw.text((left + int(110 * u), cy), str(result.get("score", "？")),
+                  font=_font(disp, int(52 * u)), fill=grade_rgb, anchor="lm")
+        draw.text((right, cy), f"满分 100", font=_font(font_file, int(20 * u)), fill=sub, anchor="rm")
+    block(int(60 * u), b_score)
 
     # ⑦ 宜忌
     def b_yiji(y):
@@ -555,25 +557,38 @@ def render_tarot_card(
             yy += chip_h + int(8 * u)
     block(int(2 * (36 * u + 8 * u)), b_yiji)
 
-    # ⑧ 幸运四件套
+    # ⑧ 幸运四件套（2×2 小卡网格，带淡底与润色小注）
     def b_lucky(y):
-        draw.text((left, y),
-                  f"幸运物：{result.get('lucky_item', '？')} ｜ 幸运色：{(result.get('lucky_color') or {}).get('name', '？')}",
-                  font=_font(font_file, int(24 * u)), fill=ink)
-        draw.text((left, y + int(32 * u)),
-                  f"幸运数字：{result.get('lucky_number', '？')} ｜ 幸运方位：{result.get('lucky_dir', '？')}",
-                  font=_font(font_file, int(24 * u)), fill=ink)
-    block(int(60 * u), b_lucky)
+        cells = [
+            ("幸运物", str(result.get("lucky_item", "？")), "带在身边试试"),
+            ("幸运色", str((result.get("lucky_color") or {}).get("name", "？")), "今天多看它两眼"),
+            ("幸运数字", str(result.get("lucky_number", "？")), "做选择时想起它"),
+            ("幸运方位", str(result.get("lucky_dir", "？")), "朝它走两步"),
+        ]
+        cw, ch, gapx = (right - left) / 2 - int(8 * u), int(64 * u), int(12 * u)
+        for i, (label, value, note) in enumerate(cells):
+            cx = left + (cw + gapx) * (i % 2)
+            cy = y + (ch + int(10 * u)) * (i // 2)
+            draw.rounded_rectangle([cx, cy, cx + cw, cy + ch],
+                                   radius=int(10 * u),
+                                   fill=_mix(lucky_rgb, (255, 255, 255), 0.55) + (200,))
+            draw.text((cx + int(14 * u), cy + int(10 * u)), label,
+                      font=_font(font_file, int(19 * u)), fill=sub)
+            draw.text((cx + int(14 * u), cy + int(30 * u)), value,
+                      font=_font(font_file, int(27 * u)), fill=ink)
+            draw.text((right - int(6 * u) if i % 2 == 0 else W - int(32 * u) + int(6 * u), cy + int(10 * u)),
+                      note, font=_font(font_file, int(17 * u)), fill=sub, anchor="ra")
+    block(int(2 * (64 * u + 10 * u)), b_lucky)
 
     # ⑨ 脚注（月相/连签）
     phase = result.get("phase") or {}
-    foot = f"月相：{phase.get('name', '？')}"
+    foot = f"月相·{phase.get('name', '？')}：{phase.get('text', '')}"
     streak = result.get("streak") or 0
     if streak >= 2:
         foot += f" ｜ 连签 {streak} 天"
     def b_foot(y):
-        draw.text((mid, y), foot, font=_font(font_file, int(22 * u)), fill=sub, anchor="ma")
-    block(int(28 * u), b_foot)
+        draw.text((mid, y), foot, font=_font(font_file, int(21 * u)), fill=sub, anchor="ma")
+    block(int(30 * u), b_foot)
 
     # ---- 弹性间隙等分布局 ----
     total = sum(h for h, _ in blocks)
