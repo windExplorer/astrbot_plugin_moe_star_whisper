@@ -58,7 +58,7 @@ except Exception:  # pragma: no cover
     render_help_card = None
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.7.3")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.7.4")
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         # ⚠️ 必须接受 config kwarg：star_manager 注入 AstrBotConfig 时若构造函数
@@ -226,7 +226,7 @@ class StarWhisperPlugin(Star):
             provider = self.context.get_using_provider(umo)
             if provider is not None:
                 resp = await asyncio.wait_for(
-                    provider.text_chat(prompt=prompt, system_prompt=fortune.DRAW_SYSTEM_HINT),
+                    provider.text_chat(prompt=prompt, system_prompt=fortune.draw_system_hint(lang)),
                     timeout=20,
                 )
                 text = str(getattr(resp, "completion_text", "") or "").strip()
@@ -235,10 +235,15 @@ class StarWhisperPlugin(Star):
                         str(getattr(s, "text", "") or "") for s in resp.result_chain.chain
                     ).strip()
                 if text:
-                    return text.strip('`" \n')[:300], template
+                    text = text.strip('`" \n')[:300]
+                    if fortune.lang_matches(text, lang):
+                        return text, template
+                    logger.warning(
+                        f"[{PLUGIN_NAME}] 封面图提示词语言不符合配置（{lang}），回退本地模板"
+                    )
         except Exception:
             logger.error(
-                f"[{PLUGIN_NAME}] 生图提示词 LLM 生成失败，改用本地模板\n{traceback.format_exc()}"
+                f"[{PLUGIN_NAME}] 封面图提示词 LLM 生成失败，改用本地模板\n{traceback.format_exc()}"
             )
         return fortune.local_draw_prompt(result, lang, fmt), template
 

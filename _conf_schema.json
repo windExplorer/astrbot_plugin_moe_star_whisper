@@ -101,8 +101,8 @@
     "default": "08:00"
   },
   "draw_enabled": {
-    "description": "AI 底图联动",
-    "hint": "需已安装 astrbot-comfyui-anima：抽签时由 LLM 生成提示词、anima 出图作为卡面底图；anima 不可用或超时自动回退渐变底图",
+    "description": "AI 封面图联动",
+    "hint": "需已安装 astrbot-comfyui-anima：抽签时由 LLM 生成提示词、anima 出图作为卡面封面图；anima 不可用或超时自动回退渐变封面",
     "type": "bool",
     "default": false
   },
@@ -113,23 +113,23 @@
     "default": ""
   },
   "draw_prompt_lang": {
-    "description": "底图提示词语言",
-    "hint": "遵循 anima 提示词规范：动漫工作流必须英文标签，真人工作流选中文自然语言",
+    "description": "封面图提示词语言",
+    "hint": "严格按此语言生成提示词（生成结果不符合会自动回退内置模板）；建议搭配：中文+自然语言 或 英文+标签式",
     "type": "string",
     "options": ["en", "zh"],
-    "labels": ["英文标签（动漫）", "中文描述（真人）"],
+    "labels": ["英文", "中文"],
     "default": "en"
   },
   "draw_prompt_format": {
-    "description": "底图提示词形式",
-    "hint": "tags=逗号分隔的标签；natural=完整自然语言句子。通常与上方语言搭配：en+tags 或 zh+natural",
+    "description": "封面图提示词形式",
+    "hint": "标签式=逗号分隔的标签；自然语言=完整句子。与上方语言独立配置，插件严格按两者的组合生成",
     "type": "string",
     "options": ["tags", "natural"],
     "labels": ["标签式", "自然语言"],
     "default": "tags"
   },
   "draw_llm_prompt": {
-    "description": "底图提示词模板",
+    "description": "封面图提示词模板",
     "hint": "让 LLM 写生图提示词的指令模板，{facts} 会替换为当日运势事实。留空用内置模板（已按语言/形式约束）",
     "type": "text",
     "default": ""
@@ -154,7 +154,7 @@
   },
   "draw_timeout": {
     "description": "出图超时",
-    "hint": "等待 anima 出图的秒数上限；anima 单张实测约 20-25 秒，超时后静默回退默认底图",
+    "hint": "等待 anima 出图的秒数上限；anima 单张实测约 20-25 秒，超时后静默回退默认渐变",
     "type": "int",
     "slider": {
       "min": 30,
@@ -164,8 +164,8 @@
     "default": 120
   },
   "draw_fail_hint": {
-    "description": "底图失败提示语",
-    "hint": "底图生成失败时随卡附送的一句话；留空则静默降级不打扰",
+    "description": "封面图失败提示语",
+    "hint": "封面图生成失败时随卡附送的一句话；留空则静默降级不打扰",
     "type": "string",
     "default": ""
   },

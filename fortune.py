@@ -223,10 +223,24 @@ def llm_facts(result: dict) -> str:
 
 # ---------- M6：anima 底图联动的提示词与响应解析 ----------
 
-DRAW_SYSTEM_HINT = (
-    "You write image-generation prompts for a moe astrology fortune card. "
-    "Output ONLY the prompt itself."
-)
+def draw_system_hint(lang: str) -> str:
+    """生图提示词的系统提示——按目标语言切换，避免 LLM 跟着英文提示输出英文。"""
+    if lang == "zh":
+        return ("你为一张动漫风格的塔罗牌牌面撰写绘图提示词。"
+                "必须使用中文输出。只输出提示词本身，不要任何解释。")
+    return ("You write image-generation prompts for a moe astrology fortune card. "
+            "Output ONLY the prompt itself.")
+
+
+def lang_matches(text: str, lang: str) -> bool:
+    """校验生成文本的语言是否符合配置（zh 需足够的中文，en 不得含中文）。"""
+    text = str(text or "")
+    if not text:
+        return False
+    cn = sum(1 for ch in text if '\u4e00' <= ch <= '\u9fff')
+    if lang == "zh":
+        return cn >= max(2, int(len(text) * 0.2))
+    return cn == 0
 
 DRAW_GRADE_MOODS_EN = {
     "大吉": "radiant smile, sparkling eyes, golden sparkles, celebration",
@@ -245,14 +259,14 @@ DRAW_GRADE_MOODS_ZH = {
 
 
 def builtin_draw_prompt(lang: str, fmt: str) -> str:
-    """生图提示词的 LLM 指令模板（塔罗牌牌面 + 动漫风格，PRD §7.6-3）。"""
+    """封面图提示词的 LLM 指令模板（塔罗牌牌面 + 动漫风格，PRD §7.6-3）。"""
     if lang == "zh":
         shape = "一段自然流畅的中文画面描述（不要标签堆砌）" if fmt == "natural" else "中文短语式描述"
         return (
             "根据下面的事实清单，为一张**动漫风格的塔罗牌牌面**插画写" + shape + "："
             "画面即清单中「今日塔罗」那张大阿卡纳的牌面演绎（牌面主题为中央构图），"
             "配华丽塔罗牌边框、星月与神秘学纹样，动漫赛璐璐质感，不要出现任何文字。"
-            "只输出描述本身。\n{facts}"
+            "⚠️ 必须输出中文描述，不要翻译成英文。只输出描述本身。\n{facts}"
         )
     if fmt == "natural":
         return (
@@ -275,7 +289,7 @@ def builtin_draw_prompt(lang: str, fmt: str) -> str:
 
 
 def local_draw_prompt(result: dict, lang: str, fmt: str) -> str:
-    """LLM 不可用时的本地兜底提示词（塔罗牌牌面 + 吉凶氛围，PRD §7.6-4）。"""
+    """LLM 不可用/语言不合规时的本地兜底提示词（塔罗牌牌面 + 吉凶氛围，严格按 lang）。"""
     grade = result.get("grade", "")
     tarot = result.get("tarot") or {}
     arcana = tarot.get("name_en") or "The Star"
