@@ -258,16 +258,19 @@ def builtin_draw_prompt(lang: str, fmt: str) -> str:
         return (
             "Based on the fortune facts below, write ONE English sentence describing an "
             "ANIME-STYLE TAROT CARD illustration: the major arcana card named in the facts "
-            "as the central motif, an ornate tarot card frame, mystical star-and-moon "
-            "ambience, cel-shaded anime art. No Chinese, no explanations, output only the "
-            "sentence.\n{facts}"
+            "as the central motif, a complete ornate tarot card border fully visible and "
+            "perfectly centered, symmetrical composition, portrait orientation, nothing "
+            "cropped at the edges, mystical star-and-moon ambience, cel-shaded anime art. "
+            "No Chinese, no explanations, output only the sentence.\n{facts}"
         )
     return (
         "Based on the fortune facts below, write ONE line of English Danbooru-style tags for an "
         "ANIME-STYLE TAROT CARD illustration: the major arcana card named in the facts as the "
-        "central motif, ornate tarot card frame, mystical symbols, star and crescent moon "
-        "background, anime style, cel shading, masterpiece, best quality. Comma-separated "
-        "lowercase tags, no sentences, no Chinese, no explanations. Output only the tags.\n{facts}"
+        "central motif, symmetrical composition, centered, complete ornate tarot card border "
+        "fully visible inside the frame, nothing cropped at the edges, portrait orientation, "
+        "mystical symbols, star and crescent moon background, anime style, cel shading, "
+        "masterpiece, best quality. Comma-separated lowercase tags, no sentences, no Chinese, "
+        "no explanations. Output only the tags.\n{facts}"
     )
 
 
@@ -279,12 +282,15 @@ def local_draw_prompt(result: dict, lang: str, fmt: str) -> str:
     if lang == "zh":
         mood = DRAW_GRADE_MOODS_ZH.get(grade, "温柔")
         return (f"动漫风格塔罗牌牌面：大阿卡纳「{tarot.get('name_cn', '星星')}」为主题的少女，"
-                f"{mood}，华丽塔罗牌边框，星月神秘氛围，淡彩，画质精美")
+                f"{mood}，完整华丽的塔罗牌边框居中且左右对称，构图饱满不裁边，"
+                f"竖版构图，星月神秘氛围，淡彩，画质精美")
     mood = DRAW_GRADE_MOODS_EN.get(grade, "gentle smile")
     return (
         f"tarot card design, anime style, 1girl, solo, {mood}, "
-        f"the {arcana} major arcana motif, ornate tarot card frame, "
-        "stars, crescent moon, mystical ambience, soft pastel colors, masterpiece, best quality"
+        f"the {arcana} major arcana motif, symmetrical composition, centered, "
+        "complete ornate tarot card border fully visible, nothing cropped, "
+        "portrait orientation, stars, crescent moon, mystical ambience, "
+        "soft pastel colors, masterpiece, best quality"
     )
 
 

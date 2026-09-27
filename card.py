@@ -129,6 +129,17 @@ def _cover(img: Image.Image, w: int, h: int) -> Image.Image:
     return img.crop((left, top, left + w, top + h))
 
 
+def _contain(img: Image.Image, w: int, h: int, fill_rgb: tuple) -> Image.Image:
+    """等比缩放到完全放入目标框（不裁切），居中放置，空隙填底色——塔罗牌面专用。"""
+    sw, sh = img.size
+    scale = min(w / sw, h / sh)
+    nw, nh = max(1, round(sw * scale)), max(1, round(sh * scale))
+    img = img.resize((nw, nh))
+    out = Image.new("RGB", (w, h), fill_rgb)
+    out.paste(img, ((w - nw) // 2, (h - nh) // 2))
+    return out
+
+
 def _circle_img(img: Image.Image, diameter: int) -> Image.Image:
     img = img.resize((diameter, diameter))
     mask = Image.new("L", (diameter * 4, diameter * 4), 0)
@@ -414,7 +425,7 @@ def render_tarot_card(
     canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
 
     # ---- 左联：AI 牌面（塔罗框 + 底部牌名条） ----
-    side = _cover(Image.open(bg_image).convert("RGB"), SW, H).convert("RGBA")
+    side = _contain(Image.open(bg_image).convert("RGB"), SW, H, (24, 22, 46)).convert("RGBA")
     canvas.paste(side, (0, 0))
     sdraw = ImageDraw.Draw(canvas)
     sdraw.rectangle([6, 6, SW - 7, H - 7], outline=gold + (235,), width=max(2, int(3 * u)))
@@ -445,7 +456,11 @@ def render_tarot_card(
     panel = _panel_base(pw, ph, lucky_rgb, dark, int(18 * u))
     canvas.paste(panel, (SW + inset // 2, inset // 2), panel)
     draw = ImageDraw.Draw(canvas)
-    draw.rectangle([SW + 6, 6, W - 7, H - 7], outline=gold + (200,), width=max(1, int(2 * u)))
+    # 塔罗式双线金框：外粗内细，与左联呼应
+    draw.rectangle([SW + 6, 6, W - 7, H - 7], outline=gold + (235,), width=max(2, int(3 * u)))
+    draw.rectangle([SW + int(12 * u), int(12 * u), W - int(13 * u), H - int(13 * u)],
+                   outline=gold + (150,), width=1)
+    _sparkle(draw, SW + (W - SW) * 0.5, int(18 * u), int(9 * u), gold, 220)
 
     left = SW + int(32 * u)
     right = W - int(32 * u)
@@ -576,8 +591,8 @@ def render_tarot_card(
                       font=_font(font_file, int(19 * u)), fill=sub)
             draw.text((cx + int(14 * u), cy + int(30 * u)), value,
                       font=_font(font_file, int(27 * u)), fill=ink)
-            draw.text((right - int(6 * u) if i % 2 == 0 else W - int(32 * u) + int(6 * u), cy + int(10 * u)),
-                      note, font=_font(font_file, int(17 * u)), fill=sub, anchor="ra")
+            draw.text((cx + cw - int(8 * u), cy + int(10 * u)), note,
+                      font=_font(font_file, int(17 * u)), fill=sub, anchor="ra")
     block(int(2 * (64 * u + 10 * u)), b_lucky)
 
     # ⑨ 脚注（月相/连签）
