@@ -27,11 +27,11 @@ async def main_async() -> int:
     check(e == {"status": "error", "message": "boom"}, "err 信封形状")
 
     # 未初始化：store None → err（不炸）
-    r = await webui_api.h_debug_state(types.SimpleNamespace(store=None))
+    r = await webui_api.h_debug_state(types.SimpleNamespace(_store=None))
     check(r["status"] == "error" and "初始化" in r["message"], "state 未初始化返回 err 信封")
 
     # 缺 uid：store 存在但未传 uid → err
-    stub = types.SimpleNamespace(store=object())
+    stub = types.SimpleNamespace(_store=object())
     r = await webui_api.h_debug_state(stub)
     check(r["status"] == "error" and "uid" in r["message"], "state 缺 uid 返回 err")
     r = await webui_api.h_debug_redraw(stub)

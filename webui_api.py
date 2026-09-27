@@ -98,7 +98,7 @@ def _fortune_summary(row) -> dict:
 def _last_ok_bg(plugin, uid: str, date: str):
     """当日 draw_jobs 里最近一次成功的 AI 底图（重绘/重抽复用）。"""
     try:
-        for job in reversed(plugin.store.get_draw_jobs(uid, date)):
+        for job in reversed(plugin._store.get_draw_jobs(uid, date)):
             p = job.get("image_path") or ""
             if job.get("status") == "ok" and p and Path(p).exists():
                 return p
@@ -168,12 +168,12 @@ def _debug_reset_core(store, uid: str, date: str) -> dict:
 
 async def h_debug_state(plugin) -> dict:
     """调试面板状态：某 uid 的今日签/档案/背包/绘图任务/关键配置。"""
-    if plugin.store is None:
+    if plugin._store is None:
         return err("插件未初始化完成")
     uid = await _uid_of()
     if not uid:
         return err("缺少 uid（要调试的 QQ 号）")
-    return _debug_state_core(plugin.store, plugin._cfg, uid, _today(plugin))
+    return _debug_state_core(plugin._store, plugin._cfg, uid, _today(plugin))
 
 
 async def h_debug_redraw(plugin) -> dict:
@@ -182,19 +182,19 @@ async def h_debug_redraw(plugin) -> dict:
     说明：WebUI 触发没有聊天事件，无法新绘 anima 底图；底图复用当日
     draw_jobs 的成功记录或默认幸运色渐变。AI 底图新绘请在聊天内抽签触发。
     """
-    if plugin.store is None:
+    if plugin._store is None:
         return err("插件未初始化完成")
     uid = await _uid_of()
     if not uid:
         return err("缺少 uid")
     date = _today(plugin)
-    existing = plugin.store.get_fortune(uid, date)
+    existing = plugin._store.get_fortune(uid, date)
     if existing is None:
         return err("该用户今天还没有签记录，请先在聊天里 /运势 抽一支")
     payload = existing.get("payload") or {}
     nonce = int(payload.get("reroll_count", 0) or 0) + 1
     result = plugin._roll_daily(
-        uid, date, _salt(plugin), plugin.store.get_profile(uid) or {},
+        uid, date, _salt(plugin), plugin._store.get_profile(uid) or {},
         nonce=nonce, streak=int(payload.get("streak") or 1),
     )
     result["reroll_count"] = nonce
@@ -205,7 +205,7 @@ async def h_debug_redraw(plugin) -> dict:
         nickname=existing.get("nickname") or "", avatar=existing.get("avatar") or "",
         bg_image=bg,
     )
-    plugin.store.update_fortune_payload(uid, date, result, card_path or "")
+    plugin._store.update_fortune_payload(uid, date, result, card_path or "")
     return ok({
         "fortune": _fortune_summary({"payload": result, "nickname": existing.get("nickname")}),
         "card_path": card_path or "",
@@ -216,13 +216,13 @@ async def h_debug_redraw(plugin) -> dict:
 
 async def h_debug_rerender(plugin) -> dict:
     """重绘：不重抽，按已存 payload 重渲染卡面（改 card.py 样式后看效果）。"""
-    if plugin.store is None:
+    if plugin._store is None:
         return err("插件未初始化完成")
     uid = await _uid_of()
     if not uid:
         return err("缺少 uid")
     date = _today(plugin)
-    row = plugin.store.get_fortune(uid, date)
+    row = plugin._store.get_fortune(uid, date)
     if row is None:
         return err("该用户今天还没有签记录")
     payload = row.get("payload") or {}
@@ -234,18 +234,18 @@ async def h_debug_rerender(plugin) -> dict:
     )
     if not card_path:
         return err("重绘失败（渲染抛错），详情见 AstrBot 日志")
-    plugin.store.update_fortune_payload(uid, date, payload, card_path)
+    plugin._store.update_fortune_payload(uid, date, payload, card_path)
     return ok({"fortune": _fortune_summary(row), "card_path": card_path, "ai_bg_reused": bool(bg)})
 
 
 async def h_debug_reset(plugin) -> dict:
     """重置：删除某 uid 的今日签记录与卡文件（星尘会随重抽再次发放，仅测试用）。"""
-    if plugin.store is None:
+    if plugin._store is None:
         return err("插件未初始化完成")
     uid = await _uid_of()
     if not uid:
         return err("缺少 uid")
-    return _debug_reset_core(plugin.store, uid, _today(plugin))
+    return _debug_reset_core(plugin._store, uid, _today(plugin))
 
 
 def register(plugin) -> None:

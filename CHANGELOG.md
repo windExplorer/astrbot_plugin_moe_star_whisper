@@ -2,6 +2,14 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v1.2.3 (2026-09-27)
+
+修复调试面板报错：`'StarWhisperPlugin' object has no attribute 'store'`。
+
+- **根因**：`webui_api.py` 沿用了 user_gateway 的命名习惯访问 `plugin.store`，而本插件 main.py 的属性名是 `self._store`——本地测试的 stub 恰好也带 `store` 属性，契约错位被掩盖到真机才炸。
+- **修复**：`webui_api.py` 全部 13 处 `plugin.store` → `plugin._store`。
+- **守卫**：`test_main_structure` 新增**跨模块契约审计**——收集 main.py 主类的全部成员（方法 + `self.X` 实例属性赋值），断言 `webui_api.py` 引用的每个 `plugin.<attr>` 都真实存在（`context` 等基类属性白名单豁免）；stub 与真实接口的契约漂移今后在本地测试期拦截。
+
 ## v1.2.2 (2026-09-27)
 
 修复真机安装失败：`_conf_schema.json` 的 object 类型缺 `items` 导致 `KeyError: 'items'`。

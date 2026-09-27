@@ -82,6 +82,24 @@ def main() -> int:
     check((root / "pages" / "debug" / "index.html").is_file(), "缺少 pages/debug/index.html（调试面板页面）")
     check("debug_cmd" not in methods, "聊天侧不应再有 debug_cmd（调试已移至 WebUI 面板）")
 
+    # WebUI 后端契约审计：webui_api 引用的 plugin.<attr> 必须真实存在于主类
+    # （真机教训：stub 测试里 store 恰好存在，掩盖了 main.py 里是 _store 的错位）
+    webui_src = (root / "webui_api.py").read_text(encoding="utf-8")
+    used_attrs = set(__import__("re").findall(r"plugin\.(\w+)", webui_src))
+    members = set(methods)
+    for node in ast.walk(classes[0]):
+        target = None
+        if isinstance(node, ast.Assign) and node.targets:
+            target = node.targets[0]
+        elif isinstance(node, ast.AnnAssign):
+            target = node.target
+        if (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
+                and target.value.id == "self"):
+            members.add(target.attr)
+    external = {"context"}  # Star 基类提供
+    bad = used_attrs - members - external
+    check(not bad, f"webui_api 引用了主类不存在的属性: {bad or '无'}（契约错位）")
+
     if FAILED:
         print(f"\n{len(FAILED)} 项失败")
         return 1
