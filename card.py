@@ -697,3 +697,69 @@ def render_push_card(
     out = cards_root / f"push_{date_str}.png"
     img.convert("RGB").save(out, "PNG")
     return str(out)
+
+
+def render_help_card(
+    groups: list,
+    cards_root,
+    font_path: str | None = None,
+    extra_font_dirs=None,
+    width: int = 900,
+    signer: str = "星语者",
+    subtitle: str = "每日运势签 · 塔罗牌面 · 道具经济",
+    footer: str = "更多设置见 AstrBot 插件配置页",
+) -> str:
+    """帮助图（黑金塔罗风）：分组列出全部指令，高度随内容自适应。"""
+    font_file = find_font(font_path, extra_font_dirs)
+    if not font_file:
+        raise RuntimeError("未找到可用中文字体")
+    u = width / 900.0
+    disp = _display_font_file(font_file)
+    ink, sub = (232, 230, 240), (158, 160, 178)
+    gold = (212, 175, 55)
+
+    row_h = int(46 * u)
+    group_h = int(56 * u)
+    n_rows = sum(len(rows) for _, rows in groups)
+    W = int(width)
+    margin = int(26 * u)
+    H = int(210 * u) + group_h * len(groups) + row_h * n_rows + int(96 * u)
+
+    img = Image.new("RGBA", (W, H), (8, 8, 12, 255))
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([6, 6, W - 7, H - 7], outline=gold + (235,), width=max(2, int(3 * u)))
+    draw.rectangle([int(12 * u), int(12 * u), W - int(13 * u), H - int(13 * u)],
+                   outline=gold + (150,), width=1)
+    _sparkle(draw, W * 0.88, int(40 * u), int(11 * u), gold, 220)
+    _sparkle(draw, W * 0.10, int(64 * u), int(8 * u), gold, 180)
+
+    left, right = margin + int(34 * u), W - margin - int(34 * u)
+    y = int(46 * u)
+    draw.text(((left + right) // 2, y), "萌萌星语",
+              font=_font(disp, int(64 * u)), fill=gold, anchor="ma")
+    draw.text(((left + right) // 2, y + int(84 * u)), subtitle,
+              font=_font(font_file, int(24 * u)), fill=sub, anchor="ma")
+    y += int(140 * u)
+
+    for title, rows in groups:
+        draw.text((left, y), f"— {title} —",
+                  font=_font(disp, int(30 * u)), fill=gold, anchor="ma")
+        y += group_h
+        for cmd, desc in rows:
+            draw.text((left, y), cmd,
+                      font=_font(_bold_variant(font_file), int(26 * u)), fill=ink)
+            draw.text((right, y + int(3 * u)), desc,
+                      font=_font(font_file, int(21 * u)), fill=sub, anchor="ra")
+            y += row_h
+        y += int(10 * u)
+
+    draw.text(((left + right) // 2, H - int(64 * u)), footer,
+              font=_font(font_file, int(21 * u)), fill=sub, anchor="ma")
+    draw.text((right, H - int(34 * u)), f"—— {signer}",
+              font=_font(font_file, int(24 * u)), fill=sub, anchor="rs")
+
+    cards_root = Path(cards_root)
+    cards_root.mkdir(parents=True, exist_ok=True)
+    out = cards_root / "help.png"
+    img.convert("RGB").save(out, "PNG")
+    return str(out)

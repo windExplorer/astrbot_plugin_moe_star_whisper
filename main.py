@@ -22,10 +22,11 @@ from . import fortune, lexicon, store
 PLUGIN_NAME = "astrbot_plugin_moe_star_whisper"
 
 try:  # M2 起提供图卡；缺失/失败时回退纯文本
-    from .card import render_card, render_push_card
+    from .card import render_card, render_push_card, render_help_card
 except Exception:  # pragma: no cover
     render_card = None
     render_push_card = None
+    render_help_card = None
 
 _STREAK_BADGES = {
     3: "三星连签达成，运势开始聚拢 ✨",
@@ -54,9 +55,10 @@ try:  # M2 起提供图卡；缺失/失败时回退纯文本
     from .card import render_card
 except Exception:  # pragma: no cover
     render_card = None
+    render_help_card = None
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.7.2")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.7.3")
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         # ⚠️ 必须接受 config kwarg：star_manager 注入 AstrBotConfig 时若构造函数
@@ -1049,3 +1051,49 @@ class StarWhisperPlugin(Star):
         yield event.plain_result(
             f"已{'发放' if delta > 0 else '扣除'} {abs(delta)} 颗星尘，当前余额 {self._store.get_balance(target)}。"
         )
+
+    @filter.command("运势帮助", alias={"星语帮助"})
+    async def help_cmd(self, event: AstrMessageEvent):
+        """查看萌萌星语的全部指令（帮助图）"""
+        data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
+        font_path = self._cfg("card_font_path", "") or None
+        extra_dirs = [data_dir / "fonts", Path("data/fonts")]
+        signer = str(self._cfg("fortune_signer", "星语者"))
+        groups = [
+            ("占卜", [
+                ("/运势", "抽当日专属星语签（别名 /今日运势 /星语 /占卜）"),
+                ("/运势帮助", "查看本帮助图"),
+            ]),
+            ("群玩法", [
+                ("/运势榜 [日|周]", "群内幸运指数排行"),
+                ("/运势PK @某人", "当日幸运指数对决"),
+                ("/运势开关 on|off", "群级启停（管理员）"),
+            ]),
+            ("星座", [
+                ("/星语绑定 <MM-DD>", "绑定生日，解锁星座与生日彩蛋"),
+                ("/星座 [@某人]", "查看星座与今日吉凶"),
+            ]),
+            ("道具经济", [
+                ("/星尘", "星尘余额与背包"),
+                ("/运势商店", "道具与价格"),
+                ("/运势购买 <名称> [数量]", "购买道具"),
+                ("/运势使用 <名称>", "使用换签卡/护身符/香烛"),
+                ("/运势补签", "断签 3 天内补回昨天"),
+                ("/运势发放 @用户 <±n>", "手动调整星尘（管理员）"),
+            ]),
+        ]
+        if render_help_card is not None:
+            try:
+                path = render_help_card(
+                    groups, data_dir / "help",
+                    font_path=font_path, extra_font_dirs=extra_dirs, signer=signer,
+                )
+                yield event.image_result(path)
+                return
+            except Exception:
+                logger.error(f"[{PLUGIN_NAME}] 帮助图渲染失败，回退文本\n{traceback.format_exc()}")
+        lines = ["🌙 萌萌星语 · 指令帮助"]
+        for title, rows in groups:
+            lines.append(f"—— {title} ——")
+            lines += [f"{cmd}　{desc}" for cmd, desc in rows]
+        yield event.plain_result("\n".join(lines))
