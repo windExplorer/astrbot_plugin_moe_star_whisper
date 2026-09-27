@@ -62,7 +62,7 @@ _ITEM_ALIASES = {
 }
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.8.2")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.8.3")
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         # ⚠️ 必须接受 config kwarg：star_manager 注入 AstrBotConfig 时若构造函数
@@ -468,7 +468,9 @@ class StarWhisperPlugin(Star):
                 self._cfg("llm_prompt_persona", "") or fortune.DEFAULT_LLM_PERSONA
             )
             prompt = (
-                "今日运势事实清单：\n" + fortune.llm_facts(result) + "\n请据此写今日签文。"
+                "今日运势事实清单（仅供你判断运势走向；吉凶、四件套、宜忌等"
+                "已展示在卡面上，签文里不要复述）：\n" + fortune.llm_facts(result)
+                + "\n请据此写今日签文。"
             )
             resp = await asyncio.wait_for(
                 provider.text_chat(prompt=prompt, system_prompt=persona),
