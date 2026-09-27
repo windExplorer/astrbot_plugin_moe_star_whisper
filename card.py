@@ -757,7 +757,7 @@ def render_help_card(
     width: int = 900,
     signer: str = "星语者",
     subtitle: str = "萌萌星语 · 每日运势签",
-    footer: str = "更多设置见 AstrBot 插件配置页",
+    footer: str = "从 /运势 开始 · 每天一支专属星语签",
     accent_hex: str = "#F6C6D3",
     theme: str = "light",
 ) -> str:
@@ -766,6 +766,7 @@ def render_help_card(
     groups: [(组名, [(指令, 说明), ...]), ...]；
     行内指令列按节内最宽指令对齐（强调色粗体），说明按剩余宽度折行；
     高度随内容自适应，文件名固定 help.png。
+    页脚 footer 是发给群友看的引导语，不要放管理员向内容（配置页他们进不去）。
     """
     font_file = find_font(font_path, extra_font_dirs)
     if not font_file:

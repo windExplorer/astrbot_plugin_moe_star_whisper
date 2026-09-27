@@ -62,7 +62,7 @@ _ITEM_ALIASES = {
 }
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.8.1")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.8.2")
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         # ⚠️ 必须接受 config kwarg：star_manager 注入 AstrBotConfig 时若构造函数
