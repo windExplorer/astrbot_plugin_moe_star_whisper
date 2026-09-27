@@ -754,18 +754,19 @@ def render_help_card(
     cards_root,
     font_path: str | None = None,
     extra_font_dirs=None,
-    width: int = 1120,
+    width: int = 960,
     signer: str = "星语者",
     subtitle: str = "萌萌星语 · 每日运势签",
     footer: str = "从 /星语 开始 · 每天一支专属星语签",
     accent_hex: str = "#F6C6D3",
     theme: str = "light",
 ) -> str:
-    """帮助图（v1.8.4 重写排版）：与提示卡同族版式——渐变底座 + 分组节面板。
+    """帮助图（v1.8.5 重排）：与提示卡同族版式——渐变底座 + 分组节面板。
 
     groups: [(组名, [(指令, 说明), ...]), ...]；
     行内指令列按节内最宽指令对齐（强调色粗体），说明按剩余宽度折行；
-    画布 1120 宽 + 大字号（v1.8.4：900 宽的小字在 QQ 压缩下发糊）；
+    字号固定大字号（v1.8.4 起），画布宽度按内容自适应收窄（v1.8.5：
+    固定 1120 宽右侧留大片空白；width 参数只是上限，下限 820）；
     高度随内容自适应，文件名固定 help.png。
     页脚 footer 是发给群友看的引导语，不要放管理员向内容（配置页他们进不去）。
     """
@@ -773,25 +774,50 @@ def render_help_card(
     if not font_file:
         raise RuntimeError("未找到可用中文字体")
     dark = str(theme or "light").lower() == "dark"
-    u0 = width / 900.0
     probe = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
-    f_cmd = _font(_bold_variant(font_file), int(17 * u0))
-    f_desc = _font(font_file, int(15 * u0))
-    f_lab = _font(_display_font_file(font_file), int(22 * u0))
+    # 字号固定（不随画布缩放）；画布宽度按内容自适应收窄
+    f_cmd = _font(_bold_variant(font_file), 17)
+    f_desc = _font(font_file, 15)
+    f_lab = _font(_display_font_file(font_file), 22)
+    sec_pad, head_h, row_lh, row_gap, sec_gap = 16, 34, 22, 7, 15
+    inner_pad = 176  # 底座左右留白合计的标称值（900 宽时）
 
-    sec_pad, head_h, row_lh, row_gap, sec_gap = int(16 * u0), int(34 * u0), int(22 * u0), int(7 * u0), int(15 * u0)
-    inner_w = int((width - (44 + 42) * 2 * u0))
+    def _natural_row_widths() -> int:
+        """按「说明不折行」估最宽行（第一遍，用于收窄画布）。"""
+        max_row = 0
+        for _title, rows in groups:
+            col = 0
+            for cmd, _d in rows:
+                cmd = str(cmd or "").strip()
+                if cmd:
+                    col = max(col, probe.textlength(cmd, font=f_cmd))
+            col = min(int(col) + 20, int(728 * 0.55))
+            for cmd, desc in rows:
+                cmd, desc = str(cmd or "").strip(), str(desc or "").strip()
+                if cmd and desc:
+                    row_w = col + min(probe.textlength(desc, font=f_desc), 728 - col)
+                elif desc:
+                    row_w = min(probe.textlength(desc, font=f_desc), 728)
+                else:
+                    row_w = col
+                max_row = max(max_row, row_w)
+        return max_row
+
+    natural = _natural_row_widths()
+    width = int(min(max(820, natural + inner_pad), max(820, width)))
+    u0 = width / 900.0
+    inner_w = int(width - (44 + 42) * 2 * u0)
     cmd_col_cap = int(inner_w * 0.55)
 
-    # ---- 逐节实测：指令列宽取节内最宽指令，说明按剩余宽度折行 ----
+    # ---- 第二遍（真实内容区）：指令列宽取节内最宽指令，说明按剩余宽度折行 ----
     sec_geo: list[tuple[int, str, list[tuple[str, str, list[str]]], int]] = []
     for title, rows in groups:
         col = 0
         for cmd, _desc in rows:
             cmd = str(cmd or "").strip()
             if cmd:
-                col = max(col, probe.textlength(cmd, font=f_cmd) / u0)
-        col = min(int(col * u0) + int(20 * u0), cmd_col_cap)
+                col = max(col, probe.textlength(cmd, font=f_cmd))
+        col = min(int(col) + 20, cmd_col_cap)
         rows_geo: list[tuple[str, str, list[str]]] = []
         for cmd, desc in rows:
             cmd, desc = str(cmd or "").strip(), str(desc or "").strip()
@@ -804,7 +830,7 @@ def render_help_card(
             rows_geo.append((cmd, desc, lines))
         h = sec_pad + head_h
         for _cmd, _desc, lines in rows_geo:
-            h += max(int(26 * u0), row_lh * max(1, len(lines)) + int(6 * u0)) + row_gap
+            h += max(26, row_lh * max(1, len(lines)) + 6) + row_gap
         h += sec_pad - row_gap
         sec_geo.append((h, title, rows_geo, col))
 
@@ -837,7 +863,7 @@ def render_help_card(
                   fill=sec_border, width=1)
         ry = iy + head_h
         for cmd, _desc, lines in rows_geo:
-            row_h = max(int(26 * u0), row_lh * max(1, len(lines)) + int(6 * u0))
+            row_h = max(26, row_lh * max(1, len(lines)) + 6)
             if cmd:
                 draw.text((left + int(18 * u), ry), cmd, font=f_cmd, fill=cmd_rgb)
             dx = left + int(18 * u) + (col if cmd else 0)
