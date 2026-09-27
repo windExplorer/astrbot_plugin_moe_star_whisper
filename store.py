@@ -156,6 +156,14 @@ class Store:
         )
         self._db.commit()
 
+    def delete_fortune(self, user_id: str, date: str) -> bool:
+        """删除当日签记录（仅调试指令使用，D5 的运营后手）。"""
+        cur = self._db.execute(
+            "DELETE FROM fortunes WHERE user_id=? AND date=?", (user_id, date)
+        )
+        self._db.commit()
+        return cur.rowcount == 1
+
     def list_active_group_ids(self, days: int = 7) -> list:
         """近 N 天有过抽签的群（group_id, platform）——每日推送的目标集。"""
         since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")

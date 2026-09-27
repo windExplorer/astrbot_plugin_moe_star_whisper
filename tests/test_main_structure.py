@@ -62,6 +62,7 @@ def main() -> int:
         "fortune_cmd", "rank_cmd", "pk_cmd", "switch_cmd",
         "bind_cmd", "constellation_cmd",
         "wallet_cmd", "shop_cmd", "buy_cmd", "use_cmd", "makeup_cmd", "grant_cmd",
+        "debug_cmd",
         "_roll_daily", "_economy_on", "_price_of",
         "_try_render_card", "_try_llm_sign",
         "_try_draw_background", "_try_build_image_prompt",

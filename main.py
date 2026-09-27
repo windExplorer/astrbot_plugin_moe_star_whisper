@@ -54,7 +54,7 @@ except Exception:  # pragma: no cover
     render_card = None
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.0.0")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.1.0")
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -986,3 +986,99 @@ class StarWhisperPlugin(Star):
         yield event.plain_result(
             f"已{'发放' if delta > 0 else '扣除'} {abs(delta)} 颗星尘，当前余额 {self._store.get_balance(target)}。"
         )
+
+    # ---------- 调试（仅 AstrBot 管理员，测试期用） ----------
+
+    @filter.command("运势调试", alias={"星语调试"})
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def debug_cmd(self, event: AstrMessageEvent):
+        """调试：/运势调试 [重抽|重绘|重置]（默认重抽）。
+
+        重抽=换种子重跑全流程（LLM 签文/anima 底图/合卡，每次出新图）；
+        重绘=按已存结果重渲染卡面（调 card.py 后看效果，不重抽不重绘底图）；
+        重置=删除今日记录，用普通 /运势 重新抽（星尘会再次发放，测试用）。
+        """
+        if self._store is None:
+            yield event.plain_result("插件未初始化完成～")
+            return
+        uid = str(event.get_sender_id() or "").strip()
+        tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
+        date = fortune.local_today(tz_name)
+        salt = str(self._cfg("salt", "moe-star-whisper"))
+        raw = str(event.message_str or "").replace(" ", "")
+        for w in ("运势调试", "星语调试", "/"):
+            raw = raw.replace(w, "")
+        sub = raw.strip() or "重抽"
+
+        if sub in ("重置", "清除"):
+            row = self._store.get_fortune(uid, date)
+            if row is None:
+                yield event.plain_result("今天还没有签记录，直接 /运势 抽就行。")
+                return
+            card_file = (row.get("payload") or {}).get("card_path") or ""
+            self._store.delete_fortune(uid, date)
+            if card_file and Path(card_file).exists():
+                try:
+                    Path(card_file).unlink()
+                except Exception:
+                    pass
+            yield event.plain_result(
+                "已清除今日签（星尘奖励会随重抽再次发放——本指令仅测试用）。"
+                "现在用 /运势 重新抽一支吧。"
+            )
+            return
+
+        if sub in ("重绘",):
+            row = self._store.get_fortune(uid, date)
+            if row is None:
+                yield event.plain_result("今天还没有签记录，先 /运势 抽一支。")
+                return
+            payload = row.get("payload") or {}
+            bg = None
+            for job in reversed(self._store.get_draw_jobs(uid, date)):
+                p = job.get("image_path") or ""
+                if job.get("status") == "ok" and p and Path(p).exists():
+                    bg = p
+                    break
+            card_path = self._try_render_card(
+                payload, uid,
+                nickname=row.get("nickname") or "", avatar=row.get("avatar") or "",
+                bg_image=bg,
+            )
+            if card_path:
+                self._store.update_fortune_payload(uid, date, payload, card_path)
+                yield event.image_result(card_path)
+            else:
+                yield event.plain_result("重绘失败，看日志（已回退说明渲染抛错）。")
+            return
+
+        # 默认：重抽（换种子重跑全流程，等价于不消耗卡片的换签）
+        row = self._store.get_fortune(uid, date)
+        if row is None:
+            yield event.plain_result("今天还没抽过，直接 /运势 就行。")
+            return
+        payload = row.get("payload") or {}
+        nonce = int(payload.get("reroll_count", 0) or 0) + 1
+        result = self._roll_daily(
+            uid, date, salt, self._store.get_profile(uid) or {},
+            nonce=nonce, streak=int(payload.get("streak") or 1),
+        )
+        result["reroll_count"] = nonce
+        await self._try_llm_sign(result)
+        bg_path, job = await self._try_draw_background(event, result, uid, date, salt)
+        card_path = self._try_render_card(
+            result, uid,
+            nickname=row.get("nickname") or "", avatar=row.get("avatar") or "",
+            bg_image=bg_path,
+        )
+        if job is not None:
+            job["card_path"] = card_path or ""
+            try:
+                self._store.record_draw_job(uid, date, **job)
+            except Exception:
+                logger.error(f"[{PLUGIN_NAME}] draw_jobs 落库失败\n{traceback.format_exc()}")
+        self._store.update_fortune_payload(uid, date, result, card_path or "")
+        if card_path:
+            yield event.image_result(card_path)
+        else:
+            yield event.plain_result(self._format_result(result))

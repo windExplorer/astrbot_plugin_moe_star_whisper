@@ -101,6 +101,14 @@ def main() -> int:
     check(st.has_ledger("e1", "2026-09-28", "use:amulet"), "佩戴标记可查")
     check(not st.has_ledger("e1", "2026-09-28", "use:candle"), "未佩戴不误报")
 
+    # 调试：删除当日签（v1.1.0）
+    ok_del = st.delete_fortune("e1", "2026-09-28")
+    check(ok_del is False, "无记录删除返回 False")
+    st.save_fortune("del1", "2026-09-27", {"grade": "吉", "score": 50})
+    check(st.delete_fortune("del1", "2026-09-27") is True, "删除当日签")
+    check(st.get_fortune("del1", "2026-09-27") is None, "删除后不可读")
+    check(st.delete_fortune("del1", "2026-09-27") is False, "重复删除返回 False")
+
     st.close()
     if FAILED:
         print(f"\n{len(FAILED)} 项失败")
