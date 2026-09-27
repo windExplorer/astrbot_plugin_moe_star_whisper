@@ -56,7 +56,7 @@ except Exception:  # pragma: no cover
     render_card = None
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.7.0")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.7.1")
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         # ⚠️ 必须接受 config kwarg：star_manager 注入 AstrBotConfig 时若构造函数
@@ -616,6 +616,8 @@ class StarWhisperPlugin(Star):
         bg_fail_hint = ""
         if mode != "纯文本":
             # D11 先绘后卡：anima 底图（可选）→ 合卡 → 发送；失败静默回退幸运色渐变
+            if bool(self._cfg("draw_enabled", False)):
+                yield event.plain_result("🔮 占卜中，星盘铺开……请稍候")
             bg_path, job = await self._try_draw_background(event, result, uid, date, salt)
             card_path = self._try_render_card(result, uid, nickname, avatar_bytes, bg_image=bg_path)
             if job is not None:
