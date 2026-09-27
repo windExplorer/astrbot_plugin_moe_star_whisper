@@ -149,6 +149,43 @@ class Store:
         ).fetchall()
         return [(r["group_id"], r["platform"] or "") for r in rows]
 
+    def record_draw_job(
+        self,
+        user_id: str,
+        date: str,
+        workflow: str = "",
+        prompt_lang: str = "",
+        prompt_fmt: str = "",
+        image_prompt: str = "",
+        llm_prompt: str = "",
+        status: str = "",
+        error: str = "",
+        duration_ms: int = 0,
+        image_path: str = "",
+        card_path: str = "",
+    ) -> int:
+        """绘图任务全链路落库（D6/D7），返回 job id。"""
+        cur = self._db.execute(
+            "INSERT INTO draw_jobs (user_id, date, workflow, prompt_lang, prompt_fmt,"
+            " image_prompt, llm_prompt, status, error, duration_ms, image_path,"
+            " card_path, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                user_id, date, workflow, prompt_lang, prompt_fmt,
+                image_prompt, llm_prompt, status, error, int(duration_ms),
+                image_path, card_path,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            ),
+        )
+        self._db.commit()
+        return int(cur.lastrowid or 0)
+
+    def get_draw_jobs(self, user_id: str, date: str) -> list:
+        rows = self._db.execute(
+            "SELECT * FROM draw_jobs WHERE user_id=? AND date=? ORDER BY id",
+            (user_id, date),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def list_day(self, date: str) -> list[dict]:
         """当日全部抽签记录（榜单/PK 用，M3 接线）。"""
         rows = self._db.execute(

@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import re
 import sys
+import time
 import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -37,7 +38,7 @@ except Exception:  # pragma: no cover
     render_card = None
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "0.6.0")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "0.7.0")
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -131,7 +132,8 @@ class StarWhisperPlugin(Star):
         except Exception:
             return ""
 
-    def _try_render_card(self, result: dict, uid: str, nickname: str = "", avatar: str = ""):
+    def _try_render_card(self, result: dict, uid: str, nickname: str = "", avatar: str = "",
+                         bg_image=None):
         """渲染卡图，失败返回 None（调用方回退纯文本，绝不吞错不回，PRD §7.3）。"""
         if render_card is None:
             return None
@@ -148,6 +150,7 @@ class StarWhisperPlugin(Star):
                 nickname=nickname,
                 avatar_url=avatar,
                 uid=uid,
+                bg_image=bg_image,
                 theme=str(self._cfg("card_theme", "auto")),
             )
         except Exception:
@@ -155,6 +158,112 @@ class StarWhisperPlugin(Star):
                 f"[{PLUGIN_NAME}] 卡片渲染失败，回退纯文本\n{traceback.format_exc()}"
             )
             return None
+
+    # ---------- anima 底图联动（F23/D6/D11，契约见 PRD §7.6） ----------
+
+    async def _try_build_image_prompt(self, result: dict):
+        """生图提示词：LLM 生成（受语言/形式约束）→ 失败回退本地模板（PRD §7.6-4）。"""
+        lang = str(self._cfg("draw_prompt_lang", "en"))
+        fmt = str(self._cfg("draw_prompt_format", "tags"))
+        template = str(
+            self._cfg("draw_llm_prompt", "") or fortune.builtin_draw_prompt(lang, fmt)
+        )
+        prompt = template.replace("{facts}", fortune.llm_facts(result))
+        try:
+            provider = self.context.get_using_provider()
+            if provider is not None:
+                resp = await asyncio.wait_for(
+                    provider.text_chat(prompt=prompt, system_prompt=fortune.DRAW_SYSTEM_HINT),
+                    timeout=20,
+                )
+                text = str(getattr(resp, "completion_text", "") or "").strip()
+                if not text and getattr(resp, "result_chain", None) is not None:
+                    text = "".join(
+                        str(getattr(s, "text", "") or "") for s in resp.result_chain.chain
+                    ).strip()
+                if text:
+                    return text.strip('`" \n')[:300], template
+        except Exception:
+            logger.error(
+                f"[{PLUGIN_NAME}] 生图提示词 LLM 生成失败，改用本地模板\n{traceback.format_exc()}"
+            )
+        return fortune.local_draw_prompt(result, lang, fmt), template
+
+    async def _try_draw_background(self, event: AstrMessageEvent, result: dict,
+                                   uid: str, date: str, salt: str):
+        """anima comfyui_draw 出底图。返回 (bg_path|None, job|None)。
+
+        契约（anima docs/cross-plugin-draw-guide.md，源码已核实）：
+        get_llm_tool_manager().get_func("comfyui_draw") → handler(event, ...)；
+        source 必传 anima 约定值「我会永远陪着你」才返回 JSON 路径由我方发图；
+        seed/width/height 透传（D11：底图一人一天一张、尺寸与卡布一致）；
+        超时/异常静默降级到幸运色默认底图，绝不阻塞出卡。
+        """
+        if not bool(self._cfg("draw_enabled", False)):
+            return None, None
+        job = {
+            "workflow": str(self._cfg("draw_workflow", "") or ""),
+            "prompt_lang": str(self._cfg("draw_prompt_lang", "en")),
+            "prompt_fmt": str(self._cfg("draw_prompt_format", "tags")),
+            "image_prompt": "",
+            "llm_prompt": "",
+            "status": "error",
+            "error": "",
+            "duration_ms": 0,
+            "image_path": "",
+        }
+        try:
+            manager = self.context.get_llm_tool_manager()
+            tool = manager.get_func("comfyui_draw") if manager is not None else None
+            handler = (getattr(tool, "handler", None) or tool) if tool is not None else None
+        except Exception:
+            handler = None
+        if handler is None:
+            job["status"] = "skipped_no_anima"
+            return None, job
+
+        image_prompt, llm_prompt = await self._try_build_image_prompt(result)
+        job["image_prompt"] = image_prompt
+        job["llm_prompt"] = llm_prompt
+        seed_int = int.from_bytes(
+            fortune.derive_seed(date, uid, salt, 0)[:8], "big"
+        ) % (2 ** 31)
+        kwargs = dict(
+            prompt=image_prompt,
+            source="我会永远陪着你",
+            seed=seed_int,
+            width=int(self._cfg("card_width", 1024)),
+            height=int(self._cfg("card_height", 1536)),
+        )
+        if job["workflow"]:
+            kwargs["workflow"] = job["workflow"]
+        negative = str(self._cfg("draw_negative_prompt", "") or "")
+        if negative:
+            kwargs["negative_prompt"] = negative
+
+        t0 = time.monotonic()
+        try:
+            raw = await asyncio.wait_for(
+                handler(event, **kwargs),
+                timeout=int(self._cfg("draw_timeout", 120)),
+            )
+            job["duration_ms"] = int((time.monotonic() - t0) * 1000)
+            paths = fortune.parse_draw_response(raw)
+            if paths and Path(paths[0]).exists():
+                job["status"] = "ok"
+                job["image_path"] = paths[0]
+                return paths[0], job
+            job["error"] = f"响应中无有效图片路径: {str(raw)[:200]}"
+            return None, job
+        except asyncio.TimeoutError:
+            job["duration_ms"] = int((time.monotonic() - t0) * 1000)
+            job["status"] = "timeout"
+            return None, job
+        except Exception as e:
+            job["duration_ms"] = int((time.monotonic() - t0) * 1000)
+            job["status"] = "error"
+            job["error"] = str(e)[:200]
+            return None, job
 
     async def _try_llm_sign(self, result: dict) -> None:
         """LLM 星语（F16，可选增强默认关）：当日首次抽签改写签文；失败静默回退本地模板。"""
@@ -390,8 +499,19 @@ class StarWhisperPlugin(Star):
 
         mode = str(self._cfg("output_mode", "图卡"))
         card_path = None
+        bg_fail_hint = ""
         if mode != "纯文本":
-            card_path = self._try_render_card(result, uid, nickname, avatar)
+            # D11 先绘后卡：anima 底图（可选）→ 合卡 → 发送；失败静默回退幸运色渐变
+            bg_path, job = await self._try_draw_background(event, result, uid, date, salt)
+            card_path = self._try_render_card(result, uid, nickname, avatar, bg_image=bg_path)
+            if job is not None:
+                job["card_path"] = card_path or ""
+                try:
+                    self._store.record_draw_job(uid, date, **job)
+                except Exception:
+                    logger.error(f"[{PLUGIN_NAME}] draw_jobs 落库失败\n{traceback.format_exc()}")
+                if job.get("status") in ("timeout", "error", "skipped_no_anima"):
+                    bg_fail_hint = str(self._cfg("draw_fail_hint", "") or "")
 
         saved = self._store.save_fortune(
             uid, date, result,
@@ -415,6 +535,8 @@ class StarWhisperPlugin(Star):
                 yield event.plain_result(self._format_result(result))
         else:
             yield event.plain_result(self._format_result(result))
+        if bg_fail_hint:
+            yield event.plain_result(bg_fail_hint)
 
     @filter.command("运势榜", alias={"星语榜"})
     async def rank_cmd(self, event: AstrMessageEvent):

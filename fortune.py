@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -211,3 +213,93 @@ def llm_facts(result: dict) -> str:
         f"宜：{'、'.join(result.get('yi') or [])}；忌：{'、'.join(result.get('ji') or [])}\n"
         f"月相：{phase.get('name', '')}"
     )
+
+
+# ---------- M6：anima 底图联动的提示词与响应解析 ----------
+
+DRAW_SYSTEM_HINT = (
+    "You write image-generation prompts for a moe astrology fortune card. "
+    "Output ONLY the prompt itself."
+)
+
+DRAW_GRADE_MOODS_EN = {
+    "大吉": "radiant smile, sparkling eyes, golden sparkles, celebration",
+    "吉": "gentle smile, warm light, soft glow",
+    "中吉": "calm expression, serene, soft pastel mood",
+    "小吉": "shy smile, cute, delicate",
+    "凶": "melancholy, gloomy mood, drizzle",
+    "大凶": "tearful pout, dramatic clouds, under a broken umbrella",
+}
+
+DRAW_GRADE_MOODS_ZH = {
+    "大吉": "光芒四射、喜气洋洋", "吉": "温柔微笑、暖光环绕",
+    "中吉": "平静安详、淡彩氛围", "小吉": "害羞可爱",
+    "凶": "微微忧郁、细雨", "大凶": "委屈嘟嘴、头顶乌云",
+}
+
+
+def builtin_draw_prompt(lang: str, fmt: str) -> str:
+    """生图提示词的 LLM 指令模板（含 anima 提示词语言规范约束，PRD §7.6-3）。"""
+    if lang == "zh":
+        shape = "一段自然流畅的中文画面描述（不要标签堆砌）" if fmt == "natural" else "中文短语式描述"
+        return (
+            "根据下面的事实清单，为一张萌系运势卡插画写{shape}："
+            "一位少女、结合幸运物入画、带星月氛围，不要出现文字。只输出描述本身。\n{facts}"
+        ).format(shape=shape, facts="{facts}")
+    if fmt == "natural":
+        return (
+            "Based on the fortune facts below, write ONE English sentence describing a moe "
+            "anime illustration (no Chinese, no explanations): a girl, the lucky item as a motif, "
+            "star and moon ambience, matching the mood. Output only the sentence.\n{facts}"
+        )
+    return (
+        "Based on the fortune facts below, write ONE line of English Danbooru-style tags for a "
+        "moe anime illustration: comma-separated lowercase tags, no sentences, no Chinese, no "
+        "explanations. Must include 1girl, solo, a mood-matching scene, the lucky item as a motif, "
+        "star and moon ambience, masterpiece, best quality. Output only the tags.\n{facts}"
+    )
+
+
+def local_draw_prompt(result: dict, lang: str, fmt: str) -> str:
+    """LLM 不可用时的本地兜底提示词（吉凶氛围 + 幸运物，PRD §7.6-4）。"""
+    grade = result.get("grade", "")
+    item = str(result.get("lucky_item", "星星"))
+    if lang == "zh":
+        mood = DRAW_GRADE_MOODS_ZH.get(grade, "温柔")
+        return f"一张萌系运势插画：少女与「{item}」，{mood}，星月氛围，淡彩，画质精美"
+    mood = DRAW_GRADE_MOODS_EN.get(grade, "gentle smile")
+    return (
+        f"1girl, solo, {mood}, holding a lucky charm ({item}), "
+        "stars, crescent moon, night sky, soft pastel colors, masterpiece, best quality"
+    )
+
+
+def parse_draw_response(raw) -> list:
+    """解析 anima comfyui_draw 的返回文本 → 本地图片路径列表。
+
+    source 命中约定值时 anima 返回 JSON 文本：{"image_paths": [...], ...}
+    （兼容旧的单数 image_path 字段）；容错：截取花括号段再解析，失败返回空表。
+    """
+    text = str(raw or "")
+    data = {}
+    try:
+        loaded = json.loads(text)
+        if isinstance(loaded, dict):
+            data = loaded
+    except Exception:
+        m = re.search(r"\{.*\}", text, re.S)
+        if m:
+            try:
+                loaded = json.loads(m.group(0))
+                if isinstance(loaded, dict):
+                    data = loaded
+            except Exception:
+                data = {}
+    paths = data.get("image_paths") or []
+    if not paths and data.get("image_path"):
+        paths = [data["image_path"]]
+    out = []
+    for p in paths:
+        if isinstance(p, str) and p.strip():
+            out.append(p.strip())
+    return out

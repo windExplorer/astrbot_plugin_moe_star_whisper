@@ -62,6 +62,7 @@ def main() -> int:
         "fortune_cmd", "rank_cmd", "pk_cmd", "switch_cmd",
         "bind_cmd", "constellation_cmd",
         "_try_render_card", "_try_llm_sign",
+        "_try_draw_background", "_try_build_image_prompt",
         "_push_loop", "_do_daily_push", "_next_push_delay",
         "initialize", "terminate",
     }

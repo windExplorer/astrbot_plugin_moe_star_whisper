@@ -78,6 +78,15 @@ def main() -> int:
     ids = [g for g, _ in st.list_active_group_ids(7)]
     check("wg1" in ids and "wg2" in ids, f"活跃群应含 wg1/wg2，实际 {ids}")
 
+    # 绘图任务落库（M6）
+    st.record_draw_job("u1", "2026-09-27", workflow="wf1", prompt_lang="en",
+                       prompt_fmt="tags", image_prompt="1girl, stars",
+                       llm_prompt="tpl", status="ok", duration_ms=1234,
+                       image_path="bg.png", card_path="card.png")
+    jobs = st.get_draw_jobs("u1", "2026-09-27")
+    check(len(jobs) == 1 and jobs[0]["status"] == "ok" and jobs[0]["duration_ms"] == 1234,
+          "draw_jobs 落库与读回")
+
     st.close()
     if FAILED:
         print(f"\n{len(FAILED)} 项失败")

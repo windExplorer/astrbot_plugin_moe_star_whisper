@@ -2,6 +2,17 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.7.0 (2026-09-27)
+
+M6 anima 底图联动：AI 生成卡面底图（D11 先绘后卡）。
+
+- **契约（已对照 anima 对接文档与源码核实，PRD §7.6）**：`get_llm_tool_manager().get_func("comfyui_draw")` 取 handler 直接 await；`source` 必传 anima 约定值「我会永远陪着你」才返回 JSON `image_paths` 由我方落库发图；`seed`＝运势种子整数化（一人一天一张底图、换签换 seed）、`width/height`＝卡布尺寸（不裁切）；`workflow`/`negative_prompt` 可配透传。
+- **时序（先绘后卡）**：LLM 生成提示词 → comfyui_draw（受 `draw_timeout` 约束，默认 120s）→ 取 `image_paths[0]` → `render_card(bg_image=...)` 合卡 → 落盘 `cards/<qq>/<date>.png` → 一次发送。
+- **提示词约束（D6）**：`draw_prompt_lang`（en/zh）+ `draw_prompt_format`（tags/natural）注入 LLM 模板（`builtin_draw_prompt`，en+tags 按动漫工作流 Danbooru 标签规范）；LLM 失败/空输出回退本地兜底提示词（吉凶氛围 + 幸运物，`local_draw_prompt`）。
+- **降级矩阵**：anima 未装 / 工具未注册 → `skipped_no_anima`；超时 → `timeout`；异常或响应无路径 → `error`。全部静默回退幸运色渐变默认底图，运势卡照常发送；`draw_fail_hint` 可选附加一句提示（默认空=静默）。
+- **draw_jobs 全链路落库（D6/D7）**：workflow/语言/形式/提示词原文/状态/耗时/底图与成品卡路径，`record_draw_job` + `get_draw_jobs`；`fortune.parse_draw_response` 容错解析（image_paths 列表、单数兼容、花括号截取）。
+- 测试：解析 6 组断言、本地/模板提示词断言、draw_jobs 落库读回、结构守卫补 `_try_draw_background`/`_try_build_image_prompt`。
+
 ## v0.6.0 (2026-09-27)
 
 M5 增强：LLM 星语（可选增强，默认关）与每日群推送。

@@ -122,6 +122,23 @@ def main() -> int:
     now = fortune.now_in("UTC")
     check(now.tzinfo is not None, "now_in 应返回 aware datetime")
 
+    # 10) M6：生图提示词与 anima 响应解析
+    tpl = fortune.builtin_draw_prompt("en", "tags")
+    check("Danbooru" in tpl and "{facts}" in tpl, "en+tags 模板应含 Danbooru 约束与 facts 占位")
+    tpl_zh = fortune.builtin_draw_prompt("zh", "natural")
+    check("自然流畅" in tpl_zh and "{facts}" in tpl_zh, "zh+natural 模板应正确")
+    lp = fortune.local_draw_prompt(r1, "en", "tags")
+    check("1girl" in lp and r1["lucky_item"] in lp, "本地兜底提示词应含少女与幸运物")
+    check(fortune.local_draw_prompt(r1, "zh", "natural"), "中文兜底提示词非空")
+    check(fortune.parse_draw_response('{"image_paths": ["a.png", " b.png "]}') == ["a.png", "b.png"],
+          "解析 image_paths 列表")
+    check(fortune.parse_draw_response('{"image_path": "one.png"}') == ["one.png"],
+          "兼容单数 image_path")
+    check(fortune.parse_draw_response('前缀 {"image_paths": ["x.png"]} 后缀') == ["x.png"],
+          "容错截取花括号段")
+    check(fortune.parse_draw_response("绘图完成！") == [], "无路径文本返回空")
+    check(fortune.parse_draw_response(None) == [], "None 返回空")
+
     if FAILED:
         print(f"\n{len(FAILED)} 项失败")
         return 1
