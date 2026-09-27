@@ -73,6 +73,15 @@ if (Test-Path $zipPath) {
     exit 1
 }
 
+function Add-FileToZip($zip, $fsPath, $entryName) {
+    # ZipFileExtensions::CreateEntryFromFile is an extension method and is NOT
+    # callable from PS 5.1 (MethodNotFound) - write the entry manually instead.
+    $entry = $zip.CreateEntry($entryName, [System.IO.Compression.CompressionLevel]::Optimal)
+    $src = [System.IO.File]::OpenRead($fsPath)
+    $dst = $entry.Open()
+    try { $src.CopyTo($dst) } finally { $src.Dispose(); $dst.Dispose() }
+}
+
 $prefix = "$pluginName/"
 $zip = [System.IO.Compression.ZipFile]::Open($zipPath, [System.IO.Compression.ZipArchiveMode]::Create)
 $entryCount = 0
@@ -94,12 +103,12 @@ try {
             Get-ChildItem -LiteralPath $fsPath -Recurse -File | ForEach-Object {
                 $relInside = $_.FullName.Substring($fsPath.Length + 1).Replace('\', '/')
                 $entryName = $prefix + $rel + "/" + $relInside
-                [void]$zip.CreateEntryFromFile($_.FullName, $entryName, [System.IO.Compression.CompressionLevel]::Optimal)
+                Add-FileToZip $zip $_.FullName $entryName
                 $entryCount++
             }
         }
         else {
-            [void]$zip.CreateEntryFromFile($fsPath, $prefix + $rel, [System.IO.Compression.CompressionLevel]::Optimal)
+            Add-FileToZip $zip $fsPath ($prefix + $rel)
             $entryCount++
         }
     }

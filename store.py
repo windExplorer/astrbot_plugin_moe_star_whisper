@@ -1,0 +1,199 @@
+# -*- coding: utf-8 -*-
+"""萌萌星语 · SQLite 存储层（同步 sqlite3，操作均为毫秒级小事务）。
+
+表结构见 PRD §6：fortunes / profiles / items / ledger / draw_jobs（后两张 M7 起用）。
+落库位置固定 data/plugin_data/ 下（StarTools.get_data_dir），升级目录不丢数据。
+一日一签由 fortunes 的 (user_id, date) 主键保证：INSERT OR IGNORE，撞车返回 False。
+"""
+from __future__ import annotations
+
+import json
+import sqlite3
+from datetime import datetime
+from pathlib import Path
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS fortunes (
+  user_id   TEXT NOT NULL,
+  date      TEXT NOT NULL,
+  grade     TEXT NOT NULL,
+  score     INTEGER NOT NULL,
+  payload   TEXT NOT NULL,
+  nickname  TEXT,
+  avatar    TEXT,
+  group_id  TEXT,
+  group_name TEXT,
+  card_path TEXT,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, date)
+);
+CREATE TABLE IF NOT EXISTS profiles (
+  user_id      TEXT PRIMARY KEY,
+  birthday     TEXT,
+  constellation TEXT,
+  nickname     TEXT,
+  avatar       TEXT,
+  streak       INTEGER DEFAULT 0,
+  last_draw_date TEXT,
+  max_streak   INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS items (
+  user_id TEXT NOT NULL,
+  item_id TEXT NOT NULL,
+  count   INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id, item_id)
+);
+CREATE TABLE IF NOT EXISTS ledger (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    TEXT NOT NULL,
+  delta      INTEGER NOT NULL,
+  reason     TEXT NOT NULL,
+  ref_date   TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS draw_jobs (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     TEXT NOT NULL,
+  date        TEXT NOT NULL,
+  workflow    TEXT,
+  prompt_lang TEXT,
+  prompt_fmt  TEXT,
+  image_prompt TEXT,
+  llm_prompt  TEXT,
+  status      TEXT NOT NULL,
+  error       TEXT,
+  duration_ms INTEGER,
+  image_path  TEXT,
+  card_path   TEXT,
+  created_at  TEXT NOT NULL
+);
+"""
+
+
+class Store:
+    def __init__(self, db_path):
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._db = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        self._db.row_factory = sqlite3.Row
+        self._db.execute("PRAGMA journal_mode=WAL")
+        self._db.executescript(SCHEMA)
+        self._db.commit()
+
+    def close(self) -> None:
+        try:
+            self._db.close()
+        except Exception:
+            pass
+
+    # ---------- fortunes ----------
+
+    def get_fortune(self, user_id: str, date: str) -> dict | None:
+        row = self._db.execute(
+            "SELECT * FROM fortunes WHERE user_id=? AND date=?", (user_id, date)
+        ).fetchone()
+        if row is None:
+            return None
+        data = dict(row)
+        data["payload"] = json.loads(data.get("payload") or "{}")
+        return data
+
+    def save_fortune(
+        self,
+        user_id: str,
+        date: str,
+        result: dict,
+        nickname: str = "",
+        avatar: str = "",
+        group_id: str = "",
+        group_name: str = "",
+        card_path: str = "",
+    ) -> bool:
+        """写入当日签；主键冲突（当日已签）时忽略并返回 False，由调用方读回已存记录。"""
+        cur = self._db.execute(
+            "INSERT OR IGNORE INTO fortunes (user_id, date, grade, score, payload,"
+            " nickname, avatar, group_id, group_name, card_path, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                user_id,
+                date,
+                str(result.get("grade", "")),
+                int(result.get("score", 0)),
+                json.dumps(result, ensure_ascii=False),
+                nickname,
+                avatar,
+                group_id,
+                group_name,
+                card_path,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            ),
+        )
+        self._db.commit()
+        return cur.rowcount == 1
+
+    def list_day(self, date: str) -> list[dict]:
+        """当日全部抽签记录（榜单/PK 用，M3 接线）。"""
+        rows = self._db.execute(
+            "SELECT * FROM fortunes WHERE date=? ORDER BY score DESC", (date,)
+        ).fetchall()
+        out = []
+        for row in rows:
+            data = dict(row)
+            data["payload"] = json.loads(data.get("payload") or "{}")
+            out.append(data)
+        return out
+
+    # ---------- profiles ----------
+
+    def get_profile(self, user_id: str) -> dict | None:
+        row = self._db.execute(
+            "SELECT * FROM profiles WHERE user_id=?", (user_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def upsert_profile(self, user_id: str, **fields) -> None:
+        row = self.get_profile(user_id) or {
+            "user_id": user_id,
+            "birthday": None,
+            "constellation": None,
+            "nickname": None,
+            "avatar": None,
+            "streak": 0,
+            "last_draw_date": None,
+            "max_streak": 0,
+        }
+        for key, value in fields.items():
+            if value is not None:
+                row[key] = value
+        self._db.execute(
+            "INSERT OR REPLACE INTO profiles (user_id, birthday, constellation, nickname,"
+            " avatar, streak, last_draw_date, max_streak) VALUES (?,?,?,?,?,?,?,?)",
+            (
+                user_id,
+                row.get("birthday"),
+                row.get("constellation"),
+                row.get("nickname"),
+                row.get("avatar"),
+                int(row.get("streak") or 0),
+                row.get("last_draw_date"),
+                int(row.get("max_streak") or 0),
+            ),
+        )
+        self._db.commit()
+
+    def bump_streak(self, user_id: str, date: str, yesterday: str) -> int:
+        """首签时推进连续天数（幂等：当天重复调用不变）。"""
+        row = self.get_profile(user_id) or {}
+        last = row.get("last_draw_date")
+        streak = int(row.get("streak") or 0)
+        if last == date:
+            pass
+        elif last == yesterday:
+            streak += 1
+        else:
+            streak = 1
+        max_streak = max(int(row.get("max_streak") or 0), streak)
+        self.upsert_profile(
+            user_id, streak=streak, last_draw_date=date, max_streak=max_streak
+        )
+        return streak

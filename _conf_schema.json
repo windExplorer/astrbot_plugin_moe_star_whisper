@@ -1,0 +1,142 @@
+{
+  "timezone": {
+    "description": "「今天」的时区（影响每日换签时刻），IANA 名称",
+    "type": "string",
+    "default": "Asia/Shanghai"
+  },
+  "salt": {
+    "description": "运势种子盐值（改动即全员重掷，请勿随意变更）",
+    "type": "string",
+    "default": "moe-star-whisper"
+  },
+  "grade_weights": {
+    "description": "吉凶档权重：大吉/吉/中吉/小吉/凶/大凶（相对权重，合计任意）",
+    "type": "object",
+    "default": {
+      "大吉": 20,
+      "吉": 25,
+      "中吉": 25,
+      "小吉": 15,
+      "凶": 10,
+      "大凶": 5
+    }
+  },
+  "output_mode": {
+    "description": "回复方式（图卡渲染失败自动回退纯文本）",
+    "type": "string",
+    "options": ["图卡", "纯文本", "图卡+文本"],
+    "default": "图卡"
+  },
+  "card_font_path": {
+    "description": "图卡字体路径（留空则按 插件data/fonts→data/plugin_data/fonts→data/fonts→系统 顺序查找）",
+    "type": "string",
+    "default": ""
+  },
+  "card_width": {
+    "description": "卡面画布宽（同时透传给 anima 作为出图宽）",
+    "type": "int",
+    "default": 1024
+  },
+  "card_height": {
+    "description": "卡面画布高（同时透传给 anima 作为出图高）",
+    "type": "int",
+    "default": 1536
+  },
+  "fortune_signer": {
+    "description": "卡面落款人设名",
+    "type": "string",
+    "default": "星语者"
+  },
+  "llm_enabled": {
+    "description": "LLM 星语：对当日签文做个性化扩写（可选增强，默认关；M5 上线）",
+    "type": "bool",
+    "default": false
+  },
+  "llm_prompt_persona": {
+    "description": "LLM 星语人设提示词（留空用内置模板）",
+    "type": "string",
+    "default": ""
+  },
+  "daily_push_enabled": {
+    "description": "每日群推送（M5 上线）",
+    "type": "bool",
+    "default": false
+  },
+  "daily_push_time": {
+    "description": "每日推送时刻 HH:MM",
+    "type": "string",
+    "default": "08:00"
+  },
+  "disabled_groups": {
+    "description": "默认停用的群号（逗号分隔；群内也可用 /运势开关 切换）",
+    "type": "string",
+    "default": ""
+  },
+  "draw_enabled": {
+    "description": "绘图联动总开关（M6 上线，需安装 astrbot-comfyui-anima）",
+    "type": "bool",
+    "default": false
+  },
+  "draw_workflow": {
+    "description": "anima 工作流名（留空=anima 默认；用 anima 的 /绘图工作流 查名后填）",
+    "type": "string",
+    "default": ""
+  },
+  "draw_prompt_lang": {
+    "description": "绘图提示词语言（en=动漫标签 / zh=真人自然语言）",
+    "type": "string",
+    "options": ["en", "zh"],
+    "default": "en"
+  },
+  "draw_prompt_format": {
+    "description": "提示词形式（tags=英文标签 / natural=自然语言）",
+    "type": "string",
+    "options": ["tags", "natural"],
+    "default": "tags"
+  },
+  "draw_llm_prompt": {
+    "description": "生成绘图提示词的 LLM 模板（留空用内置模板，注入当日运势事实）",
+    "type": "string",
+    "default": ""
+  },
+  "draw_negative_prompt": {
+    "description": "附加负向提示词（透传 anima）",
+    "type": "string",
+    "default": ""
+  },
+  "draw_timeout": {
+    "description": "等待出图上限（秒）",
+    "type": "int",
+    "default": 120
+  },
+  "draw_fail_hint": {
+    "description": "底图生成失败回退默认底图时附加的提示（默认空=静默）",
+    "type": "string",
+    "default": ""
+  },
+  "economy_enabled": {
+    "description": "道具经济（星尘/商店，M7 上线）",
+    "type": "bool",
+    "default": true
+  },
+  "item_prices": {
+    "description": "道具价格：reroll/amulet/streak_guard/candle",
+    "type": "object",
+    "default": {
+      "reroll": 80,
+      "amulet": 50,
+      "streak_guard": 30,
+      "candle": 20
+    }
+  },
+  "draw_reward_base": {
+    "description": "每日抽签基础星尘",
+    "type": "int",
+    "default": 10
+  },
+  "item_hold_cap": {
+    "description": "单道具持有上限",
+    "type": "int",
+    "default": 3
+  }
+}
