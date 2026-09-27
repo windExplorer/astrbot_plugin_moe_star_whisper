@@ -134,6 +134,18 @@
     "type": "string",
     "default": ""
   },
+  "draw_silent": {
+    "description": "静默生图",
+    "hint": "调用 anima 绘图时不发任何过程消息（处理中/排队/结果卡，图片由本插件发送）；需 anima v7.7.46+，关闭后恢复 anima 原生提示",
+    "type": "bool",
+    "default": true
+  },
+  "draw_raw_prompt": {
+    "description": "提示词透传",
+    "hint": "本插件的提示词已按 anima 语言规范生成，开启后跳过 anima 内部的 LLM 扩写与中译英处理（需 anima v7.7.46+）",
+    "type": "bool",
+    "default": true
+  },
   "draw_timeout": {
     "description": "出图超时",
     "hint": "等待 anima 出图的秒数上限；anima 单张实测约 20-25 秒，超时后静默回退默认底图",

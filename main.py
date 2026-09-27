@@ -56,7 +56,7 @@ except Exception:  # pragma: no cover
     render_card = None
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.6.3")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.7.0")
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         # ⚠️ 必须接受 config kwarg：star_manager 注入 AstrBotConfig 时若构造函数
@@ -282,14 +282,19 @@ class StarWhisperPlugin(Star):
             prompt=image_prompt,
             source="我会永远陪着你",
             seed=seed_int,
-            width=int(self._cfg("card_width", 1024)),
-            height=int(self._cfg("card_height", 1536)),
+            width=int(self._cfg("card_width", 700)),
+            height=int(self._cfg("card_height", 1200)),
         )
         if job["workflow"]:
             kwargs["workflow"] = job["workflow"]
         negative = str(self._cfg("draw_negative_prompt", "") or "")
         if negative:
             kwargs["negative_prompt"] = negative
+        # anima v7.7.46+：静默生图（不发过程消息）与提示词透传（跳过其 LLM 处理/翻译）
+        if bool(self._cfg("draw_silent", True)):
+            kwargs["silent"] = True
+        if bool(self._cfg("draw_raw_prompt", True)):
+            kwargs["raw_prompt"] = True
 
         t0 = time.monotonic()
         try:
