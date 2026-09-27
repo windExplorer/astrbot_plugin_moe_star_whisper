@@ -422,10 +422,10 @@ def render_tarot_card(
         line_rgb = (238, 236, 242, 255)
     disp = _display_font_file(font_file)
 
-    canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    canvas = Image.new("RGBA", (W, H), (8, 8, 12, 255))
 
     # ---- 左联：AI 牌面（塔罗框 + 底部牌名条） ----
-    side = _contain(Image.open(bg_image).convert("RGB"), SW, H, (24, 22, 46)).convert("RGBA")
+    side = _contain(Image.open(bg_image).convert("RGB"), SW, H, (8, 8, 12)).convert("RGBA")
     canvas.paste(side, (0, 0))
     sdraw = ImageDraw.Draw(canvas)
     sdraw.rectangle([6, 6, SW - 7, H - 7], outline=gold + (235,), width=max(2, int(3 * u)))
@@ -447,18 +447,14 @@ def render_tarot_card(
     _sparkle(sdraw, SW * 0.86, H * 0.08, 13 * u, gold, 200)
 
     # ---- 右联：幸运色渐变面板（顶浓底淡） ----
-    grad = _gradient(SW, H, lucky_rgb, dark=dark,
-                     top_mix=(0.50 if not dark else 0.74),
-                     bottom_mix=(0.90 if not dark else 0.92)).convert("RGBA")
-    canvas.paste(grad, (SW, 0))
-    inset = int(12 * u)
-    pw, ph = SW - inset, H - inset
-    panel = _panel_base(pw, ph, lucky_rgb, dark, int(18 * u))
-    canvas.paste(panel, (SW + inset // 2, inset // 2), panel)
+    bw = int(10 * u)
+    pw, ph = SW - bw * 2, H - bw * 2
+    panel = _panel_base(pw, ph, lucky_rgb, dark, 0)
+    canvas.paste(panel, (SW + bw, bw))
     draw = ImageDraw.Draw(canvas)
-    # 塔罗式双线金框：外粗内细，与左联呼应
-    draw.rectangle([SW + 6, 6, W - 7, H - 7], outline=gold + (235,), width=max(2, int(3 * u)))
-    draw.rectangle([SW + int(12 * u), int(12 * u), W - int(13 * u), H - int(13 * u)],
+    # 塔罗式双线金框：画在内嵌面板边缘，金边之外露黑
+    draw.rectangle([SW + bw, bw, W - bw, H - bw], outline=gold + (235,), width=max(2, int(3 * u)))
+    draw.rectangle([SW + bw + int(6 * u), bw + int(6 * u), W - bw - int(6 * u), H - bw - int(6 * u)],
                    outline=gold + (150,), width=1)
     _sparkle(draw, SW + (W - SW) * 0.5, int(18 * u), int(9 * u), gold, 220)
 
