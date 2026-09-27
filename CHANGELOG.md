@@ -2,6 +2,16 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v1.8.7 (2026-09-28)
+
+修复「当日第二次抽签退回纯文本」（版本 v1.8.6 -> v1.8.7）。
+
+- **现象**：同一天第二次发 `/星语`，回来的是纯文本签面（带「今天已经抽过啦」前缀），而不是首签那张图卡。
+- **根因**：`card_path` 存在 `fortunes` 表的**独立列**里，`payload` JSON 中从来就没有这个键；而「一日一签」复用分支读的是 `payload.get("card_path")` → 永远为空 → 必然走纯文本回退。首签之所以正常，是因为那条路径用的是渲染返回的局部变量，绕开了 payload。
+- **修复（读取点全部改为「行内列优先、payload 兜底」）**：`fortune_cmd` 复用分支与并发撞车分支；`webui_api._fortune_summary`（调试面板 `has_card` 恒 false 是同一个根因）、`webui_api._remove_card`（此前 reset/重绘都删不掉旧卡文件）、重抽返回的摘要（`card_path` 透传）。
+- **顺带对齐**：`output_mode=图卡+文本` 时第二次也补发文本签面，与首签行为一致（此前只有图卡路径会附加文本）。
+- 测试：`test_store` 新增「card_path 只落列、payload 不含该键」结构锁定；`test_webui` 摘要用例改走行内列并保留 payload 旧数据兜底用例；`test_main_structure` 新增源码守卫——复用分支必须读 `existing["card_path"]`。
+
 ## v1.8.6 (2026-09-28)
 
 AI 封面图不再出现男性角色（版本 v1.8.5 -> v1.8.6）。

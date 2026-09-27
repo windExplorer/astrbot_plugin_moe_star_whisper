@@ -80,7 +80,8 @@ def _salt(plugin) -> str:
 
 def _fortune_summary(row) -> dict:
     payload = (row or {}).get("payload") or {}
-    card_path = str(payload.get("card_path") or "")
+    # card_path 权威来源是 fortunes 行内的独立列；payload 里的同名键仅作旧数据兜底
+    card_path = str((row or {}).get("card_path") or payload.get("card_path") or "")
     return {
         "grade": payload.get("grade_display") or payload.get("grade", "？"),
         "score": payload.get("score"),
@@ -109,7 +110,11 @@ def _last_ok_bg(plugin, uid: str, date: str):
 
 
 def _remove_card(plugin, row) -> None:
-    card_file = ((row or {}).get("payload") or {}).get("card_path") or ""
+    card_file = str(
+        (row or {}).get("card_path")
+        or ((row or {}).get("payload") or {}).get("card_path")
+        or ""
+    )
     if card_file and Path(card_file).exists():
         try:
             Path(card_file).unlink()
@@ -219,7 +224,8 @@ async def h_debug_redraw(plugin) -> dict:
     )
     plugin._store.update_fortune_payload(uid, date, result, card_path or "")
     return ok({
-        "fortune": _fortune_summary({"payload": result, "nickname": existing.get("nickname")}),
+        "fortune": _fortune_summary({"payload": result, "nickname": existing.get("nickname"),
+                                     "card_path": card_path or ""}),
         "card_path": card_path or "",
         "ai_bg_reused": bool(bg),
         "note": "重抽不含新绘 AI 底图（WebUI 无聊天事件），底图为复用或默认渐变",

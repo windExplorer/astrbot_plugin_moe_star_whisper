@@ -90,6 +90,11 @@ def main() -> int:
                  "MessageChain", "Plain", "Image", "At"):
         check(must in names, f"模块级缺少名字定义: {must}（import 块可能被误删）")
 
+    # 抽签复用分支必须从 fortunes 行读 card_path：该字段是独立列，payload JSON 里
+    # 没有这个键（v1.8.6 及以前只读 payload → 当日第二次抽签必然退回纯文本）
+    check('existing.get("card_path")' in src,
+          "fortune_cmd 复用分支必须读 existing['card_path']（列），不能只读 payload")
+
     # 调试面板（M7.5）：后端模块与页面文件必须存在，聊天侧不得再出现调试指令
     root = Path(__file__).resolve().parents[1]
     check((root / "webui_api.py").is_file(), "缺少 webui_api.py（调试面板后端）")

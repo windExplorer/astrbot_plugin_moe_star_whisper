@@ -654,9 +654,13 @@ class StarWhisperPlugin(Star):
         existing = self._store.get_fortune(uid, date)
         if existing is not None:
             payload = existing.get("payload") or {}
-            card_path = payload.get("card_path") or ""
+            # ⚠️ card_path 是 fortunes 表的独立列，payload JSON 里没有该键
+            # （v1.8.7 前的 bug：只读 payload → 当日第二次抽签必然退回纯文本）
+            card_path = str(existing.get("card_path") or payload.get("card_path") or "")
             if card_path and Path(card_path).exists():
                 yield event.image_result(card_path)
+                if str(self._cfg("output_mode", "图卡")) == "图卡+文本":
+                    yield event.plain_result(self._format_result(payload, repeat=True))
             else:
                 yield event.plain_result(self._format_result(payload, repeat=True))
             return
@@ -699,7 +703,9 @@ class StarWhisperPlugin(Star):
         if not saved:  # 并发撞车：读回已存的那份
             existing = self._store.get_fortune(uid, date)
             payload = (existing or {}).get("payload") or result
-            card_path = payload.get("card_path") or card_path
+            card_path = str(
+                (existing or {}).get("card_path") or payload.get("card_path") or card_path or ""
+            )
             if card_path and Path(card_path).exists():
                 yield event.image_result(card_path)
             else:

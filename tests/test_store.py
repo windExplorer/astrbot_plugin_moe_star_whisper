@@ -42,6 +42,13 @@ def main() -> int:
         check(row["payload"].get("grade") == result["grade"], "payload 往返一致")
         check(row["nickname"] == "测试君" and row["group_id"] == "g1", "身份快照入库")
 
+    # card_path 只存在 fortunes 的独立列（payload 里没有该键）——v1.8.7 的
+    # 「当日第二次抽签退回纯文本」正是读取方误读 payload 造成的，这里锁死结构。
+    st.save_fortune("c1", "2026-09-27", {"grade": "吉", "score": 60}, card_path="card-c1.png")
+    crow = st.get_fortune("c1", "2026-09-27")
+    check(crow["card_path"] == "card-c1.png", "card_path 落列并可读回")
+    check("card_path" not in crow["payload"], "payload 不含 card_path（读取方必须取列）")
+
     # streak：首日 1 → 同日幂等 → 次日 2 → 断签回 1
     s1 = st.bump_streak("u1", "2026-09-27", "2026-09-26")
     s2 = st.bump_streak("u1", "2026-09-27", "2026-09-26")

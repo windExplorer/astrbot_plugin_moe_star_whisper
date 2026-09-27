@@ -73,12 +73,18 @@ async def main_async() -> int:
           and r["data"]["items"]["candle"] == 3 and r["data"]["config"]["draw_enabled"] is True,
           "core：余额/背包/配置齐备")
 
-    row = {"nickname": "测试", "avatar": "", "payload": {
+    # card_path 权威来源是行内列，payload 同名键仅旧数据兜底（v1.8.7）
+    row = {"nickname": "测试", "avatar": "", "card_path": "", "payload": {
         "grade": "吉", "score": 77, "streak": 4, "sign_text": "今天不错。",
-        "lucky_color": {"name": "樱粉"}, "card_path": ""}}
+        "lucky_color": {"name": "樱粉"}}}
     r = webui_api._debug_state_core(FakeStore(row), cfg, "10086", "2026-09-27")
     check(r["data"]["fortune"]["grade"] == "吉" and r["data"]["fortune"]["score"] == 77,
           "core：有签记录摘要完整")
+    check(webui_api._fortune_summary(
+        {"card_path": "a.png", "payload": {"card_path": "b.png"}})["card_path"] == "a.png",
+        "摘要卡片路径以行内列为准")
+    check(webui_api._fortune_summary({"payload": {"card_path": "b.png"}})["card_path"] == "b.png",
+        "摘要卡片路径兼容 payload 旧数据")
 
     # reset core：无记录 err；有记录删卡+删行
     r = webui_api._debug_reset_core(FakeStore(), "10086", "2026-09-27")
@@ -87,7 +93,8 @@ async def main_async() -> int:
     import tempfile
     card_file = Path(tempfile.mkdtemp(prefix="moe_webui_")) / "card.png"
     card_file.write_bytes(b"x")
-    row2 = {"nickname": "测试", "avatar": "", "payload": {"grade": "吉", "card_path": str(card_file)}}
+    row2 = {"nickname": "测试", "avatar": "", "card_path": str(card_file),
+            "payload": {"grade": "吉"}}
     fs = FakeStore(row2)
     r = webui_api._debug_reset_core(fs, "10086", "2026-09-27")
     check(r["status"] == "ok" and fs.deleted and not card_file.exists(),
