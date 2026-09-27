@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>萌萌星语 · 调试面板</title>
+<style>
+  :root { --ink:#4a4a60; --sub:#9696a8; --line:#eeecf2; --accent:#e86a8a; --ok:#3a9a5c; --warn:#d88; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:20px; font-family:"Microsoft YaHei","PingFang SC",sans-serif;
+         color:var(--ink); background:linear-gradient(180deg,#faf6f4,#f4f2fa); min-height:100vh; }
+  .wrap { max-width:860px; margin:0 auto; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--sub); font-size:12px; margin-bottom:16px; }
+  .card { background:#fff; border-radius:14px; padding:16px 18px; margin-bottom:14px;
+          box-shadow:0 2px 10px rgba(120,100,140,.08); }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  input[type=text] { flex:1; min-width:200px; padding:9px 12px; border:1px solid var(--line);
+                     border-radius:9px; font-size:14px; outline:none; }
+  input[type=text]:focus { border-color:var(--accent); }
+  button { padding:9px 16px; border:none; border-radius:9px; font-size:14px; cursor:pointer;
+           background:#f2eef6; color:var(--ink); }
+  button.primary { background:var(--accent); color:#fff; }
+  button.danger { background:#fdeeee; color:#c05656; }
+  button:disabled { opacity:.5; cursor:default; }
+  .msg { margin-top:10px; font-size:13px; white-space:pre-wrap; word-break:break-all; }
+  .msg.err { color:#c05656; }
+  .kv { display:grid; grid-template-columns:96px 1fr; gap:4px 10px; font-size:13px; margin-top:8px; }
+  .kv b { color:var(--sub); font-weight:normal; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:8px; font-size:12px;
+         background:#f2eef6; margin-right:4px; }
+  .tag.ok { background:#e6f4ea; color:var(--ok); }
+  .tag.bad { background:#fdeeee; color:#c05656; }
+  table { width:100%; border-collapse:collapse; font-size:12px; margin-top:8px; }
+  th,td { text-align:left; padding:5px 8px; border-bottom:1px solid var(--line); }
+  th { color:var(--sub); font-weight:normal; }
+  .hidden { display:none; }
+  code { background:#f6f2f8; padding:1px 5px; border-radius:5px; font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🌙 萌萌星语 · 调试面板</h1>
+  <div class="sub">仅管理员使用 · 操作对象为任意 QQ 号的「今日签」（时区按插件配置）</div>
+
+  <div class="card">
+    <div class="row">
+      <input type="text" id="uid" placeholder="要调试的 QQ 号，例如 10086">
+      <button class="primary" id="btnState">查状态</button>
+      <span id="cfgTags"></span>
+    </div>
+    <div class="msg" id="msgTop"></div>
+  </div>
+
+  <div class="card hidden" id="fortuneCard">
+    <div class="row" style="justify-content:space-between">
+      <b>今日签 <span id="fDate" class="sub"></span></b>
+      <span>
+        <button id="btnRedraw">重抽（换种子，复用底图）</button>
+        <button id="btnRerender">重绘（改卡面后看效果）</button>
+        <button class="danger" id="btnReset">重置（删除今日记录）</button>
+      </span>
+    </div>
+    <div class="kv" id="fortuneKv"></div>
+    <div class="msg" id="signText" style="margin-top:10px"></div>
+    <div class="msg sub" id="cardPath"></div>
+  </div>
+
+  <div class="card hidden" id="profileCard">
+    <b style="font-size:14px">档案 / 背包 / 配置</b>
+    <div class="kv" id="profileKv"></div>
+  </div>
+
+  <div class="card hidden" id="jobsCard">
+    <b style="font-size:14px">绘图任务（当日最近 10 条）</b>
+    <table>
+      <thead><tr><th>#</th><th>状态</th><th>工作流</th><th>耗时</th><th>错误</th></tr></thead>
+      <tbody id="jobsBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+(function () {
+  var bridge = null;
+  var waiting = 0;
+
+  function getBridge(cb) {
+    // 页面跑在 sandbox iframe（无 allow-same-origin），只通过官方桥通信；
+    // 本地 file:// 打开时没有桥，提示注入桩桥查看静态效果。
+    if (bridge) return cb(bridge);
+    if (window.AstrBotPluginPage && window.AstrBotPluginPage.apiGet) {
+      bridge = window.AstrBotPluginPage;
+      return cb(bridge);
+    }
+    if (waiting++ > 40) {
+      showMsg("未检测到 AstrBotPluginPage 桥：请从 AstrBot Dashboard 的插件页打开本页面。", true);
+      return;
+    }
+    setTimeout(function () { getBridge(cb); }, 250);
+  }
+
+  function $(id) { return document.getElementById(id); }
+  function showMsg(text, isErr) {
+    var el = $("msgTop");
+    el.textContent = text || "";
+    el.className = "msg" + (isErr ? " err" : "");
+  }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+  function busy(b) {
+    ["btnState", "btnRedraw", "btnRerender", "btnReset"].forEach(function (id) {
+      $(id).disabled = b;
+    });
+  }
+  function uid() { return $("uid").value.trim(); }
+
+  function call(method, path, body) {
+    busy(true);
+    var p;
+    if (method === "POST") {
+      p = bridge.apiPost(path, body || {});
+    } else {
+      p = bridge.apiGet(path, body || { _t: Date.now() });
+    }
+    return p.finally(function () { busy(false); });
+  }
+
+  function renderState(d) {
+    var hasF = !!d.fortune;
+    $("fortuneCard").className = "card" + (hasF ? "" : " hidden");
+    $("profileCard").className = "card";
+    $("jobsCard").className = "card" + (d.draw_jobs && d.draw_jobs.length ? "" : " hidden");
+    if (hasF) {
+      var f = d.fortune;
+      $("fDate").textContent = "· " + d.date;
+      $("fortuneKv").innerHTML =
+        "<b>吉凶 / 指数</b><span><span class='tag'>" + esc(f.grade) + "</span>" +
+        esc(f.score == null ? "？" : f.score) + " 分</span>" +
+        "<b>状态</b><span>" +
+        (f.reroll_count > 0 ? "<span class='tag'>已换签 ×" + esc(f.reroll_count) + "</span>" : "") +
+        (f.llm_used ? "<span class='tag ok'>LLM 签文</span>" : "") +
+        (f.has_card ? "<span class='tag ok'>卡已生成</span>" : "<span class='tag bad'>无卡文件</span>") +
+        "</span>" +
+        "<b>连签</b><span>" + esc(f.streak == null ? "？" : f.streak) + " 天</span>" +
+        "<b>幸运色</b><span>" + esc(f.lucky_color || "？") + "</span>" +
+        "<b>星尘/背包</b><span>余额 " + esc(d.balance) +
+        " ｜ 换签卡 ×" + esc(d.items.reroll) + " 护身符 ×" + esc(d.items.amulet) +
+        " 保护卡 ×" + esc(d.items.streak_guard) + " 香烛 ×" + esc(d.items.candle) + "</span>";
+      $("signText").textContent = f.sign_text || "";
+      $("cardPath").textContent = f.card_path ? ("卡路径：" + f.card_path) : "";
+    }
+    var p = d.profile || {};
+    var c = d.config || {};
+    $("profileKv").innerHTML =
+      "<b>星座 / 生日</b><span>" + esc(p.constellation || "未绑定") +
+      " ｜ " + esc(p.birthday || "未绑定") + "（不展示给他人）</span>" +
+      "<b>连签</b><span>当前 " + esc(p.streak) + " / 最高 " + esc(p.max_streak) +
+      " ｜ 上次 " + esc(p.last_draw_date || "无") + "</span>" +
+      "<b>关键配置</b><span>" +
+      "<span class='tag " + (c.draw_enabled ? "ok" : "") + "'>绘图 " + (c.draw_enabled ? "开" : "关") + "</span>" +
+      "<span class='tag " + (c.llm_enabled ? "ok" : "") + "'>LLM " + (c.llm_enabled ? "开" : "关") + "</span>" +
+      "<span class='tag'>输出 " + esc(c.output_mode || "?") + "</span>" +
+      "<span class='tag'>主题 " + esc(c.card_theme || "?") + "</span>" +
+      "<span class='tag'>推送 " + (c.daily_push_enabled ? esc(c.daily_push_time) : "关") + "</span>" +
+      (c.draw_workflow ? "<span class='tag'>工作流 " + esc(c.draw_workflow) + "</span>" : "") +
+      "</span>";
+    var body = $("jobsBody");
+    body.innerHTML = "";
+    (d.draw_jobs || []).forEach(function (j) {
+      var tr = document.createElement("tr");
+      tr.innerHTML =
+        "<td>" + esc(j.id) + "</td>" +
+        "<td><span class='tag " + (j.status === "ok" ? "ok" : (j.status === "disabled" ? "" : "bad")) + "'>" +
+        esc(j.status) + "</span></td>" +
+        "<td>" + esc(j.workflow || "默认") + "</td>" +
+        "<td>" + esc(j.duration_ms == null ? "？" : j.duration_ms + "ms") + "</td>" +
+        "<td>" + esc(j.error || "") + "</td>";
+      body.appendChild(tr);
+    });
+  }
+
+  function loadState(keepMsg) {
+    var u = uid();
+    if (!u) { showMsg("先填 QQ 号", true); return; }
+    getBridge(function (b) {
+      call("GET", "debug/state", { uid: u }).then(function (d) {
+        if (!keepMsg) showMsg("");
+        renderState(d);
+      }).catch(function (e) { showMsg("查询失败：" + e.message, true); });
+    });
+  }
+
+  function act(path, confirmText) {
+    var u = uid();
+    if (!u) { showMsg("先填 QQ 号", true); return; }
+    if (confirmText && !window.confirm(confirmText)) return;
+    getBridge(function (b) {
+      call("POST", path, { uid: u }).then(function (d) {
+        var f = d.fortune || {};
+        loadState(true);
+        showMsg("完成。" + (d.note || "") + (f.grade ? ("（" + f.grade + " · " + f.score + " 分）") : ""));
+      }).catch(function (e) { showMsg("操作失败：" + e.message, true); });
+    });
+  }
+
+  $("btnState").onclick = loadState;
+  $("uid").addEventListener("keydown", function (e) { if (e.key === "Enter") loadState(); });
+  $("btnRedraw").onclick = function () {
+    act("debug/redraw", "重抽会换种子重算该用户的今日签（复用当日底图），确认？");
+  };
+  $("btnRerender").onclick = function () {
+    act("debug/rerender", "按已存结果重渲染卡面（不重抽），确认？");
+  };
+  $("btnReset").onclick = function () {
+    act("debug/reset", "确认删除该用户今日签记录与卡文件？（星尘会随重抽再次发放）");
+  };
+})();
+</script>
+</body>
+</html>

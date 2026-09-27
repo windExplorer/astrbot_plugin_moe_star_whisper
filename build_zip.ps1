@@ -43,6 +43,8 @@ $includeList = @(
     "fortune.py",
     "lexicon.py",
     "store.py",
+    "webui_api.py",
+    "pages",
     "metadata.yaml",
     "_conf_schema.json",
     "requirements.txt",
@@ -87,7 +89,7 @@ $zip = [System.IO.Compression.ZipFile]::Open($zipPath, [System.IO.Compression.Zi
 $entryCount = 0
 try {
     # explicit directory entries first (AstrBot needs them)
-    foreach ($d in @("$pluginName/", "$pluginName/data/", "$pluginName/data/lexicon/")) {
+    foreach ($d in @("$pluginName/", "$pluginName/data/", "$pluginName/data/lexicon/", "$pluginName/pages/", "$pluginName/pages/debug/")) {
         [void]$zip.CreateEntry($d)
         $entryCount++
     }

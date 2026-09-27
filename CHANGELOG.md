@@ -2,6 +2,16 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v1.2.0 (2026-09-27)
+
+调试迁移到 WebUI：插件 Page 调试面板（仅管理员），撤掉 v1.1.0 的聊天调试指令。
+
+- **`pages/debug/index.html`（单文件面板，零依赖原生 JS）**：输入任意 QQ 号 → 查看今日签摘要（吉凶/指数/签文/连签/星尘与背包/卡文件状态）、档案与关键配置标签、当日绘图任务表（状态/工作流/耗时/错误）；操作按钮：重抽（换种子重算 + LLM 签文 + 复用当日 AI 底图渲染）、重绘（按已存结果重渲染，改卡面样式后看效果）、重置（删记录与卡文件，带确认）。
+- **`webui_api.py`（桥接 API）**：`/debug/state|redraw|rerender|reset` 四路由，经 `register_web_api` 挂 Dashboard 登录墙内（沿 user_gateway 控制台访问口径，仅管理员账号使用）；返回信封严格遵循 AstrBot 桥接约定（`status=ok/error`）；uid 支持 query/body 双通道。后端核心逻辑抽成 `_debug_state_core` / `_debug_reset_core` 纯函数，脱离 quart 可直测。
+- **边界说明**：WebUI 触发没有聊天事件，重抽不新绘 anima AI 底图（复用当日 `draw_jobs` 成功记录或默认渐变）；AI 底图新绘仍由聊天内抽签/换签触发。
+- **撤回**：v1.1.0 的 `/运势调试` 聊天指令移除（结构守卫反向锁定：main.py 不得再出现 debug_cmd）。
+- 测试：新增 `tests/test_webui.py`（信封形状、缺 uid/未初始化错误路径、state/reset core 含删卡验证），六套测试全绿。
+
 ## v1.1.0 (2026-09-27)
 
 调试支持：`/运势调试`（仅 AstrBot 管理员，测试期用）。

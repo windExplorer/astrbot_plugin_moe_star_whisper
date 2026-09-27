@@ -62,7 +62,6 @@ def main() -> int:
         "fortune_cmd", "rank_cmd", "pk_cmd", "switch_cmd",
         "bind_cmd", "constellation_cmd",
         "wallet_cmd", "shop_cmd", "buy_cmd", "use_cmd", "makeup_cmd", "grant_cmd",
-        "debug_cmd",
         "_roll_daily", "_economy_on", "_price_of",
         "_try_render_card", "_try_llm_sign",
         "_try_draw_background", "_try_build_image_prompt",
@@ -76,6 +75,12 @@ def main() -> int:
     for must in ("render_card", "render_push_card", "PLUGIN_NAME",
                  "MessageChain", "Plain", "Image", "At"):
         check(must in names, f"模块级缺少名字定义: {must}（import 块可能被误删）")
+
+    # 调试面板（M7.5）：后端模块与页面文件必须存在，聊天侧不得再出现调试指令
+    root = Path(__file__).resolve().parents[1]
+    check((root / "webui_api.py").is_file(), "缺少 webui_api.py（调试面板后端）")
+    check((root / "pages" / "debug" / "index.html").is_file(), "缺少 pages/debug/index.html（调试面板页面）")
+    check("debug_cmd" not in methods, "聊天侧不应再有 debug_cmd（调试已移至 WebUI 面板）")
 
     if FAILED:
         print(f"\n{len(FAILED)} 项失败")
