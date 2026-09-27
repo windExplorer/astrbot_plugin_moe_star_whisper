@@ -2,6 +2,15 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v1.6.2 (2026-09-27)
+
+调试面板：QQ 号历史记录。
+
+- 面板记录最近调试过的 QQ 号（新表 `debug_history`，服务端 SQLite 持久——sandbox iframe 里不能用 localStorage），以可点击标签显示在输入框下方，点一下自动填充并查询。
+- 查询状态/重抽/重绘/重置任一操作都会刷新该 uid 的最近使用时间；历史按最近使用排序、去重、最多 8 个。
+- 新增 `GET /debug/history`（页面打开即拉取历史）；`/debug/state` 响应附带 `recent_uids` 同步刷新标签。
+- store：`record_debug_uid` / `list_debug_uids`；测试补去重与排序断言。
+
 ## v1.6.1 (2026-09-27)
 
 塔罗卡第三轮：牌面完整显示、对称约束、双线金框、小注归位。

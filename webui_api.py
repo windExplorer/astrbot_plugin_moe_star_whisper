@@ -174,7 +174,18 @@ async def h_debug_state(plugin) -> dict:
     uid = await _uid_of()
     if not uid:
         return err("缺少 uid（要调试的 QQ 号）")
-    return _debug_state_core(plugin._store, plugin._cfg, uid, _today(plugin))
+    plugin._store.record_debug_uid(uid)
+    state = _debug_state_core(plugin._store, plugin._cfg, uid, _today(plugin))
+    if state.get("status") == "ok":
+        state["data"]["recent_uids"] = plugin._store.list_debug_uids()
+    return state
+
+
+async def h_debug_history(plugin) -> dict:
+    """最近调试过的 QQ 号（面板历史标签）。"""
+    if plugin._store is None:
+        return err("插件未初始化完成")
+    return ok({"recent_uids": plugin._store.list_debug_uids()})
 
 
 async def h_debug_redraw(plugin) -> dict:
@@ -188,6 +199,7 @@ async def h_debug_redraw(plugin) -> dict:
     uid = await _uid_of()
     if not uid:
         return err("缺少 uid")
+    plugin._store.record_debug_uid(uid)
     date = _today(plugin)
     existing = plugin._store.get_fortune(uid, date)
     if existing is None:
@@ -221,6 +233,7 @@ async def h_debug_rerender(plugin) -> dict:
     uid = await _uid_of()
     if not uid:
         return err("缺少 uid")
+    plugin._store.record_debug_uid(uid)
     date = _today(plugin)
     row = plugin._store.get_fortune(uid, date)
     if row is None:
@@ -246,6 +259,7 @@ async def h_debug_reset(plugin) -> dict:
     uid = await _uid_of()
     if not uid:
         return err("缺少 uid")
+    plugin._store.record_debug_uid(uid)
     return _debug_reset_core(plugin._store, uid, _today(plugin))
 
 
@@ -253,6 +267,7 @@ def register(plugin) -> None:
     """把调试面板路由挂到 AstrBot（Dashboard 登录墙内，仅管理员使用）。"""
     routes = [
         ("/debug/state", h_debug_state, ["GET"]),
+        ("/debug/history", h_debug_history, ["GET"]),
         ("/debug/redraw", h_debug_redraw, ["POST"]),
         ("/debug/rerender", h_debug_rerender, ["POST"]),
         ("/debug/reset", h_debug_reset, ["POST"]),

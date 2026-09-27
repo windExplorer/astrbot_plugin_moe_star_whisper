@@ -110,6 +110,14 @@ def main() -> int:
     check(st.has_ledger("e1", "2026-09-28", "use:amulet"), "佩戴标记可查")
     check(not st.has_ledger("e1", "2026-09-28", "use:candle"), "未佩戴不误报")
 
+    # 调试历史（v1.6.3）：记录/去重/按最近排序
+    st.record_debug_uid("10086")
+    st.record_debug_uid("23456")
+    st.record_debug_uid("10086")
+    uids = st.list_debug_uids(8)
+    check(uids[0] == "10086" and "23456" in uids and len(uids) == 2,
+          f"调试历史去重按最近排序，实际 {uids}")
+
     # 调试：删除当日签（v1.1.0）
     ok_del = st.delete_fortune("e1", "2026-09-28")
     check(ok_del is False, "无记录删除返回 False")

@@ -70,6 +70,10 @@ CREATE TABLE IF NOT EXISTS draw_jobs (
   card_path   TEXT,
   created_at  TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS debug_history (
+  uid     TEXT PRIMARY KEY,
+  used_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_fortunes_date ON fortunes(date);
 """
 
@@ -220,6 +224,24 @@ class Store:
             (user_id, date),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # ---------- 调试面板（M7.5） ----------
+
+    def record_debug_uid(self, uid: str) -> None:
+        """记录/刷新调试过的 QQ 号（面板历史，按最近使用排序）。"""
+        self._db.execute(
+            "INSERT INTO debug_history (uid, used_at) VALUES (?, ?)"
+            " ON CONFLICT(uid) DO UPDATE SET used_at = excluded.used_at",
+            (uid, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        )
+        self._db.commit()
+
+    def list_debug_uids(self, limit: int = 8) -> list:
+        """最近调试过的 QQ 号（新→旧）。"""
+        rows = self._db.execute(
+            "SELECT uid FROM debug_history ORDER BY used_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [r["uid"] for r in rows]
 
     # ---------- 道具经济（M7，D8） ----------
 
