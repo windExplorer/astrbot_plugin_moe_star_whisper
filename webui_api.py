@@ -163,7 +163,7 @@ def _debug_reset_core(store, uid: str, date: str) -> dict:
     _remove_card(None, row)
     store.delete_fortune(uid, date)
     return ok({"deleted": True, "uid": uid, "date": date,
-               "note": "已清除，用聊天 /运势 可重新抽取（星尘再次发放）"})
+               "note": "已清除；下次抽签会自动换一颗种子，得到新的运势"})
 
 
 async def h_debug_state(plugin) -> dict:
@@ -192,12 +192,10 @@ async def h_debug_redraw(plugin) -> dict:
     if existing is None:
         return err("该用户今天还没有签记录，请先在聊天里 /运势 抽一支")
     payload = existing.get("payload") or {}
-    nonce = int(payload.get("reroll_count", 0) or 0) + 1
     result = plugin._roll_daily(
         uid, date, _salt(plugin), plugin._store.get_profile(uid) or {},
-        nonce=nonce, streak=int(payload.get("streak") or 1),
+        streak=int(payload.get("streak") or 1),
     )
-    result["reroll_count"] = nonce
     await plugin._try_llm_sign(result)
     bg = _last_ok_bg(plugin, uid, date)
     card_path = plugin._try_render_card(

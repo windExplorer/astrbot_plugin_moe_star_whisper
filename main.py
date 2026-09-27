@@ -54,7 +54,7 @@ except Exception:  # pragma: no cover
     render_card = None
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.3.0")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.3.1")
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -292,12 +292,17 @@ class StarWhisperPlugin(Star):
             return None, job
 
     def _roll_daily(self, uid: str, date: str, salt: str, profile: dict,
-                    nonce: int = 0, streak=None) -> dict:
+                    nonce=None, streak=None) -> dict:
         """确定性掷出当日签（M7 重构）：生日特权 / 佩戴道具 / 彩蛋 / 首抽星尘。
 
-        nonce>0 为换签重掷（跳过 streak 推进与星尘发放）；
-        streak 传值时沿用（补签/换签场景），缺省时按首签推进。
+        nonce 缺省时按档案中的当日种子序号自增（seed_date/seed_nonce 持久在
+        profiles，不随签记录删除而丢失）——换签卡、调试重置后的重抽都会得到新签；
+        streak 传值时沿用（补签/换签场景），缺省时按首签推进（当日幂等）。
         """
+        if nonce is None:
+            nonce = 0
+            if str(profile.get("seed_date") or "") == date:
+                nonce = int(profile.get("seed_nonce") or 0) + 1
         weights = self._grade_weights()
         birthday_today = str(profile.get("birthday") or "") == date[5:]
         if birthday_today:
@@ -309,9 +314,12 @@ class StarWhisperPlugin(Star):
         seed = fortune.derive_seed(date, uid, salt, nonce)
         result = fortune.roll_fortune(seed, lex, weights)
         result["date"] = date
+        result["reroll_count"] = nonce
         if streak is None:
             streak = self._store.bump_streak(uid, date, fortune.prev_date(date))
         result["streak"] = streak
+        # 种子序号持久到档案：重置删记录后，下次抽签依然自动换种子
+        self._store.upsert_profile(uid, seed_date=date, seed_nonce=nonce)
         if profile.get("constellation"):
             result["constellation"] = profile["constellation"]
         if birthday_today:
@@ -884,9 +892,8 @@ class StarWhisperPlugin(Star):
             self._store.add_item(uid, "reroll", -1)
             new_result = self._roll_daily(
                 uid, date, salt, self._store.get_profile(uid) or {},
-                nonce=used + 1, streak=int(payload.get("streak") or 1),
+                streak=int(payload.get("streak") or 1),
             )
-            new_result["reroll_count"] = used + 1
             bg_path, job = await self._try_draw_background(event, new_result, uid, date, salt)
             card_path = self._try_render_card(
                 new_result, uid,

@@ -36,7 +36,9 @@ CREATE TABLE IF NOT EXISTS profiles (
   avatar       TEXT,
   streak       INTEGER DEFAULT 0,
   last_draw_date TEXT,
-  max_streak   INTEGER DEFAULT 0
+  max_streak   INTEGER DEFAULT 0,
+  seed_date    TEXT,
+  seed_nonce   INTEGER DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS items (
   user_id TEXT NOT NULL,
@@ -81,8 +83,16 @@ class Store:
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.executescript(SCHEMA)
         try:  # 旧库补列（列已存在时报错吞掉）
-            self._db.execute("ALTER TABLE fortunes ADD COLUMN platform TEXT")
-            self._db.commit()
+            for stmt in (
+                "ALTER TABLE fortunes ADD COLUMN platform TEXT",
+                "ALTER TABLE profiles ADD COLUMN seed_date TEXT",
+                "ALTER TABLE profiles ADD COLUMN seed_nonce INTEGER DEFAULT 0",
+            ):
+                try:
+                    self._db.execute(stmt)
+                    self._db.commit()
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -308,13 +318,16 @@ class Store:
             "streak": 0,
             "last_draw_date": None,
             "max_streak": 0,
+            "seed_date": None,
+            "seed_nonce": 0,
         }
         for key, value in fields.items():
             if value is not None:
                 row[key] = value
         self._db.execute(
             "INSERT OR REPLACE INTO profiles (user_id, birthday, constellation, nickname,"
-            " avatar, streak, last_draw_date, max_streak) VALUES (?,?,?,?,?,?,?,?)",
+            " avatar, streak, last_draw_date, max_streak, seed_date, seed_nonce)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
                 user_id,
                 row.get("birthday"),
@@ -324,6 +337,8 @@ class Store:
                 int(row.get("streak") or 0),
                 row.get("last_draw_date"),
                 int(row.get("max_streak") or 0),
+                row.get("seed_date"),
+                int(row.get("seed_nonce") or 0),
             ),
         )
         self._db.commit()

@@ -2,6 +2,15 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v1.3.1 (2026-09-27)
+
+修复：调试重置后再抽得到一模一样的签。
+
+- **根因**：重置只删除签记录，种子序号（nonce）存在签 payload 里随之丢失——下次抽签回落到 nonce=0 的同一颗种子，确定论算出完全相同的结果。
+- **修复**：种子序号迁移到**用户档案**（`profiles.seed_date` / `seed_nonce`，旧库自动补列）。`_roll_daily` 的 nonce 缺省时按「当日档案序号 + 1」自增并回写——首抽为 0，换签卡、WebUI 重抽、调试重置后的重抽都会自动换种子；同一天内每次抽签都是新签，且删除记录也无法重置种子（防刷星尘的重抽不再发奖，nonce=0 首抽才发）。
+- **统一机制**：换签卡与 WebUI 重抽不再自行计算 nonce，全部走 `_roll_daily` 的档案序号自增，`reroll_count` 由其统一写入 payload。
+- store：`upsert_profile` 支持 seed 字段；测试补「删签后序号仍在档案」断言。
+
 ## v1.3.0 (2026-09-27)
 
 配置页重做：按 Dashboard 实际渲染规则修正表单组件与文案分层（对照 `dashboard/src/components/shared/ConfigItemRenderer.vue` 源码）。

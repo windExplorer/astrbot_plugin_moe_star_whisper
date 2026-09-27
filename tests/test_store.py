@@ -58,6 +58,15 @@ def main() -> int:
     check(p2["nickname"] == "新昵称" and p2["avatar"] == "http://a/2", "档案昵称/头像更新")
     check(p2["streak"] == 1, "未提供的字段不被覆盖")
 
+    # 种子序号（v1.3.1）：持久在档案，重置删签后仍可自增换种子
+    st.upsert_profile("u1", seed_date="2026-09-27", seed_nonce=2)
+    p3 = st.get_profile("u1")
+    check(p3["seed_date"] == "2026-09-27" and p3["seed_nonce"] == 2,
+          f"种子序号持久化，实际 {p3.get('seed_date')}/{p3.get('seed_nonce')}")
+    st.delete_fortune("u1", "2026-09-27")
+    p4 = st.get_profile("u1")
+    check(p4["seed_nonce"] == 2, "删除签记录后种子序号仍在档案")
+
     # 群榜聚合（M3）：用独立群号，避免与前面用例的 g1 数据互相污染
     def fake(score):
         return {"grade": "吉", "score": score, "date": "x"}
