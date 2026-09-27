@@ -11,7 +11,7 @@
   },
   "grade_weights": {
     "description": "吉凶档权重：大吉/吉/中吉/小吉/凶/大凶（相对权重，合计任意）",
-    "type": "object",
+    "type": "dict",
     "default": {
       "大吉": 20,
       "吉": 25,
@@ -127,7 +127,7 @@
   },
   "item_prices": {
     "description": "道具价格：reroll/amulet/streak_guard/candle",
-    "type": "object",
+    "type": "dict",
     "default": {
       "reroll": 80,
       "amulet": 50,

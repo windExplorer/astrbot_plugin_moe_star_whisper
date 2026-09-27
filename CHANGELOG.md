@@ -2,6 +2,14 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v1.2.2 (2026-09-27)
+
+修复真机安装失败：`_conf_schema.json` 的 object 类型缺 `items` 导致 `KeyError: 'items'`。
+
+- **根因**（真机日志定位）：AstrBotConfig 的 `_parse_schema` 对 `type: "object"` 会递归解析 `v["items"]` 子 schema，缺 `items` 直接 `KeyError`，整个插件加载失败。`grade_weights` 与 `item_prices` 用了无 `items` 的 object。
+- **修复**：两键类型改为 **`dict`**（自由键值映射，AstrBot 4.28.1 合法类型，用户自定义键保留、无需 items 子 schema），默认值保留。
+- **守卫**：新增 `tests/test_config_schema.py`——校验 `_conf_schema.json` 全部 type 在 `DEFAULT_VALUE_MAP` 合法集内、object 必须带非空 items、list 建议带 items 模板；此类问题今后在本地测试期拦截，不必再等真机。
+
 ## v1.2.1 (2026-09-27)
 
 修复调试面板的确认交互：原生 confirm 在 sandbox iframe 里会被静默忽略。
