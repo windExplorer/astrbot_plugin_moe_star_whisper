@@ -113,6 +113,15 @@ def main() -> int:
     check(fortune.constellation_of("abc") == "", "非法输入返回空串")
     check(fortune.constellation_of("13-40") == "", "越界日期返回空串")
 
+    # 9) LLM 星语辅助（M5）
+    facts = fortune.llm_facts(r1)
+    check("吉凶" in facts and "幸运物" in facts and str(r1["grade"]) in facts,
+          "llm_facts 应含吉凶与幸运物等事实")
+    check(fortune.DEFAULT_LLM_PERSONA and "星语者" in fortune.DEFAULT_LLM_PERSONA,
+          "内置人设非空")
+    now = fortune.now_in("UTC")
+    check(now.tzinfo is not None, "now_in 应返回 aware datetime")
+
     if FAILED:
         print(f"\n{len(FAILED)} 项失败")
         return 1

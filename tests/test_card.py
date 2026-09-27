@@ -70,6 +70,14 @@ def main() -> int:
     lo4, hi4 = img4.convert("L").getextrema()
     check(hi4 - lo4 > 30, "暗色卡应有明暗层次")
 
+    # 3.6) M5：推送卡冒烟
+    p5 = card.render_push_card(
+        "2026-09-27", "星期日", {"name": "新月", "text": "许愿的好时机"},
+        festival_line="元旦快乐！", accent_hex="#A8D8EA",
+        cards_root=Path(tempfile.mkdtemp(prefix="moe_card_")),
+    )
+    check(Image.open(p5).size == (1024, 620), "推送卡尺寸 1024x620")
+
     # 4) 长签文换行：每行不超宽（允许单字超宽的容差）
     f40 = card._font(ff, 40)
     lines = card._wrap("星" * 120, f40, 800)

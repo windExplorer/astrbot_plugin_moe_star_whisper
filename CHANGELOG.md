@@ -2,6 +2,15 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v0.6.0 (2026-09-27)
+
+M5 增强：LLM 星语（可选增强，默认关）与每日群推送。
+
+- **修复回归（重要）**：M3 重写 imports 块时曾把 `from .card import render_card` 意外吞掉，导致 v0.4.0/v0.5.0 的图卡路径运行时 NameError（main.py 无运行时测试、编译与子模块测试均兜不住）。本轮恢复导入，并新增 `tests/test_main_structure.py`——AST 级结构守卫，锁死模块级名字定义（render_card/render_push_card/组件导入等）与全部指令/生命周期方法，防止此类回归再次静默通过。
+- **LLM 星语（F16）**：`llm_enabled` 开启后，当日**首次**抽签用 `context.get_using_provider().text_chat()`（20 秒超时）按事实清单改写签文并写入 payload；无 provider/失败/空输出静默回退本地模板，绝不阻塞出卡。事实清单 `fortune.llm_facts` 只含运势事实、不含用户身份；内置人设可被 `llm_prompt_persona` 覆盖。
+- **每日群推送（F17）**：`daily_push_enabled` + `daily_push_time`；插件自管 asyncio 循环（AstrBot 无插件侧定时装饰器，PRD §7.5），每分钟复查配置（开关/时刻改动即时生效）、距目标 30 分钟内小步睡眠、推送后避开同一时刻防重复。目标群 = 近 7 天有抽签的群（`list_active_group_ids`，fortunes 新增 platform 列 + 旧库 ALTER 迁移）且不在停用名单。内容 = 文本（日期/星期/月相/节日）+ 新增 `render_push_card`「今日星象」卡（日期大字/月相/节日/抽签引导，幸运色按日期种子轮换）。
+- 测试：main 结构守卫、`llm_facts`/`now_in` 断言、推送卡冒烟、活跃群列表断言。
+
 ## v0.5.0 (2026-09-27)
 
 M4 星座与彩蛋：绑定体系、特殊日期、暗色卡面。

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """萌萌星语：每日运势签插件入口。"""
+import asyncio
 import importlib
 import re
 import sys
@@ -10,11 +11,18 @@ from pathlib import Path
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, StarTools, register
 from astrbot.api import logger
-from astrbot.api.message_components import At
+from astrbot.api.message_components import At, Image, Plain
+from astrbot.core.message.message_event_result import MessageChain
 
 from . import fortune, lexicon, store
 
 PLUGIN_NAME = "astrbot_plugin_moe_star_whisper"
+
+try:  # M2 起提供图卡；缺失/失败时回退纯文本
+    from .card import render_card, render_push_card
+except Exception:  # pragma: no cover
+    render_card = None
+    render_push_card = None
 
 _STREAK_BADGES = {
     3: "三星连签达成，运势开始聚拢 ✨",
@@ -29,11 +37,12 @@ except Exception:  # pragma: no cover
     render_card = None
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "0.5.0")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "0.6.0")
 class StarWhisperPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
         self._store = None
+        self._push_task = None
         self._reload_modules()
 
     # ---------- 生命周期 ----------
@@ -57,12 +66,17 @@ class StarWhisperPlugin(Star):
             lexicon.load_lexicon(force_reload=True)
             data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
             self._store = store.Store(data_dir / "star_whisper.db")
+            self._start_push_loop()
             logger.info(f"[{PLUGIN_NAME}] 初始化完成，数据目录：{data_dir}")
         except Exception:
             logger.error(f"[{PLUGIN_NAME}] 初始化失败\n{traceback.format_exc()}")
             raise
 
     async def terminate(self):
+        task = self._push_task
+        if task is not None:
+            task.cancel()
+            self._push_task = None
         if self._store is not None:
             self._store.close()
             self._store = None
@@ -106,13 +120,16 @@ class StarWhisperPlugin(Star):
     @staticmethod
     def _sender_avatar(event: AstrMessageEvent, uid: str) -> str:
         """头像 URL：QQ 平台用 qlogo 标准地址；其他平台留空（D10）。"""
-        try:
-            platform = str(event.get_platform_name() or "")
-        except Exception:
-            platform = ""
-        if "aiocqhttp" in platform:
+        if StarWhisperPlugin._sender_platform(event):
             return f"https://q1.qlogo.cn/g?qq={uid}&s=640"
         return ""
+
+    @staticmethod
+    def _sender_platform(event: AstrMessageEvent) -> str:
+        try:
+            return str(event.get_platform_name() or "")
+        except Exception:
+            return ""
 
     def _try_render_card(self, result: dict, uid: str, nickname: str = "", avatar: str = ""):
         """渲染卡图，失败返回 None（调用方回退纯文本，绝不吞错不回，PRD §7.3）。"""
@@ -138,6 +155,131 @@ class StarWhisperPlugin(Star):
                 f"[{PLUGIN_NAME}] 卡片渲染失败，回退纯文本\n{traceback.format_exc()}"
             )
             return None
+
+    async def _try_llm_sign(self, result: dict) -> None:
+        """LLM 星语（F16，可选增强默认关）：当日首次抽签改写签文；失败静默回退本地模板。"""
+        try:
+            if not bool(self._cfg("llm_enabled", False)):
+                return
+            provider = self.context.get_using_provider()
+            if provider is None:
+                return
+            persona = str(
+                self._cfg("llm_prompt_persona", "") or fortune.DEFAULT_LLM_PERSONA
+            )
+            prompt = (
+                "今日运势事实清单：\n" + fortune.llm_facts(result) + "\n请据此写今日签文。"
+            )
+            resp = await asyncio.wait_for(
+                provider.text_chat(prompt=prompt, system_prompt=persona),
+                timeout=20,
+            )
+            text = str(getattr(resp, "completion_text", "") or "").strip()
+            if not text and getattr(resp, "result_chain", None) is not None:
+                parts = []
+                for seg in resp.result_chain.chain:
+                    t = getattr(seg, "text", None)
+                    if t:
+                        parts.append(str(t))
+                text = "".join(parts).strip()
+            if not text:
+                return
+            result["sign_text"] = text[:160]
+            result["llm_used"] = True
+        except Exception:
+            logger.error(
+                f"[{PLUGIN_NAME}] LLM 星语失败，回退本地签文\n{traceback.format_exc()}"
+            )
+
+    # ---------- 每日群推送（F17，插件自管定时循环，PRD §7.5） ----------
+
+    def _start_push_loop(self):
+        self._push_task = asyncio.create_task(self._push_loop())
+
+    def _next_push_delay(self) -> float:
+        """距下次推送时刻的秒数（时刻已过则顺延到明天）。"""
+        tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
+        now = fortune.now_in(tz_name)
+        raw = str(self._cfg("daily_push_time", "08:00") or "08:00")
+        try:
+            hh, mm = raw.split(":")[:2]
+            hour, minute = int(hh), int(mm)
+        except Exception:
+            hour, minute = 8, 0
+        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        return (target - now).total_seconds()
+
+    async def _push_loop(self):
+        while True:
+            try:
+                if not bool(self._cfg("daily_push_enabled", False)):
+                    await asyncio.sleep(60)
+                    continue
+                wait = self._next_push_delay()
+                if wait > 0:
+                    await asyncio.sleep(min(wait, 1800))
+                    continue
+                await self._do_daily_push()
+                await asyncio.sleep(120)  # 推完避开同一时刻，防重复
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.error(f"[{PLUGIN_NAME}] 推送循环异常\n{traceback.format_exc()}")
+                await asyncio.sleep(300)
+
+    async def _do_daily_push(self):
+        if self._store is None:
+            return
+        tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
+        today = fortune.local_today(tz_name)
+        salt = str(self._cfg("salt", "moe-star-whisper"))
+        lex = lexicon.load_lexicon()
+        seed = fortune.derive_seed(today, "daily-push", salt)
+        phase = fortune.pick_text(seed, "push_phase", lex["phases"])
+        accent = fortune.pick_text(seed, "push_color", lex["lucky_colors"])
+        fest = (lex.get("festivals") or {}).get(today[5:])
+        fest_line = fortune.pick_text(seed, "push_fest", fest) if fest else ""
+        weekday_name = "星期" + "一二三四五六日"[fortune.now_in(tz_name).weekday()]
+
+        data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
+        push_card_path = None
+        if render_push_card is not None:
+            try:
+                push_card_path = render_push_card(
+                    today, weekday_name, phase, fest_line,
+                    accent_hex=accent.get("hex", "#F6C6D3"),
+                    cards_root=data_dir / "push",
+                    font_path=self._cfg("card_font_path", "") or None,
+                    extra_font_dirs=[data_dir / "fonts", Path("data/fonts")],
+                    signer=str(self._cfg("fortune_signer", "星语者")),
+                )
+            except Exception:
+                logger.error(f"[{PLUGIN_NAME}] 推送卡渲染失败，回退纯文本\n{traceback.format_exc()}")
+                push_card_path = None
+
+        caption = (
+            "🌙 萌萌星语 · 今日星象\n"
+            f"{today} {weekday_name} ｜ 月相：{phase.get('name', '？')}——{phase.get('text', '')}"
+        )
+        if fest_line:
+            caption += f"\n{fest_line}"
+
+        disabled = self._disabled_groups()
+        targets = [g for g in self._store.list_active_group_ids(7) if g[0] not in disabled]
+        for gid, platform in targets:
+            if not platform:
+                continue  # 没有平台信息无法定位会话
+            session = f"{platform}:GroupMessage:{gid}"
+            chain = MessageChain(chain=[Plain(caption)])
+            if push_card_path:
+                chain.chain.append(Image.fromFileSystem(push_card_path))
+            try:
+                ok = await StarTools.send_message(session, chain)
+                logger.info(f"[{PLUGIN_NAME}] 推送 {gid}: {'ok' if ok else 'no platform matched'}")
+            except Exception:
+                logger.error(f"[{PLUGIN_NAME}] 推送 {gid} 失败\n{traceback.format_exc()}")
 
     def _format_result(self, payload: dict, repeat: bool = False) -> str:
         dims = payload.get("dims") or {}
@@ -240,6 +382,8 @@ class StarWhisperPlugin(Star):
             if extras:
                 result["sign_text"] = result["sign_text"] + "".join(extras)
 
+        await self._try_llm_sign(result)
+
         nickname = event.get_sender_name() or "旅行者"
         avatar = self._sender_avatar(event, uid)
         group_id = "" if event.is_private_chat() else str(event.get_group_id() or "")
@@ -253,6 +397,7 @@ class StarWhisperPlugin(Star):
             uid, date, result,
             nickname=nickname, avatar=avatar, group_id=group_id,
             card_path=card_path or "",
+            platform=self._sender_platform(event),
         )
         if not saved:  # 并发撞车：读回已存的那份
             existing = self._store.get_fortune(uid, date)

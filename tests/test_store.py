@@ -74,6 +74,10 @@ def main() -> int:
           f"周榜甲均分 75 应第一，实际 {week[0]}")
     check(week[1]["user_id"] == "w2" and week[1]["days"] == 1, "周榜乙 1 天")
 
+    # 活跃群列表（M5 推送目标集）：近 7 天有抽签的群
+    ids = [g for g, _ in st.list_active_group_ids(7)]
+    check("wg1" in ids and "wg2" in ids, f"活跃群应含 wg1/wg2，实际 {ids}")
+
     st.close()
     if FAILED:
         print(f"\n{len(FAILED)} 项失败")

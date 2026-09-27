@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -347,5 +348,81 @@ def render_card(
     cards_root = Path(cards_root)
     cards_root.mkdir(parents=True, exist_ok=True)
     out = cards_root / f"{result.get('date', 'unknown')}.png"
+    img.convert("RGB").save(out, "PNG")
+    return str(out)
+
+
+def render_push_card(
+    date_str: str,
+    weekday_name: str,
+    phase: dict,
+    festival_line: str = "",
+    accent_hex: str = "#F6C6D3",
+    cards_root=None,
+    font_path: str | None = None,
+    extra_font_dirs=None,
+    width: int = 1024,
+    height: int = 620,
+    signer: str = "星语者",
+) -> str:
+    """每日推送的「今日星象」卡（F17）：日期 + 月相 + 节日 + 抽签引导。"""
+    font_file = find_font(font_path, extra_font_dirs)
+    if not font_file:
+        raise RuntimeError("未找到可用中文字体")
+    W, H = int(width), int(height)
+    u = W / 1024.0
+    accent = _hex_rgb(accent_hex)
+    ink, sub = (74, 74, 96), (150, 150, 168)
+    img = _gradient(W, H, accent).convert("RGBA")
+    deco = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    dd = ImageDraw.Draw(deco)
+    _sparkle(dd, W * 0.16, H * 0.24, 14 * u, accent, 90)
+    _sparkle(dd, W * 0.86, H * 0.34, 10 * u, accent, 80)
+    img = Image.alpha_composite(img, deco)
+
+    margin = int(48 * u)
+    panel = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(panel).rounded_rectangle(
+        [margin, margin, W - margin, H - margin],
+        radius=int(40 * u), fill=(255, 255, 255, 236),
+    )
+    img = Image.alpha_composite(img, panel)
+    draw = ImageDraw.Draw(img)
+    left, right = margin + int(48 * u), W - margin - int(48 * u)
+    y = margin + int(44 * u)
+
+    draw.text((left, y), "萌萌星语 · 今日星象",
+              font=_font(font_file, int(34 * u)), fill=sub)
+    try:
+        d = datetime.strptime(date_str, "%Y-%m-%d")
+        big = f"{d.month} 月 {d.day} 日"
+    except Exception:
+        big = date_str
+    draw.text((left, y + int(56 * u)), big,
+              font=_font(_bold_variant(font_file), int(96 * u)), fill=ink)
+    draw.text((right, y + int(96 * u)), weekday_name,
+              font=_font(font_file, int(44 * u)), fill=sub, anchor="ra")
+    y += int(200 * u)
+    draw.line([(left, y), (right, y)], fill=(238, 236, 242, 255), width=max(1, int(2 * u)))
+    y += int(40 * u)
+
+    draw.text((left, y), f"月相 · {(phase or {}).get('name', '？')}",
+              font=_font(_bold_variant(font_file), int(46 * u)), fill=ink)
+    draw.text((left, y + int(64 * u)), (phase or {}).get("text", ""),
+              font=_font(font_file, int(34 * u)), fill=sub)
+    y += int(124 * u)
+    if festival_line:
+        draw.text((left, y), festival_line,
+                  font=_font(font_file, int(34 * u)), fill=sub)
+        y += int(52 * u)
+
+    draw.text((left, H - margin - int(72 * u)), "今天的专属星语签已就位",
+              font=_font(font_file, int(38 * u)), fill=ink)
+    draw.text((right, H - margin - int(30 * u)), f"—— {signer}",
+              font=_font(font_file, int(30 * u)), fill=sub, anchor="rs")
+
+    cards_root = Path(cards_root)
+    cards_root.mkdir(parents=True, exist_ok=True)
+    out = cards_root / f"push_{date_str}.png"
     img.convert("RGB").save(out, "PNG")
     return str(out)

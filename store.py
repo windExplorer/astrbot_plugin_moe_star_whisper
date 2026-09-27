@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 SCHEMA = """
@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS fortunes (
   group_id  TEXT,
   group_name TEXT,
   card_path TEXT,
+  platform  TEXT,
   created_at TEXT NOT NULL,
   PRIMARY KEY (user_id, date)
 );
@@ -79,7 +80,11 @@ class Store:
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.executescript(SCHEMA)
-        self._db.commit()
+        try:  # 旧库补列（列已存在时报错吞掉）
+            self._db.execute("ALTER TABLE fortunes ADD COLUMN platform TEXT")
+            self._db.commit()
+        except Exception:
+            pass
 
     def close(self) -> None:
         try:
@@ -109,12 +114,13 @@ class Store:
         group_id: str = "",
         group_name: str = "",
         card_path: str = "",
+        platform: str = "",
     ) -> bool:
         """写入当日签；主键冲突（当日已签）时忽略并返回 False，由调用方读回已存记录。"""
         cur = self._db.execute(
             "INSERT OR IGNORE INTO fortunes (user_id, date, grade, score, payload,"
-            " nickname, avatar, group_id, group_name, card_path, created_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            " nickname, avatar, group_id, group_name, card_path, platform, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 user_id,
                 date,
@@ -126,11 +132,22 @@ class Store:
                 group_id,
                 group_name,
                 card_path,
+                platform,
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             ),
         )
         self._db.commit()
         return cur.rowcount == 1
+
+    def list_active_group_ids(self, days: int = 7) -> list:
+        """近 N 天有过抽签的群（group_id, platform）——每日推送的目标集。"""
+        since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        rows = self._db.execute(
+            "SELECT group_id, MAX(platform) AS platform FROM fortunes"
+            " WHERE group_id!='' AND date>=? GROUP BY group_id",
+            (since,),
+        ).fetchall()
+        return [(r["group_id"], r["platform"] or "") for r in rows]
 
     def list_day(self, date: str) -> list[dict]:
         """当日全部抽签记录（榜单/PK 用，M3 接线）。"""

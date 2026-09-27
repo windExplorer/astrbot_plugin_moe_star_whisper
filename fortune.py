@@ -70,9 +70,8 @@ def derive_seed(date_str: str, user_id: str, salt: str, nonce: int = 0) -> bytes
     return hashlib.sha256(raw).digest()
 
 
-def local_today(tz_name: str = "Asia/Shanghai") -> str:
-    """插件时区的今天（YYYY-MM-DD）。时区非法或环境缺 tzdata 时回退 Asia/Shanghai；
-    仍失败（如 Windows 未装 tzdata 包）则用固定偏移 UTC+8，绝不让时区问题炸掉抽签。"""
+def now_in(tz_name: str = "Asia/Shanghai") -> datetime:
+    """插件时区的当前时刻（aware）。回退链：配置时区 → Asia/Shanghai → 固定 UTC+8。"""
     try:
         tz = ZoneInfo(tz_name)
     except Exception:
@@ -80,7 +79,12 @@ def local_today(tz_name: str = "Asia/Shanghai") -> str:
             tz = ZoneInfo("Asia/Shanghai")
         except Exception:
             tz = timezone(timedelta(hours=8))
-    return datetime.now(tz).strftime("%Y-%m-%d")
+    return datetime.now(tz)
+
+
+def local_today(tz_name: str = "Asia/Shanghai") -> str:
+    """插件时区的今天（YYYY-MM-DD）。"""
+    return now_in(tz_name).strftime("%Y-%m-%d")
 
 
 def prev_date(date_str: str) -> str:
@@ -184,3 +188,26 @@ def apply_candle(result: dict) -> dict:
     result["score"] = min(100, int(result.get("score", 0)) + 8)
     boosts["candle"] = True
     return result
+
+
+DEFAULT_LLM_PERSONA = (
+    "你是「星语者」，一位温柔微傲娇的占星见习生。根据给出的事实清单，为这位用户写一段今日签文："
+    "第二人称、60 字以内、2~3 句，结合幸运物与宜忌给一句具体的小建议；"
+    "凶日要温柔安慰、吉日要大方恭喜。只输出签文本身，不要解释、引号或表情。"
+)
+
+
+def llm_facts(result: dict) -> str:
+    """当日运势事实清单（F16：喂给 LLM 的脱敏事实，不含任何用户身份信息）。"""
+    dims = result.get("dims") or {}
+    dim_text = "、".join(f"{k}{v}星" for k, v in dims.items())
+    color = (result.get("lucky_color") or {}).get("name", "")
+    phase = result.get("phase") or {}
+    return (
+        f"吉凶：{result.get('grade', '')}（幸运指数 {result.get('score', '')}）\n"
+        f"六维：{dim_text}\n"
+        f"幸运物：{result.get('lucky_item', '')}；幸运色：{color}；"
+        f"幸运数字：{result.get('lucky_number', '')}；幸运方位：{result.get('lucky_dir', '')}\n"
+        f"宜：{'、'.join(result.get('yi') or [])}；忌：{'、'.join(result.get('ji') or [])}\n"
+        f"月相：{phase.get('name', '')}"
+    )
