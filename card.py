@@ -10,15 +10,10 @@
 from __future__ import annotations
 
 import io
-import logging
-import ssl
-import urllib.request
 from datetime import datetime
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
-
-_log = logging.getLogger("moe_star_whisper")
 
 # 常见 CJK 字体候选（按优先级；Windows 在前，Linux Noto/文泉驿在后）
 _SYSTEM_FONT_CANDIDATES = [
@@ -119,41 +114,6 @@ def _cover(img: Image.Image, w: int, h: int) -> Image.Image:
     return img.crop((left, top, left + w, top + h))
 
 
-def _fetch_avatar(url: str, timeout: float = 5.0) -> Image.Image | None:
-    """下载头像；多候选依次尝试：原地址 → http 变体（qlogo 支持 http，绕开证书问题）
-    → https 跳过证书校验。全部失败返回 None 并把原因写日志。"""
-    candidates = [url]
-    if url.startswith("https://"):
-        candidates.append("http://" + url[len("https://"):])
-    attempts = []
-    for cand in candidates:
-        if cand.startswith("https://"):
-            attempts += [(cand, None), (cand, _insecure_ssl())]
-        else:
-            attempts.append((cand, None))
-    last_error = ""
-    for cand, ctx in attempts:
-        try:
-            req = urllib.request.Request(cand, headers={"User-Agent": "Mozilla/5.0"})
-            kwargs = {"timeout": timeout}
-            if ctx is not None:
-                kwargs["context"] = ctx
-            with urllib.request.urlopen(req, **kwargs) as resp:
-                return Image.open(io.BytesIO(resp.read())).convert("RGBA")
-        except Exception as e:
-            last_error = f"{type(e).__name__}: {e}"
-            _log.warning(f"[moe_star_whisper] 头像下载失败（{cand}）：{last_error}")
-    _log.warning(f"[moe_star_whisper] 头像最终不可用，使用占位头像：{url} → {last_error}")
-    return None
-
-
-def _insecure_ssl() -> ssl.SSLContext:
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    return ctx
-
-
 def _circle_img(img: Image.Image, diameter: int) -> Image.Image:
     img = img.resize((diameter, diameter))
     mask = Image.new("L", (diameter * 4, diameter * 4), 0)
@@ -199,7 +159,7 @@ def render_card(
     height: int = 1536,
     signer: str = "星语者",
     nickname: str = "",
-    avatar_url: str = "",
+    avatar_data: bytes | None = None,
     uid: str = "",
     bg_image=None,
     theme: str = "light",
@@ -262,11 +222,14 @@ def render_card(
     inner_w = right - left
     y = margin + int(28 * u)
 
-    # ① 身份头：头像 + 昵称 + QQ号 + 日期
+    # ① 身份头：头像 + 昵称 + QQ号 + 日期（头像 bytes 由调用方异步下载）
     av_d = int(128 * u)
     av = None
-    if avatar_url:
-        av = _fetch_avatar(avatar_url)
+    if avatar_data:
+        try:
+            av = Image.open(io.BytesIO(avatar_data)).convert("RGBA")
+        except Exception:
+            av = None
     if av is not None:
         avatar_img = _circle_img(av, av_d)
     else:

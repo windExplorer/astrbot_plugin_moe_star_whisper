@@ -54,6 +54,19 @@ def main() -> int:
           "main.py 应只定义 StarWhisperPlugin 一个类")
     if not classes:
         return 1
+
+    # ⚠️ __init__ 必须接受 config 参数：AstrBot star_manager 注入 AstrBotConfig
+    # 时若 TypeError 会被静默降级为只传 context → self.config 缺失 →
+    # 所有配置开关真机上"永远不生效"（v1.3.4 前的教训）
+    init_fn = next((n for n in classes[0].body
+                    if isinstance(n, ast.FunctionDef) and n.name == "__init__"), None)
+    check(init_fn is not None, "缺少 __init__")
+    if init_fn is not None:
+        init_args = ([a.arg for a in init_fn.args.args]
+                     + [a.arg for a in init_fn.args.kwonlyargs])
+        check("config" in init_args,
+              "__init__ 必须接受 config 参数（否则 AstrBotConfig 不会注入，配置全部回落默认值）")
+
     methods = {
         n.name for n in classes[0].body
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))

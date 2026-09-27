@@ -2,6 +2,13 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v1.3.4 (2026-09-27)
+
+真机联调第三轮：两个系统性根因修复（配置注入 + 头像链路）。
+
+- **配置开关全部失效的根因（大）**：`__init__` 沿 helloworld 模板只接受 `context`——star_manager 注入 AstrBotConfig 时若构造函数不接受 `config` kwarg，TypeError 会被**静默降级**为只传 context（star_manager.py:1225），`self.config` 从未存在 → `_cfg` 抛 AttributeError 被吞 → **所有配置项回落默认值**：LLM/绘图/输出方式在真机上永远按出厂默认跑，而配置页显示的是另一份对象（自然显示已开启）。修复：`__init__(self, context, config=None)` 接收并保存；结构守卫新增断言（`__init__` 必须含 config 参数），此类问题永绝。
+- **头像链路重构（对齐 box 插件同款已验证姿势）**：旧实现用 `q1.qlogo.cn/g?qq=` 老接口 + 服务器端 urllib 下载（真机失败、原因不可见）。改为 **`q4.qlogo.cn/headimg_dl` 官方接口 + aiohttp 异步下载 bytes**（AstrBot 自带依赖，与 box 完全同款 URL 与客户端），下载集中在 main `_fetch_avatar_bytes`（8 秒超时、全异常吞掉写日志），card.py 回归纯同步渲染（`avatar_data` bytes 入参，不再自带网络逻辑）；聊天/换签/面板重绘统一走该链路，失败自动占位。
+
 ## v1.3.3 (2026-09-27)
 
 真机联调第二轮：WebUI 重抽修复 + 头像多候选下载。

@@ -13,7 +13,9 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, StarTools, register
 from astrbot.api import logger
 from astrbot.api.message_components import At, Image, Plain
+from astrbot.core.config.astrbot_config import AstrBotConfig
 from astrbot.core.message.message_event_result import MessageChain
+import aiohttp
 
 from . import fortune, lexicon, store
 
@@ -54,10 +56,14 @@ except Exception:  # pragma: no cover
     render_card = None
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.3.3")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.3.4")
 class StarWhisperPlugin(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config: AstrBotConfig = None):
+        # ⚠️ 必须接受 config kwarg：star_manager 注入 AstrBotConfig 时若构造函数
+        # 不接受该参数会 TypeError 被静默降级（只传 context），self.config 缺失
+        # 导致 _cfg 全部回落默认值——所有配置开关在真机上"永远不生效"。
         super().__init__(context)
+        self.config = config
         self._store = None
         self._push_task = None
         self._reload_modules()
@@ -146,9 +152,9 @@ class StarWhisperPlugin(Star):
 
     @staticmethod
     def _sender_avatar(event: AstrMessageEvent, uid: str) -> str:
-        """头像 URL：QQ 平台用 qlogo 标准地址；其他平台留空（D10）。"""
+        """头像 URL 快照（D10）：q4 headimg_dl 官方接口（box 同款，已验证可用）。"""
         if StarWhisperPlugin._sender_platform(event):
-            return f"https://q1.qlogo.cn/g?qq={uid}&s=640"
+            return f"https://q4.qlogo.cn/headimg_dl?dst_uin={uid}&spec=640"
         return ""
 
     @staticmethod
@@ -158,8 +164,25 @@ class StarWhisperPlugin(Star):
         except Exception:
             return ""
 
-    def _try_render_card(self, result: dict, uid: str, nickname: str = "", avatar: str = "",
-                         bg_image=None):
+    async def _fetch_avatar_bytes(self, uid: str) -> bytes | None:
+        """服务端下载头像 bytes（aiohttp，box 同款接口）；失败返回 None。"""
+        url = f"https://q4.qlogo.cn/headimg_dl?dst_uin={uid}&spec=640"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=8)
+                ) as resp:
+                    resp.raise_for_status()
+                    data = await resp.read()
+                    if data and len(data) > 100:
+                        return data
+                    logger.warning(f"[{PLUGIN_NAME}] 头像响应过小（{len(data or '')}B），视为失败")
+        except Exception as e:
+            logger.warning(f"[{PLUGIN_NAME}] 头像下载失败：{type(e).__name__}: {e}")
+        return None
+
+    def _try_render_card(self, result: dict, uid: str, nickname: str = "",
+                         avatar_bytes: bytes | None = None, bg_image=None):
         """渲染卡图，失败返回 None（调用方回退纯文本，绝不吞错不回，PRD §7.3）。"""
         if render_card is None:
             return None
@@ -174,7 +197,7 @@ class StarWhisperPlugin(Star):
                 height=int(self._cfg("card_height", 1536)),
                 signer=str(self._cfg("fortune_signer", "星语者")),
                 nickname=nickname,
-                avatar_url=avatar,
+                avatar_data=avatar_bytes,
                 uid=uid,
                 bg_image=bg_image,
                 theme=str(self._cfg("card_theme", "auto")),
@@ -578,7 +601,8 @@ class StarWhisperPlugin(Star):
         await self._try_llm_sign(result, event)
 
         nickname = event.get_sender_name() or "旅行者"
-        avatar = self._sender_avatar(event, uid)
+        avatar_url = self._sender_avatar(event, uid)  # URL 快照入库（D10）
+        avatar_bytes = await self._fetch_avatar_bytes(uid) if avatar_url else None
         group_id = "" if event.is_private_chat() else str(event.get_group_id() or "")
 
         mode = str(self._cfg("output_mode", "图卡"))
@@ -587,7 +611,7 @@ class StarWhisperPlugin(Star):
         if mode != "纯文本":
             # D11 先绘后卡：anima 底图（可选）→ 合卡 → 发送；失败静默回退幸运色渐变
             bg_path, job = await self._try_draw_background(event, result, uid, date, salt)
-            card_path = self._try_render_card(result, uid, nickname, avatar, bg_image=bg_path)
+            card_path = self._try_render_card(result, uid, nickname, avatar_bytes, bg_image=bg_path)
             if job is not None:
                 job["card_path"] = card_path or ""
                 try:
@@ -599,7 +623,7 @@ class StarWhisperPlugin(Star):
 
         saved = self._store.save_fortune(
             uid, date, result,
-            nickname=nickname, avatar=avatar, group_id=group_id,
+            nickname=nickname, avatar=avatar_url, group_id=group_id,
             card_path=card_path or "",
             platform=self._sender_platform(event),
         )
@@ -907,9 +931,10 @@ class StarWhisperPlugin(Star):
                 streak=int(payload.get("streak") or 1),
             )
             bg_path, job = await self._try_draw_background(event, new_result, uid, date, salt)
+            avatar_bytes = await self._fetch_avatar_bytes(uid)
             card_path = self._try_render_card(
                 new_result, uid,
-                nickname=existing.get("nickname") or "", avatar=existing.get("avatar") or "",
+                nickname=existing.get("nickname") or "", avatar_bytes=avatar_bytes,
                 bg_image=bg_path,
             )
             if job is not None:

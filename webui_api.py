@@ -199,9 +199,10 @@ async def h_debug_redraw(plugin) -> dict:
     )
     await plugin._try_llm_sign(result)
     bg = _last_ok_bg(plugin, uid, date)
+    avatar_bytes = await plugin._fetch_avatar_bytes(uid)
     card_path = plugin._try_render_card(
         result, uid,
-        nickname=existing.get("nickname") or "", avatar=existing.get("avatar") or "",
+        nickname=existing.get("nickname") or "", avatar_bytes=avatar_bytes,
         bg_image=bg,
     )
     plugin._store.update_fortune_payload(uid, date, result, card_path or "")
@@ -226,9 +227,10 @@ async def h_debug_rerender(plugin) -> dict:
         return err("该用户今天还没有签记录")
     payload = row.get("payload") or {}
     bg = _last_ok_bg(plugin, uid, date)
+    avatar_bytes = await plugin._fetch_avatar_bytes(uid)
     card_path = plugin._try_render_card(
         payload, uid,
-        nickname=row.get("nickname") or "", avatar=row.get("avatar") or "",
+        nickname=row.get("nickname") or "", avatar_bytes=avatar_bytes,
         bg_image=bg,
     )
     if not card_path:
