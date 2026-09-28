@@ -243,6 +243,18 @@ def main() -> int:
     check(Path(dirs[2]) == Path("data/fonts"),
           f"第三候选为 cwd 兜底写法，实际 {dirs[2]}")
 
+    # 9) sanitize_name（v1.10.2）：QQ 昵称里的换行/制表/零宽字符不能上卡
+    check(card.sanitize_name("小\n明\t吧  ") == "小 明 吧",
+          "换行/制表/多余空格应压成单个空格")
+    check(card.sanitize_name("A\u200bB\ufeffC") == "ABC",
+          "零宽字符应直接删除而不是变成空格")
+    check(card.sanitize_name(None) == "" and card.sanitize_name("   ") == "",
+          "空/None 应得到空串")
+    check(card.sanitize_name("  星语者  ") == "星语者", "首尾空白应去掉")
+    cleaned_long = card.sanitize_name("很" * 30)
+    check(len(cleaned_long) == 16 and cleaned_long.endswith("…"),
+          f"超长昵称应截断到 16 字并带省略号，实际长度 {len(cleaned_long)}")
+
     # 圆体渲染冒烟：能落盘且非空白
     p_rounded = card.render_rank_card(
         "今日星语榜", [(1, "甲", "95", ""), (2, "乙", "88", "")], misc,

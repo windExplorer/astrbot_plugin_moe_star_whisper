@@ -170,6 +170,11 @@ def main() -> int:
           "控制台配置页必须把「自定义字体」联动到「字体选择=自定义」")
     check("visibleKeys(group)" in vue, "配置页渲染必须按可见性过滤字段")
     check("visibleKeys(group).filter" in vue, "保存时不应提交被条件隐藏的字段")
+
+    # v1.10.2：昵称上卡前必须清洗（QQ 昵称可能带换行/零宽字符，撑破单行排版）
+    check("def sanitize_name" in card_src, "card.py 需提供 sanitize_name（昵称清洗）")
+    uses = card_src.count("sanitize_name(")
+    check(uses >= 8, f"运势卡/塔罗卡/身份行/榜单/PK/日历等入口都要清洗昵称，当前 {uses} 处")
     check("extra_font_dirs=self._font_dirs(data_dir)" in src,
           "运势卡渲染必须使用 _font_dirs 的候选目录")
     schema_src = (root / "_conf_schema.json").read_text(encoding="utf-8")

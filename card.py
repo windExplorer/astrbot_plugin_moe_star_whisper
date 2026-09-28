@@ -79,6 +79,25 @@ def find_font(explicit: str | None = None, extra_dirs=None) -> str | None:
     return None
 
 
+# 用户输入（QQ 昵称等）里的危险空白：换行/制表符会把单行排版撑破，
+# 零宽字符等不可见字符会画出看不见的东西（v1.10.2）
+_ZW_RE = re.compile(r"[\u200b-\u200f\u2028\u2029\u2060\ufeff]")  # 零宽类：直接删除
+_BAD_WS_RE = re.compile(r"\s+")  # 其余空白（含换行/制表）：压成单个空格
+
+
+def sanitize_name(text, max_len: int = 16) -> str:
+    """清洗昵称类用户输入：删零宽字符、空白压成单个空格并限长。
+
+    QQ 昵称什么都能塞：换行、制表符、零宽连接符都见过——直接上卡会把单行
+    排版撑破或渲染出看不见的字符。这里统一压平 + 截断（超长加省略号）。
+    所有把昵称画上卡片的入口都必须先过这个函数。
+    """
+    cleaned = _BAD_WS_RE.sub(" ", _ZW_RE.sub("", str(text or ""))).strip()
+    if len(cleaned) > max_len:
+        cleaned = cleaned[: max_len - 1].rstrip() + "…"
+    return cleaned
+
+
 # 不能当正文用的字体名特征（emoji/symbol/icon 字体没有中文字形）
 _SKIP_FONT_NAME_HINTS = ("emoji", "symbol", "icon")
 _FONT_PATTERNS = ("*.ttf", "*.otf", "*.ttc", "*.woff2")
@@ -382,6 +401,7 @@ def render_card(
     stardust_total: int | None = None,
 ) -> str:
     """渲染当日星语签，落盘 cards_root/<date>.png 并返回路径。失败抛异常由调用方回退。"""
+    nickname = sanitize_name(nickname)
     font_file = find_font(font_path, extra_font_dirs)
     if not font_file:
         raise RuntimeError("未找到可用中文字体")
@@ -391,7 +411,7 @@ def render_card(
         return render_tarot_card(
             result, str(bg_image), cards_root, font_file,
             width=int(width), height=int(height),
-            signer=str(signer), nickname=str(nickname or ""),
+            signer=str(signer), nickname=nickname,
             avatar_data=avatar_data, uid=str(uid or ""),
             theme=str(theme or "light"),
             tarot_label_on_image=bool(tarot_label_on_image),
@@ -618,6 +638,7 @@ def render_tarot_card(
     右联为幸运色渐变圆角面板（顶浓底淡），布局按「固定块高 + 弹性间隙」
     等分剩余空间——不留大片空白也不挤压；吉凶/牌名用楷体系展示字体。
     """
+    nickname = sanitize_name(nickname)  # render_card 已清洗，此处兜底直接调用
     SW, H = int(width), int(height)
     u = SW / 700.0
     W = SW * 2
@@ -1147,6 +1168,7 @@ def _utility_card_save(ctx: dict, cards_root, filename: str, signer: str,
 
 def _identity_row(ctx: dict, nickname: str, uid: str, avatar_data) -> None:
     """提示卡身份行：圆头像 + 昵称 + QQ 号（推进 ctx["y"]）。"""
+    nickname = sanitize_name(nickname)
     img, draw, u, ff = ctx["img"], ctx["draw"], ctx["u"], ctx["font_file"]
     left, y = ctx["left"], ctx["y"]
     av_d = int(88 * u)
@@ -1365,6 +1387,7 @@ def render_rank_card(
     name_avail = int(right - name_x - right_w - int(30 * u))
 
     for i, (rank, name, main_text, sub_text) in enumerate(rows):
+        name = sanitize_name(name)  # 榜单行也是 QQ 昵称，同样要压平空白
         cy = y + row_h * i
         rank_rgb = medal[rank - 1] if isinstance(rank, int) and 1 <= rank <= 3 else ctx["sub"]
         draw.text((left, cy + row_h / 2), str(rank),
@@ -1402,6 +1425,8 @@ def render_pk_card(
     theme: str = "light",
 ) -> str:
     """星语 PK 卡：左右分数对撞 + 中央 VS 徽 + 判词与碎碎念。winner: left/right/tie。"""
+    left_name = sanitize_name(left_name)
+    right_name = sanitize_name(right_name)
     font_file = find_font(font_path, extra_font_dirs)
     if not font_file:
         raise RuntimeError("未找到可用中文字体")
@@ -1517,6 +1542,7 @@ def render_calendar_card(
     stats: {"drawn": n, "daji": n, "avg": 均分, "stardust": 累计星尘或 None}。
     未占卜的日子画小圆点；未来日期灰显；今日金框。
     """
+    nickname = sanitize_name(nickname)
     font_file = find_font(font_path, extra_font_dirs)
     if not font_file:
         raise RuntimeError("未找到可用中文字体")
