@@ -96,6 +96,13 @@ def main() -> int:
     check('existing.get("card_path")' in src,
           "fortune_cmd 复用分支必须读 existing['card_path']（列），不能只读 payload")
 
+    # v1.10.1：首签渲染失败时，当日复用分支必须补渲染（不重算运势、不重调萌绘）
+    check("def _retry_render_card" in src, "必须提供 _retry_render_card（缺卡补渲染）")
+    check("_retry_render_card(existing, uid, date)" in src,
+          "fortune_cmd 复用分支缺卡时必须走补渲染")
+    check("self._store.set_card_path(uid, date, card)" in src,
+          "补渲染成功必须回写 card_path 列（避免之后每次请求都重试渲染）")
+
     # v1.9.3：群名必须随抽签落库（group_name 一直是空的，控制台只能显示群号）
     check("group_name=group_name" in src,
           "save_fortune 必须带 group_name（否则控制台只能显示群号）")

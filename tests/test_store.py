@@ -49,6 +49,9 @@ def main() -> int:
     crow = st.get_fortune("c1", "2026-09-27")
     check(crow["card_path"] == "card-c1.png", "card_path 落列并可读回")
     check("card_path" not in crow["payload"], "payload 不含 card_path（读取方必须取列）")
+    st.set_card_path("c1", "2026-09-27", "card-c1-retry.png")
+    check(st.get_fortune("c1", "2026-09-27")["card_path"] == "card-c1-retry.png",
+          "set_card_path 应能回写补渲染的卡路径")
 
     # streak：首日 1 → 同日幂等 → 次日 2 → 断签回 1
     s1 = st.bump_streak("u1", "2026-09-27", "2026-09-26")

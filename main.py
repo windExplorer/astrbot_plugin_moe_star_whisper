@@ -381,6 +381,44 @@ class StarWhisperPlugin(Star):
             )
             return None
 
+    async def _retry_render_card(self, existing: dict, uid: str, date: str) -> str | None:
+        """当日签缺卡时的补渲染（v1.10.1）：运势不重算、萌绘不重调。
+
+        - 底图：复用当日 draw_jobs 里已落盘的 AI 牌面（取最新且文件还在的那张），
+          没有则回落幸运色渐变——观感与首签一致或接近；
+        - 头像：用入库的 avatar URL 快照再拉一次，失败不影响渲染；
+        - 成功后把新卡路径写回 card_path 列（之后当天直接回发同一张图，
+          不会每次请求都重试渲染）。
+        返回卡路径；不满足条件或仍渲染失败返回 None（调用方回退纯文本）。
+        """
+        if render_card is None or self._store is None:
+            return None
+        payload = existing.get("payload") or {}
+        if not payload:
+            return None
+        bg_path = None
+        try:
+            for job in reversed(self._store.get_draw_jobs(uid, date)):
+                p = str(job.get("image_path") or "")
+                if p and Path(p).exists():
+                    bg_path = p
+                    break
+        except Exception:
+            bg_path = None
+        avatar_bytes = None
+        if existing.get("avatar"):
+            avatar_bytes = await self._fetch_avatar_bytes(uid)
+        nickname = str(existing.get("nickname") or "旅行者")
+        card = self._try_render_card(payload, uid, nickname, avatar_bytes, bg_image=bg_path)
+        if card:
+            try:
+                self._store.set_card_path(uid, date, card)
+            except Exception:
+                logger.warning(
+                    f"[{PLUGIN_NAME}] 补渲染成功但回写 card_path 失败\n{traceback.format_exc()}"
+                )
+        return card
+
     # ---------- 提示卡（M9）：星尘/商店/榜单/PK/通知/日历 ----------
 
     def _utility_cards_on(self) -> bool:
@@ -817,6 +855,18 @@ class StarWhisperPlugin(Star):
                 # 图与文合并成一条结果链：框架的自动 @ 只跟一条结果走，
                 # 分两次 yield 会在群里 @ 两次（v1.9.3 修）
                 comps: list = [Image.fromFileSystem(card_path)]
+                if str(self._cfg("output_mode", "图卡")) == "图卡+文本":
+                    comps.append(Plain("\n" + self._format_result(payload, repeat=True)))
+                yield event.chain_result(comps)
+                return
+            # v1.10.1：首签渲染失败（card_path 列为空）或卡文件丢失时补渲染一次——
+            # 运势不重算、不重调萌绘（底图复用当日 draw_jobs 里已落盘的 AI 图）；
+            # 成功则回发并落列，当天再请求就直接回发同一张图，不会反复重试
+            retried = None
+            if str(self._cfg("output_mode", "图卡")) != "纯文本":
+                retried = await self._retry_render_card(existing, uid, date)
+            if retried:
+                comps: list = [Image.fromFileSystem(retried)]
                 if str(self._cfg("output_mode", "图卡")) == "图卡+文本":
                     comps.append(Plain("\n" + self._format_result(payload, repeat=True)))
                 yield event.chain_result(comps)

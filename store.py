@@ -153,6 +153,14 @@ class Store:
         self._db.commit()
         return cur.rowcount == 1
 
+    def set_card_path(self, user_id: str, date: str, card_path: str) -> None:
+        """回写卡路径（v1.10.1：当日签缺卡、补渲染成功后用）。"""
+        self._db.execute(
+            "UPDATE fortunes SET card_path=? WHERE user_id=? AND date=?",
+            (str(card_path or ""), user_id, date),
+        )
+        self._db.commit()
+
     def update_fortune_payload(self, user_id: str, date: str, result: dict,
                                card_path: str | None = None) -> None:
         """换签卡（M7）：覆盖当日签的运势内容（grade/score/payload/卡路径同步）。"""
