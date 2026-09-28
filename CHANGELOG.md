@@ -2,6 +2,22 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v1.9.8 (2026-09-28)
+
+修复「配置圆体后卡片渲染必崩」（版本 v1.9.7 -> v1.9.8）。
+
+- **现象**：`card_font_style=圆体` 下所有卡片渲染失败、回退纯文本，日志为 `NameError: name 'card' is not defined`（`main.py` 的 `_card_font_path`）。
+- **根因**：v1.9.7 引入 `card.find_font_by_hint` 时漏了模块导入——文件顶部只有 `from .card import render_*` 白名单，`card` 这个模块名从未绑定。任何一次渲染都会崩，与字体文件本身无关。
+- **修复**：导入区补 `from . import card`（并入同一处软导入 try，`except` 里置 `card = None`）；`_card_font_path` 增加 `card is None` 与显式路径的双重防御。
+- **顺带把「填了字体却没生效」做成可诊断的**：
+  - 挑中圆体时记 info 日志 `卡面使用圆体：<路径>` —— 一眼确认生效；
+  - 候选目录里**有**名字匹配但加载失败 → warning 指明「本机读不了（woff2 需要 FreeType 带 brotli 支持），建议换 ttf/otf/ttc」；
+  - 候选目录里**没有**名字匹配 → info 列出已查找的目录；
+  - `card_font_path` 指向的文件不存在 / 加载失败 → 分别 warning 后回落默认字体（此前会静默跳过，用户无从得知）。
+- **新增** `card.list_fonts_by_hint(dirs, hints)`：只按文件名列出候选、不校验可加载，用于区分「没有这个字体」与「有但读不了」——两者对用户的处置完全不同。`find_font_by_hint` 改为基于它实现。
+- 配置 `card_font_path` 的 hint 与 README 明确：填的是**字体文件路径**（绝对路径最稳，如 `/AstrBot/data/fonts/ResourceHanRoundedCN-Medium.woff2`；相对路径按 AstrBot 进程工作目录解析），不是文件名。
+- 测试：`test_card` 新增 `list_fonts_by_hint` 断言（列出含坏文件、跳过 emoji）与「坏候选不挡路」用例（改用垃圾内容的 `.ttf`，不再靠扩展名伪装，确保真的走加载探测）；另加一段真实 woff2 圆体用例（本机存在样本时才跑，实测 `ResourceHanRoundedCN-Medium.woff2` 可加载并被选中）。`test_main_structure` 新增守卫：`main.py` 必须 `from . import card`（本次 NameError 的根因）、必须有 `_find_rounded_font`。
+
 ## v1.9.7 (2026-09-28)
 
 字体来源只认公共目录，不再借用其它插件（版本 v1.9.6 -> v1.9.7）。

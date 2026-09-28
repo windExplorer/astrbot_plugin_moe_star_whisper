@@ -64,6 +64,8 @@ AstrBot 今日运势插件：每个用户每天一支专属「星语签」——
 
 选「圆体」时若这些目录里没有圆体（或该格式本机读不了），会**自动回落**默认字体并记一条日志，不会导致出卡失败。圆体推荐 [Resource Han Rounded](https://github.com/CyanoHao/Resource-Han-Rounded)（SIL OFL 1.1，文件名形如 `ResourceHanRoundedCN-Medium.woff2`）。
 
+也可以不用风格开关，直接在配置 `card_font_path` 里填**字体文件路径**（不是文件名）：绝对路径最稳，例如 `/AstrBot/data/fonts/ResourceHanRoundedCN-Medium.woff2`；相对路径按 AstrBot 进程的工作目录解析。支持 `ttf` / `otf` / `ttc` / `woff2`。填了它就以它为准（优先级高于风格开关）；路径不存在或本机读不了时会在日志里告警，然后回落默认字体。
+
 ## 依赖
 
 - AstrBot 4.28+

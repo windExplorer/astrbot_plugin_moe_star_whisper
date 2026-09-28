@@ -81,6 +81,28 @@ def find_font(explicit: str | None = None, extra_dirs=None) -> str | None:
 # 不能当正文用的字体名特征（emoji/symbol/icon 字体没有中文字形）
 _SKIP_FONT_NAME_HINTS = ("emoji", "symbol", "icon")
 
+def list_fonts_by_hint(dirs, hints=("rounded",)) -> list[str]:
+    """列出候选目录里**文件名匹配**的字体（不校验可否加载，供排查日志用，v1.9.8）。
+
+    区分「没有这个字体」和「有这个字体但本机读不了」——后者要提示用户换格式
+    （woff2 需要 FreeType 带 brotli 支持），两者对用户的处置方式完全不同。
+    """
+    hints = tuple(str(h).lower() for h in hints)
+    out: list[str] = []
+    for d in dirs or []:
+        p = Path(d)
+        if not p.is_dir():
+            continue
+        for pat in ("*.ttf", "*.otf", "*.ttc", "*.woff2"):
+            for x in sorted(p.glob(pat)):
+                name = x.name.lower()
+                if any(skip in name for skip in _SKIP_FONT_NAME_HINTS):
+                    continue
+                if any(h in name for h in hints):
+                    out.append(str(x))
+    return out
+
+
 def find_font_by_hint(dirs, hints=("rounded",)) -> str | None:
     """在候选目录里按**文件名关键词**挑一个可用字体（v1.9.7，圆体风格用）。
 
@@ -91,18 +113,9 @@ def find_font_by_hint(dirs, hints=("rounded",)) -> str | None:
     字体放哪完全由使用者决定（推荐 AstrBot 的 `data/fonts/` 公共目录），
     插件不借用、也不依赖任何其它插件的字体。
     """
-    hints = tuple(str(h).lower() for h in hints)
-    for d in dirs or []:
-        p = Path(d)
-        if not p.is_dir():
-            continue
-        for pat in ("*.ttf", "*.otf", "*.ttc", "*.woff2"):
-            for x in sorted(p.glob(pat)):
-                name = x.name.lower()
-                if any(skip in name for skip in _SKIP_FONT_NAME_HINTS):
-                    continue
-                if any(h in name for h in hints) and _font_loadable(str(x)):
-                    return str(x)
+    for c in list_fonts_by_hint(dirs, hints):
+        if _font_loadable(c):
+            return c
     return None
 
 

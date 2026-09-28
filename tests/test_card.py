@@ -166,14 +166,18 @@ def main() -> int:
     check(bool(base_font), "应能找到系统字体用于构造测试样本")
     rounded_like = font_dir / "MyRoundedCN-Regular.ttf"
     emoji_like = font_dir / "NotoColorEmoji.ttf"
-    broken_like = font_dir / "BrokenRounded.woff2"  # 内容不是 woff2：必须探测为不可加载
-    for src, dst in ((base_font, rounded_like), (base_font, emoji_like), (base_font, broken_like)):
-        if src and Path(src).is_file():
-            shutil.copyfile(str(src), str(dst))
+    broken_like = font_dir / "AaaRoundedBroken.ttf"  # 垃圾内容：必须探测为不可加载
+    if base_font and Path(str(base_font)).is_file():
+        shutil.copyfile(str(base_font), str(rounded_like))
+        shutil.copyfile(str(base_font), str(emoji_like))
+    broken_like.write_bytes(b"not a font file")
 
+    named = [Path(p).name for p in card.list_fonts_by_hint([font_dir], ("rounded",))]
+    check(named == ["AaaRoundedBroken.ttf", "MyRoundedCN-Regular.ttf"],
+          f"list_fonts_by_hint 应列出全部名字匹配项（含读不了的、跳过 emoji），实际 {named}")
     picked = card.find_font_by_hint([font_dir], ("rounded",))
     check(picked is not None and Path(str(picked)).name == "MyRoundedCN-Regular.ttf",
-          f"应按名字挑到圆体、跳过 emoji 字体与坏文件，实际 {picked}")
+          f"应按名字挑到可加载的圆体（坏候选不挡路），实际 {picked}")
     check(card._display_font_file(str(rounded_like)) == str(rounded_like),
           "圆体风格下展示字体不再替换为楷体")
     check(card.find_font_by_hint([font_dir], ("不存在的关键词",)) is None,
@@ -183,6 +187,23 @@ def main() -> int:
     check(card._font_loadable(str(font_dir / "nope.ttf")) is False, "坏路径应探测为不可加载")
     check(card.find_font(str(font_dir / "nope.ttf"), []) is not None, "显式路径不存在时回落系统")
     check("sibling_font_dirs" not in dir(card), "不得再有「借用其它插件字体」的接口")
+
+    # 8.1) 真实 woff2 圆体（模拟 data/fonts/ResourceHanRoundedCN-Medium.woff2）：
+    #      仅当本机恰好存在样本时才跑——不是依赖，是拿真文件验证 FreeType 的 woff2 能力。
+    samples = sorted(
+        (Path(__file__).resolve().parents[2] / "astrbot_plugin_box").glob(
+            "core/resource/*ounded*.woff2")
+    )
+    if samples:
+        pub = Path(tempfile.mkdtemp(prefix="moe_pub_")) / "fonts"
+        pub.mkdir(parents=True, exist_ok=True)
+        target = pub / "ResourceHanRoundedCN-Medium.woff2"
+        shutil.copyfile(str(samples[0]), str(target))
+        picked_w2 = card.find_font_by_hint([pub], ("rounded",))
+        check(picked_w2 == str(target),
+              f"公共目录里的真实 woff2 圆体应被挑中，实际 {picked_w2}")
+        check(card._font_loadable(str(target)),
+              "本机 FreeType 应能加载 woff2（不能加载时插件会告警并回落默认字体）")
 
     # 圆体渲染冒烟：能落盘且非空白
     p_rounded = card.render_rank_card(

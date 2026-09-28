@@ -22,12 +22,14 @@ from . import fortune, lexicon, store
 PLUGIN_NAME = "astrbot_plugin_moe_star_whisper"
 
 try:  # M2 起提供图卡；缺失/失败时回退纯文本
+    from . import card  # v1.9.8：字体解析（find_font_by_hint）也要用模块本体
     from .card import (
         render_card, render_push_card, render_help_card,
         render_wallet_card, render_shop_card, render_rank_card,
         render_pk_card, render_notice_card, render_calendar_card,
     )
 except Exception:  # pragma: no cover
+    card = None
     render_card = None
     render_push_card = None
     render_help_card = None
@@ -287,26 +289,55 @@ class StarWhisperPlugin(Star):
             dirs.append(legacy)
         return dirs
 
+    def _find_rounded_font(self, data_dir: Path) -> str | None:
+        """在候选目录里按文件名挑圆体（v1.9.8）；挑不到时按原因分别给日志。"""
+        dirs = self._font_dirs(data_dir)
+        picked = card.find_font_by_hint(dirs, ("rounded",))
+        if picked:
+            logger.info(f"[{PLUGIN_NAME}] 卡面使用圆体：{picked}")
+            return picked
+        named = card.list_fonts_by_hint(dirs, ("rounded",))
+        if named:
+            logger.warning(
+                f"[{PLUGIN_NAME}] 找到圆体候选但本机读不了：{named}"
+                "（woff2 需要 FreeType 带 brotli 支持，建议改用 ttf/otf/ttc）——本次回落默认字体"
+            )
+        else:
+            logger.info(
+                f"[{PLUGIN_NAME}] 圆体风格未找到圆体字体（文件名需含 rounded）；已找 "
+                f"{[str(d) for d in dirs]}，本次回落默认字体；"
+                "把圆体放进 AstrBot 的 data/fonts/ 即可"
+            )
+        return None
+
     def _card_font_path(self, data_dir: Path) -> str | None:
-        """本次渲染实际使用的字体路径（v1.9.7）。
+        """本次渲染实际使用的字体路径（v1.9.8）。
 
         优先级：显式配置 `card_font_path` → 圆体风格时在候选目录里按名字挑圆体 →
-        None（交给 card.find_font 走系统字体）。挑不到圆体只记日志、不报错，
+        None（交给 card.find_font 走系统字体）。任何一步失败都只记日志、不抛错，
         绝不影响出卡（回落默认字体）。
         """
+        if card is None:  # 图卡模块不可用（PIL 缺失等），调用方本就不会走到这里
+            return None
         explicit = str(self._cfg("card_font_path", "") or "").strip()
         if explicit:
-            return explicit
+            p = Path(explicit).expanduser()
+            # 填了却用不上是最容易让人困惑的，所以两种情况都明确告警后回落
+            if not p.is_file():
+                logger.warning(
+                    f"[{PLUGIN_NAME}] card_font_path 指向的文件不存在：{explicit}"
+                    "（相对路径按 AstrBot 进程的工作目录解析，建议填绝对路径）——本次回落默认字体"
+                )
+                return None
+            if not card._font_loadable(str(p)):
+                logger.warning(
+                    f"[{PLUGIN_NAME}] card_font_path 指向的字体本机无法加载：{explicit}"
+                    "（woff2 需要 FreeType 带 brotli 支持，建议换 ttf/otf/ttc）——本次回落默认字体"
+                )
+                return None
+            return str(p)
         if str(self._cfg("card_font_style", "auto")).strip().lower() == "rounded":
-            dirs = self._font_dirs(data_dir)
-            picked = card.find_font_by_hint(dirs, ("rounded",))
-            if picked:
-                return picked
-            logger.info(
-                f"[{PLUGIN_NAME}] 圆体风格未找到圆体字体（已找 "
-                f"{[str(d) for d in dirs]}），本次回落默认字体；"
-                "把 Resource Han Rounded 等圆体放进 AstrBot 的 data/fonts/ 即可"
-            )
+            return self._find_rounded_font(data_dir)
         return None
 
     def _try_render_card(self, result: dict, uid: str, nickname: str = "",

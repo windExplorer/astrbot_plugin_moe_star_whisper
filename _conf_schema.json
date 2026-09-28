@@ -29,7 +29,7 @@
   },
   "card_font_path": {
     "description": "卡面字体路径",
-    "hint": "留空按顺序查找：本配置 → 插件 data 目录 fonts/ → AstrBot data/fonts/ → 系统字体（微软雅黑/Noto CJK）；支持 ttf/otf/ttc/woff2",
+    "hint": "直接填字体文件路径，例如 /AstrBot/data/fonts/ResourceHanRoundedCN-Medium.woff2（绝对路径最稳；相对路径按 AstrBot 进程的工作目录解析），支持 ttf/otf/ttc/woff2。留空则按「卡面字体风格」自动查找：插件 fonts/ → AstrBot data/fonts/ → 系统字体（微软雅黑/Noto CJK）",
     "type": "string",
     "default": ""
   },
