@@ -35,13 +35,13 @@
   },
   "card_width": {
     "description": "卡面单面宽度",
-    "hint": "塔罗牌式版式的单面宽度（比例参考经典塔罗 7:12）；同时透传给 anima 作为 AI 牌面出图宽。双联合成图总宽为两倍",
+    "hint": "塔罗牌式版式的单面宽度（比例参考经典塔罗 7:12）；同时透传给萌绘作为 AI 牌面出图宽。双联合成图总宽为两倍",
     "type": "int",
     "default": 700
   },
   "card_height": {
     "description": "卡面单面高度",
-    "hint": "塔罗牌式版式的单面高度；同时透传给 anima 作为 AI 牌面出图高。无 AI 牌面的单联卡内容过多时会自动加高防截断（配置值仍是最小高度）",
+    "hint": "塔罗牌式版式的单面高度；同时透传给萌绘作为 AI 牌面出图高。无 AI 牌面的单联卡内容过多时会自动加高防截断（配置值仍是最小高度）",
     "type": "int",
     "default": 1200
   },
@@ -102,13 +102,13 @@
   },
   "draw_enabled": {
     "description": "AI 封面图联动",
-    "hint": "需已安装 astrbot-comfyui-anima：抽签时由 LLM 生成提示词、anima 出图作为卡面封面图；anima 不可用或超时自动回退渐变封面",
+    "hint": "需已安装萌绘（astrbot-comfyui-anima）：抽签时由 LLM 生成提示词、萌绘出图作为卡面封面图；萌绘不可用或超时自动回退渐变封面",
     "type": "bool",
     "default": false
   },
   "draw_workflow": {
-    "description": "anima 工作流名",
-    "hint": "留空用 anima 的默认工作流；填写真实工作流名（可在 anima 里用 /绘图工作流 查询）",
+    "description": "萌绘工作流名",
+    "hint": "留空用萌绘的默认工作流；填写真实工作流名（可在萌绘里用 /绘图工作流 查询）",
     "type": "string",
     "default": ""
   },
@@ -136,25 +136,25 @@
   },
   "draw_negative_prompt": {
     "description": "负向提示词",
-    "hint": "附加给 anima 的 negative_prompt，如低质量标签；留空使用内置默认（排除男性角色：1boy, male, man, boy），填写则整体覆盖（若要保留排除男性请在自定义内容里自行带上）",
+    "hint": "附加给萌绘的 negative_prompt，如低质量标签；留空使用内置默认（排除男性角色：1boy, male, man, boy），填写则整体覆盖（若要保留排除男性请在自定义内容里自行带上）",
     "type": "string",
     "default": ""
   },
   "draw_silent": {
     "description": "静默生图",
-    "hint": "调用 anima 绘图时不发任何过程消息（处理中/排队/结果卡，图片由本插件发送）；需 anima v7.7.46+，关闭后恢复 anima 原生提示",
+    "hint": "调用萌绘绘图时不发任何过程消息（处理中/排队/结果卡，图片由本插件发送）；需萌绘 v7.7.46+，关闭后恢复萌绘原生提示",
     "type": "bool",
     "default": true
   },
   "draw_raw_prompt": {
     "description": "提示词透传",
-    "hint": "本插件的提示词已按 anima 语言规范生成，开启后跳过 anima 内部的 LLM 扩写与中译英处理（需 anima v7.7.46+）",
+    "hint": "本插件的提示词已按萌绘语言规范生成，开启后跳过萌绘内部的 LLM 扩写与中译英处理（需萌绘 v7.7.46+）",
     "type": "bool",
     "default": true
   },
   "draw_timeout": {
     "description": "出图超时",
-    "hint": "等待 anima 出图的秒数上限；anima 单张实测约 20-25 秒，超时后静默回退默认渐变",
+    "hint": "等待萌绘出图的秒数上限；萌绘单张实测约 20-25 秒，超时后静默回退默认渐变",
     "type": "int",
     "slider": {
       "min": 30,
