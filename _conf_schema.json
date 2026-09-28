@@ -29,9 +29,23 @@
   },
   "card_font_path": {
     "description": "卡面字体路径",
-    "hint": "留空按顺序查找：本配置 → 插件 data 目录 fonts/ → AstrBot data/fonts/ → 系统字体（微软雅黑/Noto CJK）",
+    "hint": "留空按顺序查找：本配置 → 插件 data 目录 fonts/ → AstrBot data/fonts/ → 系统字体（微软雅黑/Noto CJK）；支持 ttf/otf/ttc/woff2",
     "type": "string",
     "default": ""
+  },
+  "card_font_style": {
+    "description": "卡面字体风格",
+    "hint": "跟随默认=正文黑体 + 展示楷体（现有观感）；圆体=全卡用 Resource Han Rounded 圆体（与「萌萌资料卡」同款，SIL OFL 授权）——字体文件来源：装了萌绘资料卡会直接借它的圆体，也可以自己把字体丢进插件 data 目录 fonts/ 或 AstrBot data/fonts/；找不到或本机读不了该格式时自动回落默认字体并记日志",
+    "type": "string",
+    "options": [
+      "auto",
+      "rounded"
+    ],
+    "labels": [
+      "跟随默认（黑体 + 楷体）",
+      "圆体（资料卡同款）"
+    ],
+    "default": "auto"
   },
   "card_width": {
     "description": "卡面单面宽度",

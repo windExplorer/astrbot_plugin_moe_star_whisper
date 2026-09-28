@@ -157,6 +157,28 @@ def main() -> int:
         lo_, hi_ = im.convert("L").getextrema()
         check(hi_ - lo_ > 30, f"提示卡应有明暗层次：{Path(p).name} {lo_}~{hi_}")
 
+    # 8) 字体风格（v1.9.6）：圆体候选 / woff2 可读性探测 / emoji 字体必须被跳过
+    sibs = card.sibling_font_dirs()
+    if sibs:
+        ff_rounded = card.find_font(None, [Path(d) for d in sibs])
+        check(bool(ff_rounded) and "hanrounded" in Path(str(ff_rounded)).name.lower(),
+              f"邻近插件的圆体应被选中（不能挑到 NotoColorEmoji），实际 {ff_rounded}")
+        check(card._display_font_file(str(ff_rounded)) == str(ff_rounded),
+              "圆体风格下展示字体不再替换为楷体")
+    check(card.find_font(None, []) is not None, "默认风格仍能解析到系统字体")
+    check(card._font_loadable(str(tmp / "nope.ttf")) is False, "坏路径应探测为不可加载")
+    check(card.find_font(str(tmp / "nope.ttf"), []) is not None, "显式路径不存在时回落系统字体")
+    # 圆体渲染冒烟：能落盘且非空白
+    p_rounded = card.render_rank_card(
+        "今日星语榜", [(1, "甲", "95", ""), (2, "乙", "88", "")], misc,
+        file_key="rounded", subtitle="萌萌星语 · 本群成员 3 人", date_str="2026-09-28",
+        extra_font_dirs=[Path(d) for d in sibs],
+    )
+    im_r = Image.open(p_rounded)
+    im_r.load()
+    lo_r, hi_r = im_r.convert("L").getextrema()
+    check(hi_r - lo_r > 30, f"圆体风格卡应正常渲染，实际 {lo_r}~{hi_r}")
+
     if FAILED:
         print(f"\n{len(FAILED)} 项失败")
         return 1

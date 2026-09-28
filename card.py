@@ -39,21 +39,69 @@ _DISPLAY_CANDIDATES = (
 _font_cache: dict = {}
 
 
+def _font_loadable(path: str) -> bool:
+    """试加载一次（20 号），失败说明这个字体本机读不了。
+
+    为什么要试：woff2 需要 FreeType 带 brotli 支持（Pillow 9+ 官方 wheel 一般都有，
+    但老环境可能没有）。不试的话会等到整张卡渲染时才炸，用户只能拿到纯文本兜底。
+    加载结果进 _font_cache，不会重复解析。
+    """
+    try:
+        _font(path, 20)
+        return True
+    except Exception:
+        return False
+
+
 def find_font(explicit: str | None = None, extra_dirs=None) -> str | None:
-    """多级查找：显式路径 → extra_dirs 下的 ttf/ttc/otf → 系统候选。找不到返回 None。"""
+    """多级查找：显式路径 → extra_dirs 下的 ttf/otf/ttc/woff2 → 系统候选。
+
+    每个候选先试加载（见 _font_loadable），读不了就跳到下一个。找不到返回 None。
+    emoji / symbol / icon 类字体直接跳过——它们没有中文字形，被选中会渲染出一片空白
+    （萌萌资料卡目录里就有 NotoColorEmoji.ttf，字母序还排在圆体前面，v1.9.6 踩过）。
+    """
     candidates: list = []
     if explicit:
         candidates.append(explicit)
     for d in extra_dirs or []:
         p = Path(d)
         if p.is_dir():
-            for pat in ("*.ttf", "*.otf", "*.ttc"):
-                candidates += [str(x) for x in sorted(p.glob(pat))]
+            for pat in ("*.ttf", "*.otf", "*.ttc", "*.woff2"):
+                for x in sorted(p.glob(pat)):
+                    if any(h in x.name.lower() for h in _SKIP_FONT_NAME_HINTS):
+                        continue
+                    candidates.append(str(x))
     candidates += _SYSTEM_FONT_CANDIDATES
     for c in candidates:
-        if c and Path(c).is_file():
+        if c and Path(c).is_file() and _font_loadable(c):
             return c
     return None
+
+
+# 不能当正文用的字体名特征（emoji/symbol/icon 字体没有中文字形）
+_SKIP_FONT_NAME_HINTS = ("emoji", "symbol", "icon")
+
+# 邻近插件自带的字体目录（relative to 本插件目录的上一级，即 data/plugins/）
+#   astrbot_plugin_box（萌萌资料卡）：core/resource 下有 Resource Han Rounded（SIL OFL 1.1）
+_SIBLING_FONT_PLUGINS = (
+    ("astrbot_plugin_box", "core", "resource"),
+)
+
+
+def sibling_font_dirs() -> list[str]:
+    """同宿主下邻近插件自带的字体目录（v1.9.6）。
+
+    萌语自己不打包字体（圆体一份 3.6MB，整个包才 0.5MB），但装了萌萌资料卡时
+    可以直接借它的圆体：插件都装在 `data/plugins/<插件名>/` 下，同级即可找到。
+    找不到就返回空表，调用方照常走系统字体。
+    """
+    root = Path(__file__).resolve().parent.parent
+    out: list[str] = []
+    for parts in _SIBLING_FONT_PLUGINS:
+        cand = root.joinpath(*parts)
+        if cand.is_dir():
+            out.append(str(cand))
+    return out
 
 
 def _font(font_file: str, size: float) -> ImageFont.FreeTypeFont:
@@ -75,7 +123,13 @@ def _bold_variant(font_file: str) -> str:
 
 
 def _display_font_file(font_file: str) -> str:
-    """展示字体：楷体/宋体系（命签感），都没有则退回粗体变体。"""
+    """展示字体：楷体/宋体系（命签感），都没有则退回粗体变体。
+
+    例外：圆体（Resource Han Rounded，`card_font_style=rounded`）本身就是完整风格，
+    直接沿用不替换——否则会出现「圆体正文 + 楷体标题」的割裂感（v1.9.6）。
+    """
+    if "rounded" in Path(str(font_file)).name.lower():
+        return font_file
     for cand in _DISPLAY_CANDIDATES:
         if Path(cand).is_file():
             return cand

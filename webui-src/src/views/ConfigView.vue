@@ -103,7 +103,7 @@ const GROUP_META: { name: string; description: string; keys: string[] }[] = [
     name: "基础与出签",
     description: "时区、种子盐、出签方式与卡面外观",
     keys: [
-      "timezone", "salt", "output_mode", "card_theme", "card_font_path",
+      "timezone", "salt", "output_mode", "card_theme", "card_font_path", "card_font_style",
       "card_width", "card_height", "fortune_signer", "tarot_label_on_image",
     ],
   },

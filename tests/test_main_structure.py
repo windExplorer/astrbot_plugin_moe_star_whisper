@@ -120,6 +120,23 @@ def main() -> int:
     check("_from_tag" not in src and "来自 " not in src,
           "榜单不得再标注抽签来源群")
 
+    # v1.9.6：字体风格（圆体借邻近插件的字体）
+    root = Path(__file__).resolve().parents[1]
+    card_src = (root / "card.py").read_text(encoding="utf-8")
+    check("def sibling_font_dirs" in card_src, "card.py 缺少 sibling_font_dirs")
+    check("_SKIP_FONT_NAME_HINTS" in card_src, "字体候选必须跳过 emoji/symbol 字体")
+    check("def _font_loadable" in card_src, "必须探测字体可否加载（woff2 依赖 FreeType）")
+    check("*.woff2" in card_src, "字体查找要支持 woff2")
+    check("def _font_dirs" in src and "card_font_style" in src,
+          "main.py 必须按 card_font_style 组装字体目录")
+    check("extra_font_dirs=self._font_dirs(data_dir)" in src,
+          "运势卡渲染必须使用 _font_dirs 的候选目录")
+    schema_src = (root / "_conf_schema.json").read_text(encoding="utf-8")
+    check("card_font_style" in schema_src, "_conf_schema.json 缺少 card_font_style")
+    view_src = (root / "webui-src" / "src" / "views" / "ConfigView.vue").read_text(encoding="utf-8")
+    check('"card_font_style"' in view_src,
+          "新配置键必须进 ConfigView 的分区表（否则掉进「其他」分区）")
+
     # 热重载列表必须包含 webui_api（v1.9.0）：控制台接口都在里面，
     # 不重载的话热更上来的实例会一直跑旧接口（新增路由静默 404）
     import re as _re

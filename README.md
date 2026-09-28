@@ -48,7 +48,16 @@ AstrBot 今日运势插件：每个用户每天一支专属「星语签」——
 
 ## 字体说明（图卡）
 
-不打包字体，按以下顺序查找：配置 `card_font_path` → `data/plugin_data/astrbot_plugin_moe_star_whisper/fonts/` → `data/fonts/` → 系统字体（Windows 微软雅黑 / Linux Noto CJK）。找不到可用字体时自动回退纯文本出签。
+不打包字体，按以下顺序查找：配置 `card_font_path` → `data/plugin_data/astrbot_plugin_moe_star_whisper/fonts/` → `data/fonts/` → 系统字体（Windows 微软雅黑 / Linux Noto CJK）。支持 `ttf / otf / ttc / woff2`（woff2 需 Pillow 所带 FreeType 支持 brotli，读不了的候选会被自动跳过）。找不到可用字体时自动回退纯文本出签。
+
+**字体风格**（配置 `card_font_style`）：
+
+| 取值 | 效果 | 字体来源 |
+| --- | --- | --- |
+| `跟随默认` | 正文黑体 + 展示文字（吉凶/牌名/大数字）楷体 | 系统字体（现有观感） |
+| `圆体` | 全卡统一圆体（标题/正文/名次/分数） | 插件 `fonts/` → **已安装的「萌萌资料卡」的 `core/resource/`（Resource Han Rounded，SIL OFL 1.1）** → `data/fonts/` → 系统字体 |
+
+选「圆体」时若本机找不到圆体文件或该格式读不了，会**自动回落**默认字体并记日志，不会导致出卡失败；想开箱即用也可以自己把圆体字体丢进插件 `fonts/` 目录。
 
 ## 依赖
 

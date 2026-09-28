@@ -271,6 +271,23 @@ class StarWhisperPlugin(Star):
             logger.warning(f"[{PLUGIN_NAME}] 头像下载失败：{type(e).__name__}: {e}")
         return None
 
+    def _font_dirs(self, data_dir: Path) -> list:
+        """卡片字体候选目录（按配置 card_font_style，v1.9.6）。
+
+        auto    → 插件 fonts/ → AstrBot data/fonts/ → 系统字体（正文黑体 + 展示楷体）
+        rounded → 插件 fonts/ → 邻近插件的圆体目录（萌萌资料卡 box）→ data/fonts/ → 系统
+
+        顺序即优先级：rounded 时把资料卡的圆体目录排在 data/fonts 前面，
+        免得用户全局放的黑体把圆体顶掉；找不到圆体就自然落到系统字体。
+        """
+        dirs = [Path(data_dir) / "fonts", Path("data/fonts")]
+        style = str(self._cfg("card_font_style", "auto")).strip().lower()
+        if style == "rounded":
+            dirs = [Path(data_dir) / "fonts"]
+            dirs += [Path(p) for p in card.sibling_font_dirs()]
+            dirs.append(Path("data/fonts"))
+        return dirs
+
     def _try_render_card(self, result: dict, uid: str, nickname: str = "",
                          avatar_bytes: bytes | None = None, bg_image=None):
         """渲染卡图，失败返回 None（调用方回退纯文本，绝不吞错不回，PRD §7.3）。"""
@@ -292,7 +309,7 @@ class StarWhisperPlugin(Star):
                 result,
                 data_dir / "cards" / uid,
                 font_path=self._cfg("card_font_path", "") or None,
-                extra_font_dirs=[data_dir / "fonts", Path("data/fonts")],
+                extra_font_dirs=self._font_dirs(data_dir),
                 width=int(self._cfg("card_width", 1024)),
                 height=int(self._cfg("card_height", 1536)),
                 signer=str(self._cfg("fortune_signer", "星语者")),
@@ -332,7 +349,7 @@ class StarWhisperPlugin(Star):
             data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
             kwargs.setdefault("cards_root", data_dir / "cards" / "_misc")
             kwargs.setdefault("font_path", self._cfg("card_font_path", "") or None)
-            kwargs.setdefault("extra_font_dirs", [data_dir / "fonts", Path("data/fonts")])
+            kwargs.setdefault("extra_font_dirs", self._font_dirs(data_dir))
             kwargs.setdefault("signer", str(self._cfg("fortune_signer", "星语者")))
             kwargs.setdefault("theme", str(self._cfg("card_theme", "auto")))
             return render_fn(*args, **kwargs)
