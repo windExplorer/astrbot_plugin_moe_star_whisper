@@ -157,22 +157,38 @@ def main() -> int:
         lo_, hi_ = im.convert("L").getextrema()
         check(hi_ - lo_ > 30, f"提示卡应有明暗层次：{Path(p).name} {lo_}~{hi_}")
 
-    # 8) 字体风格（v1.9.6）：圆体候选 / woff2 可读性探测 / emoji 字体必须被跳过
-    sibs = card.sibling_font_dirs()
-    if sibs:
-        ff_rounded = card.find_font(None, [Path(d) for d in sibs])
-        check(bool(ff_rounded) and "hanrounded" in Path(str(ff_rounded)).name.lower(),
-              f"邻近插件的圆体应被选中（不能挑到 NotoColorEmoji），实际 {ff_rounded}")
-        check(card._display_font_file(str(ff_rounded)) == str(ff_rounded),
-              "圆体风格下展示字体不再替换为楷体")
-    check(card.find_font(None, []) is not None, "默认风格仍能解析到系统字体")
-    check(card._font_loadable(str(tmp / "nope.ttf")) is False, "坏路径应探测为不可加载")
-    check(card.find_font(str(tmp / "nope.ttf"), []) is not None, "显式路径不存在时回落系统字体")
+    # 8) 字体风格（v1.9.7）：按文件名挑圆体、坏候选不挡路、emoji 字体必须被跳过。
+    #    不依赖任何其它插件——测试用「系统字体改名」造样本。
+    import shutil
+
+    font_dir = Path(tempfile.mkdtemp(prefix="moe_font_"))
+    base_font = card.find_font(None, [])
+    check(bool(base_font), "应能找到系统字体用于构造测试样本")
+    rounded_like = font_dir / "MyRoundedCN-Regular.ttf"
+    emoji_like = font_dir / "NotoColorEmoji.ttf"
+    broken_like = font_dir / "BrokenRounded.woff2"  # 内容不是 woff2：必须探测为不可加载
+    for src, dst in ((base_font, rounded_like), (base_font, emoji_like), (base_font, broken_like)):
+        if src and Path(src).is_file():
+            shutil.copyfile(str(src), str(dst))
+
+    picked = card.find_font_by_hint([font_dir], ("rounded",))
+    check(picked is not None and Path(str(picked)).name == "MyRoundedCN-Regular.ttf",
+          f"应按名字挑到圆体、跳过 emoji 字体与坏文件，实际 {picked}")
+    check(card._display_font_file(str(rounded_like)) == str(rounded_like),
+          "圆体风格下展示字体不再替换为楷体")
+    check(card.find_font_by_hint([font_dir], ("不存在的关键词",)) is None,
+          "名字对不上时返回 None（不硬塞别的字体）")
+    check(card.find_font_by_hint([font_dir / "no_such_dir"], ("rounded",)) is None,
+          "目录不存在时返回 None")
+    check(card._font_loadable(str(font_dir / "nope.ttf")) is False, "坏路径应探测为不可加载")
+    check(card.find_font(str(font_dir / "nope.ttf"), []) is not None, "显式路径不存在时回落系统")
+    check("sibling_font_dirs" not in dir(card), "不得再有「借用其它插件字体」的接口")
+
     # 圆体渲染冒烟：能落盘且非空白
     p_rounded = card.render_rank_card(
         "今日星语榜", [(1, "甲", "95", ""), (2, "乙", "88", "")], misc,
         file_key="rounded", subtitle="萌萌星语 · 本群成员 3 人", date_str="2026-09-28",
-        extra_font_dirs=[Path(d) for d in sibs],
+        font_path=str(rounded_like), extra_font_dirs=[font_dir],
     )
     im_r = Image.open(p_rounded)
     im_r.load()

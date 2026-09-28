@@ -2,6 +2,18 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v1.9.7 (2026-09-28)
+
+字体来源只认公共目录，不再借用其它插件（版本 v1.9.6 -> v1.9.7）。
+
+- **背景**：v1.9.6 的「圆体」风格是靠扫描邻近插件（萌萌资料卡 `core/resource/`）来借字体的。这形成跨插件耦合——对方被卸载、改名或目录结构变了，圆体就失效；字体本身也不该被当成某个插件的私有资源。
+- **改法**：删除 `card.sibling_font_dirs()` 与 `_SIBLING_FONT_PLUGINS`，字体只认两个位置：
+  1. **AstrBot 的公共字体目录 `data/fonts/`**——由插件数据目录反推两级得到（`data/plugin_data/<插件名>` → `data/`），不依赖进程 cwd，另外保留 `data/fonts` 相对写法兜底；
+  2. 本插件数据目录下的 `fonts/`。
+- **圆体怎么挑**：新增 `card.find_font_by_hint(dirs, hints=("rounded",))`，按**文件名关键词**挑可用字体（`find_font` 取的是目录里字典序第一个，多字体混放时会挑错）；main.py 新增 `_card_font_path()` 集中解析：显式配置 `card_font_path` → 圆体风格时按名字挑 → `None` 交给系统字体。运势卡 / 提示卡 / 推送卡三处入口统一走它。
+- **拿不到圆体不算故障**：找不到只记一条 info 日志（含已查找的目录），本次回落默认字体，不影响出卡。
+- 测试：`test_card` 改用「系统字体改名造样本」验证挑选规则（**不再依赖本机装了资料卡**）——按名字挑到圆体、跳过 `NotoColorEmoji` 与内容损坏的伪 woff2（坏候选不挡后面的可用候选）、关键词对不上返回 `None`、`sibling_font_dirs` 接口已不存在；`test_main_structure` 守卫改为「不得出现 `sibling_font_dirs` / `astrbot_plugin_box`」「公共字体目录必须由数据目录反推」「必须有 `_card_font_path` 与 `find_font_by_hint`」。
+
 ## v1.9.6 (2026-09-28)
 
 新增「圆体」字体风格（版本 v1.9.5 -> v1.9.6）。

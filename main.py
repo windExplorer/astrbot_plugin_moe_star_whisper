@@ -272,21 +272,42 @@ class StarWhisperPlugin(Star):
         return None
 
     def _font_dirs(self, data_dir: Path) -> list:
-        """卡片字体候选目录（按配置 card_font_style，v1.9.6）。
+        """卡片字体候选目录（v1.9.7）。
 
-        auto    → 插件 fonts/ → AstrBot data/fonts/ → 系统字体（正文黑体 + 展示楷体）
-        rounded → 插件 fonts/ → 邻近插件的圆体目录（萌萌资料卡 box）→ data/fonts/ → 系统
+        只认两个位置，**不依赖任何其它插件**：
+          1. 本插件数据目录下的 `fonts/`（`data/plugin_data/<插件名>/fonts/`）
+          2. AstrBot 的公共字体目录 `data/fonts/`（由数据目录反推两级拿到）
 
-        顺序即优先级：rounded 时把资料卡的圆体目录排在 data/fonts 前面，
-        免得用户全局放的黑体把圆体顶掉；找不到圆体就自然落到系统字体。
+        都找不到就继续走 card.py 里的系统字体候选（Windows 微软雅黑 / Linux Noto CJK）。
         """
-        dirs = [Path(data_dir) / "fonts", Path("data/fonts")]
-        style = str(self._cfg("card_font_style", "auto")).strip().lower()
-        if style == "rounded":
-            dirs = [Path(data_dir) / "fonts"]
-            dirs += [Path(p) for p in card.sibling_font_dirs()]
-            dirs.append(Path("data/fonts"))
+        data_dir = Path(data_dir)
+        dirs = [data_dir / "fonts", data_dir.parent.parent / "fonts"]
+        legacy = Path("data/fonts")  # cwd 不在 AstrBot 根目录时的兜底写法
+        if legacy not in dirs:
+            dirs.append(legacy)
         return dirs
+
+    def _card_font_path(self, data_dir: Path) -> str | None:
+        """本次渲染实际使用的字体路径（v1.9.7）。
+
+        优先级：显式配置 `card_font_path` → 圆体风格时在候选目录里按名字挑圆体 →
+        None（交给 card.find_font 走系统字体）。挑不到圆体只记日志、不报错，
+        绝不影响出卡（回落默认字体）。
+        """
+        explicit = str(self._cfg("card_font_path", "") or "").strip()
+        if explicit:
+            return explicit
+        if str(self._cfg("card_font_style", "auto")).strip().lower() == "rounded":
+            dirs = self._font_dirs(data_dir)
+            picked = card.find_font_by_hint(dirs, ("rounded",))
+            if picked:
+                return picked
+            logger.info(
+                f"[{PLUGIN_NAME}] 圆体风格未找到圆体字体（已找 "
+                f"{[str(d) for d in dirs]}），本次回落默认字体；"
+                "把 Resource Han Rounded 等圆体放进 AstrBot 的 data/fonts/ 即可"
+            )
+        return None
 
     def _try_render_card(self, result: dict, uid: str, nickname: str = "",
                          avatar_bytes: bytes | None = None, bg_image=None):
@@ -308,7 +329,7 @@ class StarWhisperPlugin(Star):
             return render_card(
                 result,
                 data_dir / "cards" / uid,
-                font_path=self._cfg("card_font_path", "") or None,
+                font_path=self._card_font_path(data_dir),
                 extra_font_dirs=self._font_dirs(data_dir),
                 width=int(self._cfg("card_width", 1024)),
                 height=int(self._cfg("card_height", 1536)),
@@ -348,7 +369,7 @@ class StarWhisperPlugin(Star):
         try:
             data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
             kwargs.setdefault("cards_root", data_dir / "cards" / "_misc")
-            kwargs.setdefault("font_path", self._cfg("card_font_path", "") or None)
+            kwargs.setdefault("font_path", self._card_font_path(data_dir))
             kwargs.setdefault("extra_font_dirs", self._font_dirs(data_dir))
             kwargs.setdefault("signer", str(self._cfg("fortune_signer", "星语者")))
             kwargs.setdefault("theme", str(self._cfg("card_theme", "auto")))
@@ -662,8 +683,8 @@ class StarWhisperPlugin(Star):
                     today, weekday_name, phase, fest_line,
                     accent_hex=accent.get("hex", "#F6C6D3"),
                     cards_root=data_dir / "push",
-                    font_path=self._cfg("card_font_path", "") or None,
-                    extra_font_dirs=[data_dir / "fonts", Path("data/fonts")],
+                    font_path=self._card_font_path(data_dir),
+                    extra_font_dirs=self._font_dirs(data_dir),
                     signer=str(self._cfg("fortune_signer", "星语者")),
                 )
             except Exception:

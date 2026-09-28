@@ -81,27 +81,29 @@ def find_font(explicit: str | None = None, extra_dirs=None) -> str | None:
 # 不能当正文用的字体名特征（emoji/symbol/icon 字体没有中文字形）
 _SKIP_FONT_NAME_HINTS = ("emoji", "symbol", "icon")
 
-# 邻近插件自带的字体目录（relative to 本插件目录的上一级，即 data/plugins/）
-#   astrbot_plugin_box（萌萌资料卡）：core/resource 下有 Resource Han Rounded（SIL OFL 1.1）
-_SIBLING_FONT_PLUGINS = (
-    ("astrbot_plugin_box", "core", "resource"),
-)
+def find_font_by_hint(dirs, hints=("rounded",)) -> str | None:
+    """在候选目录里按**文件名关键词**挑一个可用字体（v1.9.7，圆体风格用）。
 
+    与 `find_font` 的分工：`find_font` 取目录里字典序第一个可用字体（默认风格用）；
+    这里要的是「名字对得上」的那个——使用者可能把圆体、黑体、楷体一起丢进
+    公共字体目录，只有按名字挑才能稳定拿到想要的圆体。
 
-def sibling_font_dirs() -> list[str]:
-    """同宿主下邻近插件自带的字体目录（v1.9.6）。
-
-    萌语自己不打包字体（圆体一份 3.6MB，整个包才 0.5MB），但装了萌萌资料卡时
-    可以直接借它的圆体：插件都装在 `data/plugins/<插件名>/` 下，同级即可找到。
-    找不到就返回空表，调用方照常走系统字体。
+    字体放哪完全由使用者决定（推荐 AstrBot 的 `data/fonts/` 公共目录），
+    插件不借用、也不依赖任何其它插件的字体。
     """
-    root = Path(__file__).resolve().parent.parent
-    out: list[str] = []
-    for parts in _SIBLING_FONT_PLUGINS:
-        cand = root.joinpath(*parts)
-        if cand.is_dir():
-            out.append(str(cand))
-    return out
+    hints = tuple(str(h).lower() for h in hints)
+    for d in dirs or []:
+        p = Path(d)
+        if not p.is_dir():
+            continue
+        for pat in ("*.ttf", "*.otf", "*.ttc", "*.woff2"):
+            for x in sorted(p.glob(pat)):
+                name = x.name.lower()
+                if any(skip in name for skip in _SKIP_FONT_NAME_HINTS):
+                    continue
+                if any(h in name for h in hints) and _font_loadable(str(x)):
+                    return str(x)
+    return None
 
 
 def _font(font_file: str, size: float) -> ImageFont.FreeTypeFont:
@@ -125,7 +127,7 @@ def _bold_variant(font_file: str) -> str:
 def _display_font_file(font_file: str) -> str:
     """展示字体：楷体/宋体系（命签感），都没有则退回粗体变体。
 
-    例外：圆体（Resource Han Rounded，`card_font_style=rounded`）本身就是完整风格，
+    例外：圆体（如 Resource Han Rounded，`card_font_style=rounded`）本身就是完整风格，
     直接沿用不替换——否则会出现「圆体正文 + 楷体标题」的割裂感（v1.9.6）。
     """
     if "rounded" in Path(str(font_file)).name.lower():

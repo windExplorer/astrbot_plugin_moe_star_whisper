@@ -120,15 +120,20 @@ def main() -> int:
     check("_from_tag" not in src and "来自 " not in src,
           "榜单不得再标注抽签来源群")
 
-    # v1.9.6：字体风格（圆体借邻近插件的字体）
+    # v1.9.7：字体风格（字体统一放公共目录，不借用其它插件）
     root = Path(__file__).resolve().parents[1]
     card_src = (root / "card.py").read_text(encoding="utf-8")
-    check("def sibling_font_dirs" in card_src, "card.py 缺少 sibling_font_dirs")
+    check("def find_font_by_hint" in card_src, "card.py 缺少 find_font_by_hint（按名字挑圆体）")
+    check("sibling_font_dirs" not in card_src and "astrbot_plugin_box" not in card_src,
+          "字体不得借用其它插件目录（统一放 AstrBot data/fonts）")
     check("_SKIP_FONT_NAME_HINTS" in card_src, "字体候选必须跳过 emoji/symbol 字体")
     check("def _font_loadable" in card_src, "必须探测字体可否加载（woff2 依赖 FreeType）")
     check("*.woff2" in card_src, "字体查找要支持 woff2")
     check("def _font_dirs" in src and "card_font_style" in src,
-          "main.py 必须按 card_font_style 组装字体目录")
+          "main.py 必须按 card_font_style 处理字体")
+    check('parent.parent / "fonts"' in src, "公共字体目录应由数据目录反推（data/fonts）")
+    check("def _card_font_path" in src, "字体路径必须集中解析（含圆体挑选与回落）")
+    check("card.find_font_by_hint" in src, "圆体风格必须走 find_font_by_hint")
     check("extra_font_dirs=self._font_dirs(data_dir)" in src,
           "运势卡渲染必须使用 _font_dirs 的候选目录")
     schema_src = (root / "_conf_schema.json").read_text(encoding="utf-8")

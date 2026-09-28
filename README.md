@@ -55,9 +55,14 @@ AstrBot 今日运势插件：每个用户每天一支专属「星语签」——
 | 取值 | 效果 | 字体来源 |
 | --- | --- | --- |
 | `跟随默认` | 正文黑体 + 展示文字（吉凶/牌名/大数字）楷体 | 系统字体（现有观感） |
-| `圆体` | 全卡统一圆体（标题/正文/名次/分数） | 插件 `fonts/` → **已安装的「萌萌资料卡」的 `core/resource/`（Resource Han Rounded，SIL OFL 1.1）** → `data/fonts/` → 系统字体 |
+| `圆体` | 全卡统一圆体（标题/正文/名次/分数） | 在下方候选目录里按文件名挑 `*rounded*` 字体 |
 
-选「圆体」时若本机找不到圆体文件或该格式读不了，会**自动回落**默认字体并记日志，不会导致出卡失败；想开箱即用也可以自己把圆体字体丢进插件 `fonts/` 目录。
+字体来源只认两个位置（**不依赖任何其它插件**）：
+
+1. **AstrBot 的公共字体目录 `data/fonts/`**（推荐——放这里所有插件都能用）；
+2. 本插件数据目录的 `data/plugin_data/astrbot_plugin_moe_star_whisper/fonts/`。
+
+选「圆体」时若这些目录里没有圆体（或该格式本机读不了），会**自动回落**默认字体并记一条日志，不会导致出卡失败。圆体推荐 [Resource Han Rounded](https://github.com/CyanoHao/Resource-Han-Rounded)（SIL OFL 1.1，文件名形如 `ResourceHanRoundedCN-Medium.woff2`）。
 
 ## 依赖
 
