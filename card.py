@@ -121,6 +121,28 @@ def draw_len(text: str, font: ImageFont.FreeTypeFont) -> float:
         return font.getsize(text)[0]
 
 
+def _fit_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> str:
+    """按像素宽度截断并补省略号（二分回退）；放不下一个字符时返回空串。
+
+    v1.9.5 新增：榜单里昵称会跟右侧分数抢位置，标题会跟右上角日期抢位置，
+    统一用「量宽 + 截断」而不是硬排版，宽度不够也不会叠字。
+    """
+    text = str(text)
+    if max_width <= 0:
+        return ""
+    if draw_len(text, font) <= max_width:
+        return text
+    ell = "…"
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if draw_len(text[:mid] + ell, font) <= max_width:
+            lo = mid
+        else:
+            hi = mid - 1
+    return (text[:lo] + ell) if lo > 0 else ""
+
+
 def _cover(img: Image.Image, w: int, h: int) -> Image.Image:
     """等比 cover 裁切到目标尺寸（理想情况底图尺寸已与卡布一致，仅兜底）。"""
     sw, sh = img.size
@@ -925,12 +947,25 @@ def _utility_card_base(
     left, right = margin + int(42 * u), W - margin - int(42 * u)
     y = margin + int(32 * u)
     disp = _display_font_file(font_file)
-    draw.text((left, y), subtitle, font=_font(font_file, int(25 * u)), fill=sub)
-    if title_right:
-        draw.text((right, y + int(44 * u)), title_right,
-                  font=_font(font_file, int(28 * u)), fill=sub, anchor="ra")
-    draw.text((left, y + int(34 * u)), title,
-              font=_font(disp, int(56 * u)), fill=ink)
+    meta_font = _font(font_file, int(25 * u))
+    draw.text((left, y), subtitle, font=meta_font, fill=sub)
+    # 右侧信息（日期）固定右上角、与副标题同一行：早先跟大标题挤在同一行，
+    # 标题一长就叠在一起（v1.9.5 修）
+    right_text = str(title_right or "")
+    right_w = 0.0
+    if right_text:
+        right_w = draw_len(right_text, meta_font)
+        draw.text((right, y), right_text, font=meta_font, fill=sub, anchor="ra")
+    # 大标题按剩余宽度自适应：先逐档缩字号，仍然放不下才截断
+    avail = right - left - (int(right_w) + int(28 * u) if right_text else 0)
+    avail = max(int(150 * u), int(avail))
+    title_size = int(56 * u)
+    title_font = _font(disp, title_size)
+    while title_size > int(34 * u) and draw_len(str(title), title_font) > avail:
+        title_size -= int(4 * u)
+        title_font = _font(disp, title_size)
+    title_text = _fit_text(str(title), title_font, avail)
+    draw.text((left, y + int(34 * u)), title_text, font=title_font, fill=ink)
     y += int(116 * u)
     draw.line([(left, y), (right, y)], fill=line_rgb, width=max(1, int(2 * u)))
     y += int(24 * u)
@@ -1118,6 +1153,7 @@ def render_rank_card(
     file_key: str = "rank",
     empty_text: str = "还没有人抽签，快来当第一个！",
     date_str: str = "",
+    subtitle: str = "萌萌星语",
     accent_hex: str = "#F6C6D3",
     font_path: str | None = None,
     extra_font_dirs=None,
@@ -1125,7 +1161,11 @@ def render_rank_card(
     width: int = 900,
     theme: str = "light",
 ) -> str:
-    """星语榜卡：rows=[(名次, 昵称, 右侧主文本, 右侧小注)]，前三名奖牌色。"""
+    """星语榜卡：rows=[(名次, 昵称, 右侧主文本, 右侧小注)]，前三名奖牌色。
+
+    标题（title）只放榜名，统计口径走 subtitle（小字，空间充裕），
+    这样标题不会因为口径文字太长被截断（v1.9.5）。
+    """
     font_file = find_font(font_path, extra_font_dirs)
     if not font_file:
         raise RuntimeError("未找到可用中文字体")
@@ -1134,7 +1174,7 @@ def render_rank_card(
     row_h = int(78 * u0)
     H = int((218 + 30 + max(1, len(rows)) * row_h + 96 + 16) * u0)
     ctx = _utility_card_base(width, H, accent_hex, font_file,
-                             subtitle="萌萌星语 · 群玩法", title=title,
+                             subtitle=subtitle, title=title,
                              dark=dark, title_right=date_str)
     draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
     left, right = ctx["left"], ctx["right"]
@@ -1150,13 +1190,35 @@ def render_rank_card(
                   font=_font(ff, int(30 * u)), fill=ctx["sub"], anchor="mm")
         return _utility_card_save(ctx, cards_root, f"rank_{file_key}.png", signer)
 
+    # 名次列自适应（v1.9.5）：按实际最大名次宽度排版（两位数、三位数都不会挤到昵称）；
+    # 名次过宽时先缩字号，昵称再按剩余宽度截断，绝不与右侧分数叠字。
+    name_font = _font(ff, int(32 * u))
+    rank_size = int(44 * u)
+    rank_font = _font(ctx["disp"], rank_size)
+    rank_cap = int(72 * u)
+    while rank_size > int(26 * u) and max(
+        draw_len(str(r[0]), rank_font) for r in rows
+    ) > rank_cap:
+        rank_size -= int(4 * u)
+        rank_font = _font(ctx["disp"], rank_size)
+    rank_col = max(draw_len(str(r[0]), rank_font) for r in rows)
+    name_x = left + int(rank_col) + int(22 * u)
+    # 右侧信息列宽取「所有行的主文本/小注里最宽的那个」，昵称右边界因此对齐全表
+    sub_font = _font(ff, int(20 * u))
+    right_w = max(
+        max(draw_len(str(r[2]), _font(ctx["disp"], int(40 * u) if r[3] else int(42 * u))),
+            draw_len(str(r[3]), sub_font) if r[3] else 0.0)
+        for r in rows
+    )
+    name_avail = int(right - name_x - right_w - int(30 * u))
+
     for i, (rank, name, main_text, sub_text) in enumerate(rows):
         cy = y + row_h * i
         rank_rgb = medal[rank - 1] if isinstance(rank, int) and 1 <= rank <= 3 else ctx["sub"]
         draw.text((left, cy + row_h / 2), str(rank),
-                  font=_font(ctx["disp"], int(44 * u)), fill=rank_rgb, anchor="lm")
-        draw.text((left + int(74 * u), cy + row_h / 2), str(name),
-                  font=_font(ff, int(32 * u)), fill=ctx["ink"], anchor="lm")
+                  font=rank_font, fill=rank_rgb, anchor="lm")
+        draw.text((name_x, cy + row_h / 2), _fit_text(name, name_font, name_avail),
+                  font=name_font, fill=ctx["ink"], anchor="lm")
         if sub_text:
             draw.text((right, cy + int(14 * u)), str(main_text),
                       font=_font(ctx["disp"], int(40 * u)), fill=ctx["ink"], anchor="ra")
@@ -1196,7 +1258,7 @@ def render_pk_card(
     flavor_lines = _wrap(str(flavor), _font(font_file, int(28 * u0)), int((width - 88 - 88) * u0))[:3]
     H = int((218 + 260 + 36 + 78 + len(flavor_lines) * 44 + 96) * u0)
     ctx = _utility_card_base(width, H, accent_hex, font_file,
-                             subtitle="萌萌星语 · 群玩法", title="星语 PK",
+                             subtitle="萌萌星语", title="星语 PK",
                              dark=dark)
     draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
     left, right = ctx["left"], ctx["right"]

@@ -239,14 +239,6 @@ class StarWhisperPlugin(Star):
         return ids
 
     @staticmethod
-    def _from_tag(row: dict, gid: str) -> str:
-        """榜单行的小注：抽签来源群（本群不标注，别群才标注，便于理解口径）。"""
-        row_gid = str((row or {}).get("group_id") or "")
-        if not row_gid or row_gid == str(gid or ""):
-            return ""
-        return f"来自 {row.get('group_name') or row_gid}"
-
-    @staticmethod
     async def _send_plain(event: AstrMessageEvent, text: str) -> None:
         """直发纯文本，**绕开结果链装饰**——不会被自动 @ 发送者。
 
@@ -854,12 +846,12 @@ class StarWhisperPlugin(Star):
             else:
                 rows_src = self._store.list_group_range_avg(gid, monday)
                 scope = "本群抽签"
-            title = f"本周星语榜（{monday[5:]} 起）· {scope}"
-            rows = []
-            for i, r in enumerate(rows_src, 1):
-                tag = self._from_tag(r, gid)
-                sub = (tag + " · " if tag else "") + f"均分 · {r['days']} 天"
-                rows.append((i, r.get("nickname") or "旅人", f"{r['avg_score']:.0f}", sub))
+            title = f"本周星语榜（{monday[5:]} 起）"
+            rows = [
+                (i, r.get("nickname") or "旅人", f"{r['avg_score']:.0f}",
+                 f"均分 · {r['days']} 天")
+                for i, r in enumerate(rows_src, 1)
+            ]
         else:
             if members is not None:
                 src = self._store.list_day(today)
@@ -868,9 +860,9 @@ class StarWhisperPlugin(Star):
             else:
                 rows_src = self._store.list_group_day(gid, today)
                 scope = "本群抽签"
-            title = f"今日星语榜 · {scope}"
+            title = "今日星语榜"
             rows = [
-                (i, r.get("nickname") or "旅人", str(r["score"]), self._from_tag(r, gid))
+                (i, r.get("nickname") or "旅人", str(r["score"]), "")
                 for i, r in enumerate(rows_src, 1)
             ]
         empty_text = ("本群成员都还没抽签，快来当第一个！"
@@ -879,6 +871,7 @@ class StarWhisperPlugin(Star):
         if self._utility_cards_on():
             card_path = self._try_utility_card(
                 render_rank_card, title=title, rows=rows, date_str=today,
+                subtitle=f"萌萌星语 · {scope}",
                 empty_text=empty_text,
                 # file_key 带口径标记：同一天换了口径不会复用旧卡（v1.9.4）
                 file_key=f"{span}_{gid}_{today}_{'mem' if members is not None else 'grp'}",
@@ -886,7 +879,7 @@ class StarWhisperPlugin(Star):
         if card_path:
             yield event.image_result(card_path)
             return
-        lines = ["🌙 萌萌星语", f"—— {title} ——"]
+        lines = ["🌙 萌萌星语", f"—— {title}（{scope}）——"]
         if rows:
             for i, r in enumerate(rows, 1):
                 rank, name, main_text, sub_text = r
@@ -1461,8 +1454,8 @@ class StarWhisperPlugin(Star):
                 ("/星语日历 [月份]", "当月运势日历：每日吉凶与分数"),
                 ("/星语帮助", "查看本帮助图"),
             ]),
-            ("群玩法", [
-                ("/星语榜 [日|周]", "群内幸运指数排行"),
+            ("群内排行", [
+                ("/星语榜 [日|周]", "群成员幸运指数排行"),
                 ("/星语PK @某人", "当日幸运指数对决"),
                 ("/星语开关 on|off", "群级启停（管理员）"),
             ]),

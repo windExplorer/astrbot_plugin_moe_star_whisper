@@ -78,7 +78,7 @@ def main() -> int:
         "_roll_daily", "_economy_on", "_price_of",
         "_try_render_card", "_try_utility_card", "_accent_hex", "_try_llm_sign",
         "_try_draw_background", "_try_build_image_prompt",
-        "_group_name_of", "_send_plain", "_group_member_ids", "_from_tag",
+        "_group_name_of", "_send_plain", "_group_member_ids",
         "_push_loop", "_do_daily_push", "_next_push_delay",
         "initialize", "terminate",
     }
@@ -116,6 +116,9 @@ def main() -> int:
     check("in members][:10]" in src, "榜单必须按成员集合过滤后再取前 10")
     check("list_group_range_avg(gid, monday)" in src and "list_group_day(gid, today)" in src,
           "取不到群成员时必须保留「本群抽签」回落口径")
+    # v1.9.5：榜单行不再标注「来自 X 群」（用户明确要求去掉）
+    check("_from_tag" not in src and "来自 " not in src,
+          "榜单不得再标注抽签来源群")
 
     # 热重载列表必须包含 webui_api（v1.9.0）：控制台接口都在里面，
     # 不重载的话热更上来的实例会一直跑旧接口（新增路由静默 404）
