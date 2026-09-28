@@ -185,6 +185,9 @@ def main() -> int:
     check('f"help_{str(theme' in card_src, "帮助图文件名必须带主题（换风格即新文件）")
     check("_download_avatar_bytes" in src and "_avatar_cache" in src,
           "头像下载必须带 TTL 缓存（榜单一次拉 10 个）")
+    # v1.10.5：塔罗双联左联只放 AI 牌面原图，不得叠加渲染层装饰（AI 图自带边框）
+    check("sdraw.rectangle" not in card_src and "_sparkle(sdraw" not in card_src,
+          "双联左联不得再画塔罗框/星饰（会与 AI 自带边框叠成双边）")
     check("extra_font_dirs=self._font_dirs(data_dir)" in src,
           "运势卡渲染必须使用 _font_dirs 的候选目录")
     schema_src = (root / "_conf_schema.json").read_text(encoding="utf-8")

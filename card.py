@@ -3,7 +3,7 @@
 
 运势卡两种版式（M8/M8.5）：
   单联：无 AI 牌面时的竖版运势卡（含塔罗行）；
-  塔罗双联：有 AI 牌面时左图右文的 2:1 横图（左 = 萌绘牌面 + 塔罗框，
+  塔罗双联：有 AI 牌面时左图右文的 2:1 横图（左 = 萌绘牌面原样呈现、不叠加装饰，
   右 = 幸运色渐变面板 + 全部运势信息，弹性间隙等分布局）。
 提示卡（M9）：星尘钱包 / 道具商店 / 星语榜 / PK / 通用通知 / 运势日历，
 共用 _utility_card_base 底座（渐变背景 + 圆角面板 + 标题区），风格与运势卡一致。
@@ -638,6 +638,8 @@ def render_tarot_card(
 ) -> str:
     """塔罗双联版式（M8/M8.5）：左联 AI 牌面 + 右联运势面板。
 
+    左联只放 AI 生成的牌面图，不叠加任何装饰（v1.10.5：AI 图自带边框，
+    之前叠的渲染层塔罗框会双边、且两层框对不齐，观感就是左边框不完整）；
     右联为幸运色渐变圆角面板（顶浓底淡），布局按「固定块高 + 弹性间隙」
     等分剩余空间——不留大片空白也不挤压；吉凶/牌名用楷体系展示字体。
     """
@@ -660,13 +662,12 @@ def render_tarot_card(
 
     canvas = Image.new("RGBA", (W, H), (8, 8, 12, 255))
 
-    # ---- 左联：AI 牌面（塔罗框 + 底部牌名条） ----
+    # ---- 左联：AI 牌面**原样呈现**（v1.10.5 起不再叠加塔罗框/星饰）----
+    # AI 生成的牌面自带装饰边框，再叠一层渲染框会双边、且两层框难以对齐
+    # （观感就是「左边框不完整/不对称」）；左联只放图。
     side = _contain(Image.open(bg_image).convert("RGB"), SW, H, (8, 8, 12)).convert("RGBA")
     canvas.paste(side, (0, 0))
     sdraw = ImageDraw.Draw(canvas)
-    sdraw.rectangle([6, 6, SW - 7, H - 7], outline=gold + (235,), width=max(2, int(3 * u)))
-    sdraw.rectangle([int(12 * u), int(12 * u), SW - int(13 * u), H - int(13 * u)],
-                    outline=gold + (150,), width=1)
     tarot = result.get("tarot") or {}
     if tarot_label_on_image:
         band_h = int(96 * u)
@@ -681,7 +682,6 @@ def render_tarot_card(
         sdraw.text((int(24 * u), H - band_h + int(58 * u)),
                    f"{tarot.get('name_en', '')} ｜ {tarot.get('keywords', '')}",
                    font=_font(font_file, int(22 * u)), fill=(228, 226, 236, 255))
-    _sparkle(sdraw, SW * 0.86, H * 0.08, 13 * u, gold, 200)
 
     # ---- 右联：幸运色渐变面板（顶浓底淡） ----
     bw = int(10 * u)
