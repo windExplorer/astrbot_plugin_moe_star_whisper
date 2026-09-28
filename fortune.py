@@ -248,22 +248,12 @@ DEFAULT_DRAW_NEGATIVE = (
 DRAW_NEGATIVE_HINT_ZH = "画面中只有女性角色，禁止出现男性角色"
 # v1.10.4：正向约束——边框必须与画布四边留空隙、左右对称。
 # 只说「完整可见」没用：模型不知道贴边会被裁，必须显式要求留白。
-BORDER_MARGIN_ZH = ("配华丽对称的塔罗牌边框——边框必须完整可见、与图片四边留出空隙"
-                    "（不要贴边、不要被裁切），左右两侧粗细一致，"
+BORDER_MARGIN_ZH = ("配华丽对称的塔罗牌边框——边框完整可见、不被裁切，左右两侧粗细一致，"
                     "画面铺满整个画布，四周不要留白边")
 BORDER_MARGIN_EN = ("ornate symmetrical tarot card frame, entire frame fully visible "
-                    "with even empty margins on all four sides of the image, "
-                    "the frame never touches or gets cut by the canvas edges, "
-                    "left and right sides of the frame equally thick, "
+                    "and not cropped, left and right sides of the frame equally thick, "
                     "the illustration fills the entire canvas edge to edge, "
                     "no blank white margins around the image")
-# v1.10.8：背景描述——AI 之前一直给纯白背景；塔罗牌的经典背景是深夜星空 + 金色神秘学纹样
-DRAW_BACKGROUND_ZH = ("背景为深邃的午夜蓝星空，缀满金色星辰、新月、太阳纹样与神秘学符号，"
-                      "金色放射光线与几何纹样装饰，色调浓郁华丽；背景不能是纯白或空白")
-DRAW_BACKGROUND_EN = ("deep midnight-blue starry sky background filled with golden stars, "
-                      "crescent moon and sun motifs, arcane symbols and sacred geometry "
-                      "patterns, radiating golden light, rich and mystical color palette, "
-                      "no plain white or blank background")
 
 
 def draw_system_hint(lang: str) -> str:
@@ -271,16 +261,13 @@ def draw_system_hint(lang: str) -> str:
     if lang == "zh":
         return ("你为一张动漫风格的塔罗牌牌面撰写绘图提示词。"
                 + FEMALE_SUBJECT_ZH + "。"
-                "牌面边框必须完整可见、与图片四边留出空隙，不要贴边被裁，左右对称。"
-                "背景必须是深夜星空与金色神秘学纹样，不能是纯白或空白。"
+                "牌面边框必须完整可见、不被裁切，左右对称。"
                 "必须使用中文输出。只输出提示词本身，不要任何解释。")
     return ("You write image-generation prompts for a moe astrology fortune card. "
             "The subject must be a female character (a single anime girl); "
             "never include male characters. "
-            "The card border must be fully visible with empty margins from the image "
-            "edges, never cropped, symmetrical left to right. "
-            "The background must be a deep mystical starry sky with golden arcane "
-            "motifs, never plain white. "
+            "The card border must be fully visible, never cropped, symmetrical "
+            "left to right. "
             "Output ONLY the prompt itself.")
 
 
@@ -319,7 +306,7 @@ def builtin_draw_prompt(lang: str, fmt: str) -> str:
             "画面即清单中「今日塔罗」那张大阿卡纳的牌面演绎（牌面主题为中央构图），"
             + FEMALE_SUBJECT_ZH + "，"
             + BORDER_MARGIN_ZH + "，"
-            + DRAW_BACKGROUND_ZH + "，动漫赛璐璐质感，不要出现任何文字。"
+            "星月与神秘学纹样，动漫赛璐璐质感，不要出现任何文字。"
             "⚠️ 必须输出中文描述，不要翻译成英文。只输出描述本身。\n{facts}"
         )
     if fmt == "natural":
@@ -328,9 +315,8 @@ def builtin_draw_prompt(lang: str, fmt: str) -> str:
             "ANIME-STYLE TAROT CARD illustration: a single anime girl as the central figure "
             "(female only, no male characters), the major arcana card named in the facts "
             "as the central motif, " + BORDER_MARGIN_EN + ", "
-            + DRAW_BACKGROUND_EN + ", "
             "centered composition, portrait orientation, nothing "
-            "cropped at the edges, cel-shaded anime art. "
+            "cropped at the edges, mystical star-and-moon ambience, cel-shaded anime art. "
             "No Chinese, no explanations, output only the sentence.\n{facts}"
         )
     return (
@@ -339,7 +325,7 @@ def builtin_draw_prompt(lang: str, fmt: str) -> str:
         "the major arcana card named in the facts as the "
         "central motif, symmetrical composition, centered, " + BORDER_MARGIN_EN + ", "
         "nothing cropped, portrait orientation, "
-        + DRAW_BACKGROUND_EN + ", anime style, cel shading, "
+        "mystical symbols, star and crescent moon background, anime style, cel shading, "
         "masterpiece, best quality. Comma-separated lowercase tags, no sentences, no Chinese, "
         "no explanations. Output only the tags.\n{facts}"
     )
@@ -354,13 +340,13 @@ def local_draw_prompt(result: dict, lang: str, fmt: str) -> str:
         mood = DRAW_GRADE_MOODS_ZH.get(grade, "温柔")
         return (f"动漫风格塔罗牌牌面：大阿卡纳「{tarot.get('name_cn', '星星')}」为主题的少女，"
                 f"{mood}，{DRAW_NEGATIVE_HINT_ZH}，" + BORDER_MARGIN_ZH + "，"
-                f"构图饱满不裁边，竖版构图，" + DRAW_BACKGROUND_ZH + "，淡彩，画质精美")
+                f"构图饱满不裁边，竖版构图，星月神秘氛围，淡彩，画质精美")
     mood = DRAW_GRADE_MOODS_EN.get(grade, "gentle smile")
     return (
         "tarot card design, anime style, " + FEMALE_SUBJECT_EN + f", {mood}, "
         f"the {arcana} major arcana motif, symmetrical composition, centered, "
         + BORDER_MARGIN_EN + ", nothing cropped, "
-        "portrait orientation, " + DRAW_BACKGROUND_EN + ", "
+        "portrait orientation, stars, crescent moon, mystical ambience, "
         "soft pastel colors, masterpiece, best quality"
     )
 
