@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import io
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -80,6 +81,44 @@ def find_font(explicit: str | None = None, extra_dirs=None) -> str | None:
 
 # 不能当正文用的字体名特征（emoji/symbol/icon 字体没有中文字形）
 _SKIP_FONT_NAME_HINTS = ("emoji", "symbol", "icon")
+_FONT_PATTERNS = ("*.ttf", "*.otf", "*.ttc", "*.woff2")
+
+
+def font_dirs(data_dir) -> list:
+    """卡片字体候选目录（v1.9.9）。
+
+    只认两个位置，**不依赖任何其它插件**：
+      1. 插件自己的数据目录 `data/plugin_data/<插件名>/fonts/`；
+      2. AstrBot 的公共字体目录 `data/fonts/`——由数据目录反推两级得到（不依赖进程 cwd），
+         另外补一条 `data/fonts` 相对写法兜底（cwd 恰好不是 AstrBot 根目录时也能命中）。
+
+    返回顺序即优先级；两处都没有可用字体时，由 `find_font` 继续走系统字体候选。
+    """
+    d = Path(data_dir)
+    out = [d / "fonts", d.parent.parent / "fonts"]
+    legacy = Path("data/fonts")
+    if legacy not in out:
+        out.append(legacy)
+    return out
+
+
+def _iter_font_files(dirs):
+    """遍历候选目录里的字体文件（跳过 emoji/symbol/icon 类，v1.9.9）。"""
+    for d in dirs or []:
+        p = Path(d)
+        if not p.is_dir():
+            continue
+        for pat in _FONT_PATTERNS:
+            for x in sorted(p.glob(pat)):
+                if any(skip in x.name.lower() for skip in _SKIP_FONT_NAME_HINTS):
+                    continue
+                yield x
+
+
+def _norm_font_name(text: str) -> str:
+    """字体名归一化：小写 + 去掉空格/连字符/下划线/点，用于模糊匹配（v1.9.9）。"""
+    return re.sub(r"[\s\-_.]+", "", str(text).lower())
+
 
 def list_fonts_by_hint(dirs, hints=("rounded",)) -> list[str]:
     """列出候选目录里**文件名匹配**的字体（不校验可否加载，供排查日志用，v1.9.8）。
@@ -88,19 +127,8 @@ def list_fonts_by_hint(dirs, hints=("rounded",)) -> list[str]:
     （woff2 需要 FreeType 带 brotli 支持），两者对用户的处置方式完全不同。
     """
     hints = tuple(str(h).lower() for h in hints)
-    out: list[str] = []
-    for d in dirs or []:
-        p = Path(d)
-        if not p.is_dir():
-            continue
-        for pat in ("*.ttf", "*.otf", "*.ttc", "*.woff2"):
-            for x in sorted(p.glob(pat)):
-                name = x.name.lower()
-                if any(skip in name for skip in _SKIP_FONT_NAME_HINTS):
-                    continue
-                if any(h in name for h in hints):
-                    out.append(str(x))
-    return out
+    return [str(x) for x in _iter_font_files(dirs)
+            if any(h in x.name.lower() for h in hints)]
 
 
 def find_font_by_hint(dirs, hints=("rounded",)) -> str | None:
@@ -117,6 +145,61 @@ def find_font_by_hint(dirs, hints=("rounded",)) -> str | None:
         if _font_loadable(c):
             return c
     return None
+
+
+def resolve_font(spec: str, dirs=None) -> tuple[str | None, str]:
+    """把配置里的「字体」解析成可加载的文件路径，返回 `(路径 | None, 说明)`（v1.9.9）。
+
+    `spec` 支持三种写法，按下列顺序尝试：
+      1. **路径**（含 `/`、`\\`，或以 `~` 开头，或带字体扩展名）：
+         `/AstrBot/data/fonts/x.ttf`、`./fonts/x.ttf`、`ResourceHanRoundedCN-Medium.woff2`；
+      2. **文件名**：与候选目录里的文件同名（忽略大小写）；
+      3. **字体名**：归一化后做子串匹配（忽略大小写/空格/连字符/下划线/点），
+         `Resource Han Rounded`、`resourcehanrounded` 都能命中 `ResourceHanRoundedCN-Medium.woff2`。
+
+    第 1 步没命中会继续走 2/3 —— 用户只写文件名时也能在候选目录里找到。
+    说明文本用于日志，解释「为什么没用上」。
+    """
+    spec = str(spec or "").strip()
+    if not spec:
+        return None, "字体未配置"
+    dirs = list(dirs or [])
+    tried_path = ""
+    looks_like_path = ("/" in spec) or ("\\" in spec) or spec.startswith("~")
+    if looks_like_path or Path(spec).suffix.lower() in (".ttf", ".otf", ".ttc", ".woff2"):
+        p = Path(spec).expanduser()
+        if p.is_file():
+            if _font_loadable(str(p)):
+                return str(p), "按路径命中"
+            return None, f"文件存在但本机无法加载：{p.name}（woff2 需要 FreeType 带 brotli 支持）"
+        tried_path = str(p)
+
+    candidates = list(_iter_font_files(dirs))
+    want_file = spec.lower()
+    want_names = {_norm_font_name(spec), _norm_font_name(Path(spec).stem)}
+    broken: list[str] = []
+
+    # 2) 文件名精确匹配先于 3) 字体名模糊匹配：多目录时精确命中不会被模糊结果抢走
+    for x in candidates:
+        if x.name.lower() == want_file:
+            if _font_loadable(str(x)):
+                return str(x), "按文件名命中"
+            broken.append(x.name)
+    for x in candidates:
+        norm = _norm_font_name(x.stem)
+        if any(w and w in norm for w in want_names):
+            if _font_loadable(str(x)):
+                return str(x), "按字体名命中"
+            broken.append(x.name)
+
+    if broken:
+        return None, (f"匹配到 {broken} 但本机无法加载"
+                      "（woff2 需要 FreeType 带 brotli 支持，建议改用 ttf/otf/ttc）")
+    where = [str(d) for d in dirs]
+    if tried_path:
+        return None, f"路径不存在：{tried_path}；候选目录 {where} 里也没有匹配的字体"
+    return None, (f"候选目录 {where} 里没有名为 {spec} 的字体"
+                  "（可填文件名或字体名，如 Resource Han Rounded）")
 
 
 def _font(font_file: str, size: float) -> ImageFont.FreeTypeFont:

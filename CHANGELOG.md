@@ -2,6 +2,20 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v1.9.9 (2026-09-28)
+
+`card_font_path` 支持字体名，并明确它与「卡面字体风格」的从属关系（版本 v1.9.8 -> v1.9.9）。
+
+- **配置项支持三种写法**（新增 `card.resolve_font`，按顺序尝试）：
+  1. **字体名**——归一化后模糊匹配（忽略大小写/空格/连字符/下划线/点），`Resource Han Rounded`、`resourcehanrounded` 都能命中 `ResourceHanRoundedCN-Medium.woff2`，不用再记全路径；
+  2. **文件名**——与候选目录里的文件同名（忽略大小写）；
+  3. **路径**——绝对路径最稳，也支持 `./fonts/x.ttf` 相对写法。
+  写法 1/2 都在「插件 `fonts/` → AstrBot `data/fonts/`」里找；多目录时**文件名精确匹配优先于字体名模糊匹配**，不会被别的目录抢走。
+- **两个配置的关系写明白**（此前是隐式优先级，容易被当成冲突）：`card_font_path` 填了就以它为准，留空时才看 `card_font_style`；填了但解析不到 → 告警 + 回落风格开关，而不是直接掉到系统字体。两处配置 hint 与 README 都注明「不用两个都配」。
+- **顺带解决「名字不含 rounded 的圆体没法用」**：`card_font_style=圆体` 只能按 `rounded` 关键词挑字体，霞鹜文楷（LXGW WenKai）这类文件名不含该词的字体，现在直接填在 `card_font_path` 里可用。
+- **重构**：`card.font_dirs(data_dir)` 从 `main.py` 抽到 card 层（无 astrbot 依赖、可测），消除字体文件遍历与扩展名列表的重复实现。
+- 测试：`test_card` 新增 `resolve_font` 用例（三种写法 / 忽略大小写 / 简写字体名 / 精确优先 / 空配置 / 两类失败原因）与 `font_dirs` 三级候选断言（重点锁死「AstrBot 公共 `data/fonts` 由插件数据目录反推两级」）；`test_main_structure` 守卫改为「字体目录集中在 `card.font_dirs`」「`card_font_path` 必须走 `card.resolve_font`」「解析失败必须告警」。
+
 ## v1.9.8 (2026-09-28)
 
 修复「配置圆体后卡片渲染必崩」（版本 v1.9.7 -> v1.9.8）。

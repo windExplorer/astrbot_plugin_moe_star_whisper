@@ -205,6 +205,44 @@ def main() -> int:
         check(card._font_loadable(str(target)),
               "本机 FreeType 应能加载 woff2（不能加载时插件会告警并回落默认字体）")
 
+    # 8.2) resolve_font（v1.9.9）：路径 / 文件名 / 字体名三种写法都要能解析到同一个文件
+    named_dir = Path(tempfile.mkdtemp(prefix="moe_res_"))
+    only = named_dir / "ResourceHanRoundedCN-Medium.ttf"
+    shutil.copyfile(str(base_font), str(only))
+    decoy_dir = Path(tempfile.mkdtemp(prefix="moe_decoy_"))
+    decoy = decoy_dir / "ResourceHanRoundedCN-Medium-Bold.ttf"  # 同样能模糊命中：测试精确优先
+    shutil.copyfile(str(base_font), str(decoy))
+
+    p_file, why_file = card.resolve_font("ResourceHanRoundedCN-Medium.ttf", [named_dir])
+    check(p_file == str(only) and "文件名" in why_file,
+          f"resolve_font 文件名写法应命中（{why_file}）")
+    p_case, _ = card.resolve_font("resourcehanroundedcn-medium.TTF", [named_dir])
+    check(p_case == str(only), "resolve_font 文件名匹配忽略大小写")
+    p_name, why_name = card.resolve_font("Resource Han Rounded", [named_dir])
+    check(p_name == str(only) and "字体名" in why_name,
+          f"resolve_font 字体名写法应命中（{why_name}）")
+    p_short, _ = card.resolve_font("resourcehanrounded", [named_dir])
+    check(p_short == str(only), "resolve_font 简写字体名应模糊命中")
+    p_path, why_path = card.resolve_font(str(only), [])
+    check(p_path == str(only) and "路径" in why_path, f"resolve_font 绝对路径应命中（{why_path}）")
+    check(card.resolve_font("", [named_dir])[0] is None, "空配置应解析为 None")
+    p_pri, _ = card.resolve_font("ResourceHanRoundedCN-Medium.ttf", [decoy_dir, named_dir])
+    check(p_pri == str(only), f"文件名精确匹配优先于模糊匹配（不被前一个目录抢走），实际 {p_pri}")
+    p_miss, why_miss = card.resolve_font("NoSuchFont", [named_dir])
+    check(p_miss is None and "没有名为" in why_miss, f"找不到需说明原因，实际 {why_miss}")
+    p_bad, why_bad = card.resolve_font(str(broken_like), [])
+    check(p_bad is None and "无法加载" in why_bad, f"坏字体需给出可读原因，实际 {why_bad}")
+
+    # 8.3) 字体候选目录（v1.9.9）：AstrBot 公共 data/fonts 由插件数据目录反推两级
+    dd = "/AstrBot/data/plugin_data/astrbot_plugin_moe_star_whisper"
+    dirs = card.font_dirs(dd)
+    check(Path(dirs[0]) == Path(dd) / "fonts",
+          f"第一候选应是插件自己的 fonts/，实际 {dirs[0]}")
+    check(Path(dirs[1]) == Path("/AstrBot/data/fonts"),
+          f"第二候选应是 AstrBot 公共 data/fonts（反推两级），实际 {dirs[1]}")
+    check(Path(dirs[2]) == Path("data/fonts"),
+          f"第三候选为 cwd 兜底写法，实际 {dirs[2]}")
+
     # 圆体渲染冒烟：能落盘且非空白
     p_rounded = card.render_rank_card(
         "今日星语榜", [(1, "甲", "95", ""), (2, "乙", "88", "")], misc,

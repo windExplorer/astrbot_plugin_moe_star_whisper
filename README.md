@@ -64,7 +64,17 @@ AstrBot 今日运势插件：每个用户每天一支专属「星语签」——
 
 选「圆体」时若这些目录里没有圆体（或该格式本机读不了），会**自动回落**默认字体并记一条日志，不会导致出卡失败。圆体推荐 [Resource Han Rounded](https://github.com/CyanoHao/Resource-Han-Rounded)（SIL OFL 1.1，文件名形如 `ResourceHanRoundedCN-Medium.woff2`）。
 
-也可以不用风格开关，直接在配置 `card_font_path` 里填**字体文件路径**（不是文件名）：绝对路径最稳，例如 `/AstrBot/data/fonts/ResourceHanRoundedCN-Medium.woff2`；相对路径按 AstrBot 进程的工作目录解析。支持 `ttf` / `otf` / `ttc` / `woff2`。填了它就以它为准（优先级高于风格开关）；路径不存在或本机读不了时会在日志里告警，然后回落默认字体。
+**两个配置的关系**：`card_font_path`（卡面字体）优先——填了就以它为准，留空时才看 `card_font_style`（卡面字体风格）。所以不用两个都配：常规需求只配后者（「圆体」）即可。
+
+`card_font_path` 支持三种写法，写法 ① ② 都会在「插件 `fonts/` → AstrBot `data/fonts/`」里找：
+
+| 写法 | 例子 |
+| --- | --- |
+| 字体名（最省事，模糊匹配，忽略大小写/空格/连字符） | `Resource Han Rounded`、`resourcehanrounded` |
+| 文件名（忽略大小写） | `ResourceHanRoundedCN-Medium.woff2` |
+| 文件路径（绝对路径最稳，相对路径按 AstrBot 进程工作目录解析） | `/AstrBot/data/fonts/ResourceHanRoundedCN-Medium.woff2` |
+
+支持 `ttf` / `otf` / `ttc` / `woff2`。填了却解析不到时会**在日志里给出具体原因**（文件不存在 / 有匹配但本机读不了 / 候选目录里没有这个名字），然后回落到「卡面字体风格」自动选择。想用名字不含 `rounded` 的字体（例如 LXGW WenKai 霞鹜文楷），就填在这一项里。
 
 ## 依赖
 

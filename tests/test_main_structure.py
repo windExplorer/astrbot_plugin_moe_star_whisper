@@ -131,13 +131,20 @@ def main() -> int:
     check("*.woff2" in card_src, "字体查找要支持 woff2")
     check("def _font_dirs" in src and "card_font_style" in src,
           "main.py 必须按 card_font_style 处理字体")
-    check('parent.parent / "fonts"' in src, "公共字体目录应由数据目录反推（data/fonts）")
+    check("def font_dirs" in card_src and 'parent.parent / "fonts"' in card_src,
+          "公共字体目录应由数据目录反推（data/fonts），且集中在 card.font_dirs")
+    check("card.font_dirs" in src, "main.py 的字体候选目录应委托 card.font_dirs")
     check("def _card_font_path" in src, "字体路径必须集中解析（含圆体挑选与回落）")
     check("def _find_rounded_font" in src, "圆体查找应集中在 _find_rounded_font")
     check("card.find_font_by_hint" in src, "圆体风格必须走 find_font_by_hint")
     # v1.9.8：曾因只 `from .card import 函数名`、却写 `card.find_font_by_hint` 而 NameError
     check("from . import card" in src, "main.py 必须导入 card 模块本体（否则 card.xxx 必崩）")
     check("list_fonts_by_hint" in card_src, "card.py 需提供 list_fonts_by_hint（区分没字体/读不了）")
+    # v1.9.9：card_font_path 支持「字体名 / 文件名 / 路径」三种写法
+    check("def resolve_font" in card_src, "card.py 需提供 resolve_font（解析字体名/文件名/路径）")
+    check("card.resolve_font" in src, "card_font_path 必须走 card.resolve_font")
+    check("card_font_path 未解析到可用字体" in src,
+          "card_font_path 解析失败必须告警（不能静默回落）")
     check("extra_font_dirs=self._font_dirs(data_dir)" in src,
           "运势卡渲染必须使用 _font_dirs 的候选目录")
     schema_src = (root / "_conf_schema.json").read_text(encoding="utf-8")
