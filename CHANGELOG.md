@@ -2,6 +2,20 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v1.10.4 (2026-09-28)
+
+修复 AI 牌面边框被裁导致左右不对称（版本 v1.10.3 -> v1.10.4）。
+
+- **现象**：AI 生成的塔罗牌面（萌绘联动）边框不完整——左侧缺一块、右侧正常，看起来不对称。
+- **根因**：提示词层面的问题。原提示词只说 `complete ornate tarot card border fully visible / nothing cropped`，但对扩散模型来说这是弱约束——它默认把装饰性边框画到画布边缘，被画布裁掉多少是随机的，于是出现「一边完整一边被吃」。**提示词里从来没告诉模型「边框与画布四边之间要留空隙」**，负向提示词也没有排除裁切类标签。
+- **修复**（`fortune.py`）：
+  - 新增 `BORDER_MARGIN_ZH / _EN` 正向约束：`边框必须完整可见、与图片四边留出空隙（不要贴边、不要被裁切），左右两侧粗细一致` / `entire frame fully visible with even empty margins on all four sides ... never touches or gets cut by the canvas edges, left and right sides equally thick`——注入全部三条内置模板（中文描述 / 英文自然语言 / 英文标签）与本地兜底模板；
+  - `DEFAULT_DRAW_NEGATIVE` 追加 `cropped, cropped border, cut off, out of frame, partially visible frame, uneven border`；
+  - `draw_system_hint`（LLM 生图系统提示）同步加入边框留白与对称要求。
+- **注意**：`draw_negative_prompt` 填了自定义内容的用户会整体覆盖内置负向（v1.8.6 起的行为），需要自行把 `cropped, cropped border, out of frame` 等标签带上，否则负向兜底不生效。
+- 测试：`test_fortune` 新增 10.2 组守卫——两语言内置模板必须含「边框留空隙 + 左右对称」、中文兜底模板同样、负向必须排除裁切、系统提示必须含 never cropped。
+- 说明：提示词只能显著**降低**概率，没法 100% 杜绝——扩散模型对几何对称的还原本身不稳定；若仍偶发，最有效的手段是在萌绘工作流侧换对该底模或加 ControlNet 约束，这超出本插件范围。
+
 ## v1.10.3 (2026-09-28)
 
 提示卡多主题（含塔罗牌风）、榜单头像列、帮助图按主题分文件（版本 v1.10.2 -> v1.10.3）。

@@ -153,6 +153,24 @@ def main() -> int:
           "内置负向提示词必须排除男性角色")
     check("女性角色" in fortune.draw_system_hint("zh") and "female" in fortune.draw_system_hint("en"),
           "生图系统提示必须含女性主角约束")
+
+    # 10.2) v1.10.4：牌面边框必须与画布留空隙且对称（否则 AI 会把一侧边框画出界）
+    for f in ("tags", "natural"):
+        p_en = fortune.builtin_draw_prompt("en", f)
+        check("even empty margins" in p_en and "never touches" in p_en,
+              f"英文内置模板（{f}）必须约束边框与画布四边留空隙")
+        check("symmetrical tarot card frame" in p_en,
+              f"英文内置模板（{f}）必须约束边框左右对称")
+    check("留出空隙" in fortune.builtin_draw_prompt("zh", "natural")
+          and "左右两侧粗细一致" in fortune.builtin_draw_prompt("zh", "natural"),
+          "中文内置模板必须约束边框留空且左右一致")
+    check("留出空隙" in fortune.local_draw_prompt(r1, "zh", "tags"),
+          "中文兜底提示词必须约束边框留空")
+    check("cropped border" in fortune.DEFAULT_DRAW_NEGATIVE
+          and "partially visible frame" in fortune.DEFAULT_DRAW_NEGATIVE,
+          "内置负向提示词必须排除裁切/半截边框")
+    check("never cropped" in fortune.draw_system_hint("en"),
+          "生图系统提示必须约束边框不被裁切")
     check(fortune.parse_draw_response('{"image_paths": ["a.png", " b.png "]}') == ["a.png", "b.png"],
           "解析 image_paths 列表")
     check(fortune.parse_draw_response('{"image_path": "one.png"}') == ["one.png"],
