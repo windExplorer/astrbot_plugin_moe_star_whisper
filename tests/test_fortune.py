@@ -179,6 +179,21 @@ def main() -> int:
           "中文内置模板必须要求画面铺满、不留白边")
     check("no blank white margins" in fortune.builtin_draw_prompt("en", "tags"),
           "英文内置模板必须排除画布白边")
+    # 10.4) v1.10.8：背景必须是深夜星空 + 金色神秘学纹样，不能纯白
+    for f in ("tags", "natural"):
+        p_en = fortune.builtin_draw_prompt("en", f)
+        check("midnight-blue starry sky" in p_en and "no plain white" in p_en,
+              f"英文内置模板（{f}）必须要求深夜星空背景且排除纯白")
+    check("午夜蓝星空" in fortune.builtin_draw_prompt("zh", "natural")
+          and "背景不能是纯白" in fortune.builtin_draw_prompt("zh", "natural"),
+          "中文内置模板必须要求星空背景且排除纯白")
+    check("午夜蓝星空" in fortune.local_draw_prompt(r1, "zh", "tags"),
+          "中文兜底提示词必须含星空背景")
+    check("white background" in fortune.DEFAULT_DRAW_NEGATIVE,
+          "内置负向提示词必须排除纯白背景")
+    check("never plain white" in fortune.draw_system_hint("en")
+          and "不能是纯白" in fortune.draw_system_hint("zh"),
+          "生图系统提示必须约束星空背景")
     check("never cropped" in fortune.draw_system_hint("en"),
           "生图系统提示必须约束边框不被裁切")
     check(fortune.parse_draw_response('{"image_paths": ["a.png", " b.png "]}') == ["a.png", "b.png"],
