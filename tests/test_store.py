@@ -245,6 +245,8 @@ def main() -> int:
     hist = st.user_history("s1", 10)
     check(len(hist) == 2 and hist[0]["date"] == "2026-09-21" and hist[0]["streak"] == 2,
           f"user_history 新→旧且带连签，实际 {hist}")
+    check(hist[0]["group_id"] == "sg1" and hist[0]["group_name"] == "统计群",
+          f"user_history 带来源群（v1.9.3），实际 {hist[0]}")
     uled = st.user_ledger("s1", 10)
     check(len(uled) == 2 and uled[0]["reason"] == "buy:reroll", f"user_ledger 新→旧，实际 {uled}")
     counts = st.count_all()
@@ -287,6 +289,21 @@ def main() -> int:
     check(st.list_users(order="乱写")["rows"][0]["uid"] == "t1", "list_users 非法排序回落最近活跃")
     paged_users = st.list_users(page=2, size=1)
     check(len(paged_users["rows"]) == 1 and paged_users["page"] == 2, "list_users 分页")
+
+    # 群名记录与回填（v1.9.3）：新记录带群名；历史行（没群名）用同群最新群名展示。
+    # ⚠️ 这一段会新增一个用户（t2），必须放在用户列表断言之后，否则 total 断言就变了。
+    st.save_fortune("t2", "2026-09-23", payload("吉", 55, 3, "松果", "雾蓝", "#A8C8E8", 1),
+                    nickname="归属乙", group_id="tgA")  # 故意不传 group_name
+    check(st.get_fortune("t2", "2026-09-23")["group_name"] == "", "未传群名时列里就是空")
+    check(st.group_names().get("tgA") == "A群", f"群名映射，实际 {st.group_names()}")
+    recs_tgA = st.list_records(date_from="2026-09-22", date_to="2026-09-23", group_id="tgA")
+    check(recs_tgA["total"] == 2
+          and all(r["group_name"] == "A群" for r in recs_tgA["rows"]),
+          f"同群历史行回填最新群名，实际 {[r['group_name'] for r in recs_tgA['rows']]}")
+    hist_t2 = st.user_history("t2", 5)
+    check(hist_t2[0]["group_name"] == "A群", "user_history 也回填群名")
+    t2_row = st.list_users(keyword="归属乙")["rows"][0]
+    check(t2_row["last_group_name"] == "A群", "list_users 最近群名也回填")
 
     st.close()
     if FAILED:

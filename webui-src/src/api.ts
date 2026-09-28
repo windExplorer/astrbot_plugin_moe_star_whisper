@@ -234,6 +234,8 @@ export interface UserPayload {
   uid: string;
   today: string;
   nickname: string;
+  last_group_id: string;
+  last_group_name: string;
   fortune: {
     grade: string;
     score: number;
@@ -241,6 +243,8 @@ export interface UserPayload {
     sign_text: string;
     lucky_color: string;
     card_path: string;
+    group_id: string;
+    group_name: string;
     has_card: boolean;
     reroll_count: number;
     llm_used: boolean;
@@ -272,6 +276,8 @@ export interface UserPayload {
     streak: number;
     lucky_color: string;
     has_card: boolean;
+    group_id: string;
+    group_name: string;
   }[];
   ledger: { delta: number; reason: string; ref_date: string; created_at: string }[];
   calendar: { date: string; grade: string; score: number }[];

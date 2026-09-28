@@ -132,6 +132,10 @@ async def main_async() -> int:
 
     usr = webui_api._user_core(st2, cfg_stub, "Asia/Shanghai", "c1", 1)
     check(usr["data"]["uid"] == "c1" and usr["data"]["balance"] == 30, "user core 余额")
+    check(usr["data"]["last_group_name"] == "面板群"
+          and usr["data"]["fortune"]["group_name"] == "面板群",
+          "user core 带最近所在群与今日签群名（v1.9.3）")
+    check(usr["data"]["history"][0]["group_name"] == "面板群", "user core 历史记录带来源群")
     check(len(usr["data"]["history"]) == 1 and len(usr["data"]["calendar"]) == 1, "user core 历史与日历")
     check(usr["data"]["fortune"] is not None and usr["data"]["fortune"]["has_card"] is False,
           "user core 今日签摘要")

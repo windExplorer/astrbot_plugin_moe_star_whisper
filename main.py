@@ -174,6 +174,46 @@ class StarWhisperPlugin(Star):
         except Exception:
             return ""
 
+    async def _group_name_of(self, event: AstrMessageEvent) -> str:
+        """群名快照（v1.9.3）：优先取事件自带的群名（OneBot/NapCat 下发的 group_name），
+        取不到时调平台 API 兜底（`event.get_group()` 在 aiocqhttp 下会走 OneBot
+        `get_group_info`）。私聊或彻底取不到返回空串——展示层按 `group_name or group_id` 兜底。
+        取群名失败绝不影响抽签，只记日志。
+        """
+        if event.is_private_chat():
+            return ""
+        try:
+            group = getattr(event.message_obj, "group", None)
+            name = str(getattr(group, "group_name", "") or "").strip()
+            if name:
+                return name
+        except Exception:
+            pass
+        try:
+            group = await event.get_group()
+            return str(getattr(group, "group_name", "") or "").strip()
+        except Exception:
+            logger.warning(
+                f"[{PLUGIN_NAME}] 取群名失败，本次只记录群号\n{traceback.format_exc()}"
+            )
+            return ""
+
+    @staticmethod
+    async def _send_plain(event: AstrMessageEvent, text: str) -> None:
+        """直发纯文本，**绕开结果链装饰**——不会被自动 @ 发送者。
+
+        背景（AstrBot 4.28.1 `core/pipeline/result_decorate/stage.py`）：当
+        `platform_settings.reply_with_mention` 打开时，框架会给「只含 Plain/Image
+        的结果链」在最前面插一个 `At(发送者)`；而 `event.send()` 不进结果链，
+        所以拿它发「占卜中」这类过程提示最合适。结果消息仍走 `yield`，保持 @。
+        """
+        try:
+            await event.send(MessageChain([Plain(str(text))]))
+        except Exception:
+            logger.warning(
+                f"[{PLUGIN_NAME}] 过程提示直发失败（忽略）\n{traceback.format_exc()}"
+            )
+
     async def _fetch_avatar_bytes(self, uid: str) -> bytes | None:
         """服务端下载头像 bytes（aiohttp，box 同款接口）；失败返回 None。"""
         url = f"https://q4.qlogo.cn/headimg_dl?dst_uin={uid}&spec=640"
@@ -664,9 +704,12 @@ class StarWhisperPlugin(Star):
             # （v1.8.7 前的 bug：只读 payload → 当日第二次抽签必然退回纯文本）
             card_path = str(existing.get("card_path") or payload.get("card_path") or "")
             if card_path and Path(card_path).exists():
-                yield event.image_result(card_path)
+                # 图与文合并成一条结果链：框架的自动 @ 只跟一条结果走，
+                # 分两次 yield 会在群里 @ 两次（v1.9.3 修）
+                comps: list = [Image.fromFileSystem(card_path)]
                 if str(self._cfg("output_mode", "图卡")) == "图卡+文本":
-                    yield event.plain_result(self._format_result(payload, repeat=True))
+                    comps.append(Plain("\n" + self._format_result(payload, repeat=True)))
+                yield event.chain_result(comps)
             else:
                 yield event.plain_result(self._format_result(payload, repeat=True))
             return
@@ -681,6 +724,7 @@ class StarWhisperPlugin(Star):
         avatar_url = self._sender_avatar(event, uid)  # URL 快照入库（D10）
         avatar_bytes = await self._fetch_avatar_bytes(uid) if avatar_url else None
         group_id = "" if event.is_private_chat() else str(event.get_group_id() or "")
+        group_name = await self._group_name_of(event) if group_id else ""  # 群名快照入库（v1.9.3）
 
         mode = str(self._cfg("output_mode", "图卡"))
         card_path = None
@@ -688,7 +732,8 @@ class StarWhisperPlugin(Star):
         if mode != "纯文本":
             # D11 先绘后卡：萌绘底图（可选）→ 合卡 → 发送；失败静默回退幸运色渐变
             if bool(self._cfg("draw_enabled", False)):
-                yield event.plain_result("🔮 占卜中，星盘铺开……请稍候")
+                # 过程提示直发：不在群里 @ 用户（结果那条才 @，见 _send_plain 说明）
+                await self._send_plain(event, "🔮 占卜中，星盘铺开……请稍候")
             bg_path, job = await self._try_draw_background(event, result, uid, date, salt)
             card_path = self._try_render_card(result, uid, nickname, avatar_bytes, bg_image=bg_path)
             if job is not None:
@@ -702,7 +747,7 @@ class StarWhisperPlugin(Star):
 
         saved = self._store.save_fortune(
             uid, date, result,
-            nickname=nickname, avatar=avatar_url, group_id=group_id,
+            nickname=nickname, avatar=avatar_url, group_id=group_id, group_name=group_name,
             card_path=card_path or "",
             platform=self._sender_platform(event),
         )
@@ -713,19 +758,22 @@ class StarWhisperPlugin(Star):
                 (existing or {}).get("card_path") or payload.get("card_path") or card_path or ""
             )
             if card_path and Path(card_path).exists():
-                yield event.image_result(card_path)
+                yield event.chain_result([Image.fromFileSystem(card_path)])
             else:
                 yield event.plain_result(self._format_result(payload))
             return
 
+        # 结果合并成一条链：图 + 文本 + 失败提示一起发，群里只 @ 一次（v1.9.3）
+        comps: list = []
         if card_path:
-            yield event.image_result(card_path)
+            comps.append(Image.fromFileSystem(card_path))
             if mode == "图卡+文本":
-                yield event.plain_result(self._format_result(result))
+                comps.append(Plain("\n" + self._format_result(result)))
         else:
-            yield event.plain_result(self._format_result(result))
+            comps.append(Plain(self._format_result(result)))
         if bg_fail_hint:
-            yield event.plain_result(bg_fail_hint)
+            comps.append(Plain("\n" + bg_fail_hint))
+        yield event.chain_result(comps)
 
     @filter.command("星语榜", alias={"运势榜"})
     async def rank_cmd(self, event: AstrMessageEvent):

@@ -51,6 +51,7 @@
           <span class="grade" :style="{ background: gradeColor(state.fortune.grade) }">{{ state.fortune.grade }}</span>
           <span class="tag">{{ state.fortune.score }} 分</span>
           <span class="tag">幸运色 {{ state.fortune.lucky_color || "—" }}</span>
+          <span class="tag">所在群 {{ state.fortune.group_name || state.fortune.group_id || "私聊" }}</span>
           <span class="tag" :class="{ ok: state.fortune.has_card }">{{ state.fortune.has_card ? "卡已生成" : "无卡文件" }}</span>
           <span class="tag" v-if="state.fortune.reroll_count">已换签 ×{{ state.fortune.reroll_count }}</span>
           <span class="tag" v-if="state.fortune.llm_used">LLM 签文</span>
@@ -122,6 +123,8 @@ interface DebugState {
     sign_text: string;
     lucky_color: string;
     card_path: string;
+    group_id: string;
+    group_name: string;
     has_card: boolean;
     reroll_count: number;
     llm_used: boolean;

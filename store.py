@@ -748,6 +748,7 @@ class Store:
         total = int(self._one("SELECT COUNT(*) AS n FROM fortunes" + clause, tuple(params)).get("n") or 0)
         size = max(1, min(int(size), 200))
         page = max(1, int(page))
+        names = self.group_names()  # 历史行群名回填
         rows = self._query(
             "SELECT user_id, nickname, avatar, date, grade, score, group_id, group_name,"
             " card_path, created_at, payload FROM fortunes"
@@ -772,7 +773,7 @@ class Store:
                 "grade": payload.get("grade_display") or r["grade"],
                 "score": int(r["score"] or 0),
                 "group_id": r["group_id"] or "",
-                "group_name": r["group_name"] or "",
+                "group_name": r["group_name"] or names.get(str(r["group_id"] or ""), ""),
                 "created_at": r["created_at"] or "",
                 "streak": int(payload.get("streak") or 0),
                 "lucky_color": (payload.get("lucky_color") or {}).get("name", "")
@@ -783,6 +784,19 @@ class Store:
                 "has_card": bool(card_path),
             })
         return {"total": total, "page": page, "size": size, "rows": out}
+
+    def group_names(self) -> dict:
+        """group_id -> 最近一次记录到的群名（v1.9.3）。
+
+        用途：早于 v1.9.3 的记录没有群名（`group_name` 一直是空的），展示时用它回填——
+        只要该群之后有人抽过一次签，历史行也能显示群名，不必只看到群号。
+        """
+        rows = self._query(
+            "SELECT group_id, group_name, MAX(date) AS last_date FROM fortunes"
+            " WHERE group_id!='' AND group_name IS NOT NULL AND group_name!=''"
+            " GROUP BY group_id"
+        )
+        return {str(r["group_id"]): str(r["group_name"]) for r in rows}
 
     def list_groups(self, limit: int = 100) -> list[dict]:
         """群列表（记录页的筛选下拉：群号 + 别名 + 抽签数）。"""
@@ -843,6 +857,7 @@ class Store:
 
         size = max(1, min(int(size), 100))
         page = max(1, int(page))
+        names = self.group_names()  # 历史行群名回填
         rows = self._query(
             "SELECT f.user_id, COUNT(*) AS draws, MIN(f.date) AS first_date,"
             " MAX(f.date) AS last_date, COALESCE(ROUND(AVG(f.score), 1), 0) AS avg_score,"
@@ -874,14 +889,16 @@ class Store:
                 "best_score": int(r["best_score"] or 0),
                 "groups": int(r["groups"] or 0),
                 "last_group_id": r["last_group_id"] or "",
-                "last_group_name": r["last_group_name"] or "",
+                "last_group_name": r["last_group_name"]
+                or names.get(str(r["last_group_id"] or ""), ""),
             })
         return {"total": total, "page": page, "size": size, "rows": out}
 
     def user_history(self, user_id: str, limit: int = 60) -> list[dict]:
-        """单用户最近签记录（新→旧，含卡文件状态）。"""
+        """单用户最近签记录（新→旧，含卡文件状态与当次所在群）。"""
+        names = self.group_names()  # 历史行群名回填
         rows = self._query(
-            "SELECT date, grade, score, card_path, payload FROM fortunes"
+            "SELECT date, grade, score, card_path, group_id, group_name, payload FROM fortunes"
             " WHERE user_id=? ORDER BY date DESC LIMIT ?",
             (user_id, max(1, min(int(limit), 400))),
         )
@@ -901,6 +918,9 @@ class Store:
                 "lucky_color": (payload.get("lucky_color") or {}).get("name", "")
                 if isinstance(payload.get("lucky_color"), dict) else "",
                 "has_card": bool(str(r.get("card_path") or "")),
+                "group_id": r.get("group_id") or "",
+                "group_name": r.get("group_name")
+                or names.get(str(r.get("group_id") or ""), ""),
             })
         return out
 

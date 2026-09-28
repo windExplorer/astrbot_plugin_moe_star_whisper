@@ -105,6 +105,7 @@
             <span class="tag">{{ data.fortune.score }} 分</span>
             <span class="tag">连签 {{ data.fortune.streak }}</span>
             <span class="tag">{{ data.fortune.lucky_color || "—" }}</span>
+            <span class="tag">来源：{{ data.fortune.group_name || data.fortune.group_id || "私聊" }}</span>
             <span class="tag" :class="{ ok: data.fortune.has_card }">{{ data.fortune.has_card ? "卡已生成" : "无卡文件" }}</span>
             <span class="tag" v-if="data.fortune.reroll_count">已换签 ×{{ data.fortune.reroll_count }}</span>
             <span class="tag" v-if="data.fortune.llm_used">LLM 签文</span>
@@ -160,7 +161,7 @@
         <div class="head"><b>历史签记录</b><span class="sub">最近 60 条</span></div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>日期</th><th>吉凶</th><th>指数</th><th>连签</th><th>幸运色</th><th>图卡</th></tr></thead>
+            <thead><tr><th>日期</th><th>吉凶</th><th>指数</th><th>连签</th><th>幸运色</th><th>来源</th><th>图卡</th></tr></thead>
             <tbody>
               <tr v-for="h in data.history" :key="h.date">
                 <td>{{ h.date }}</td>
@@ -168,9 +169,10 @@
                 <td>{{ h.score }}</td>
                 <td>{{ h.streak }}</td>
                 <td>{{ h.lucky_color || "-" }}</td>
+                <td>{{ h.group_name || h.group_id || "私聊" }}</td>
                 <td>{{ h.has_card ? "已生成" : "—" }}</td>
               </tr>
-              <tr v-if="!data.history.length"><td colspan="6" class="empty">暂无记录</td></tr>
+              <tr v-if="!data.history.length"><td colspan="7" class="empty">暂无记录</td></tr>
             </tbody>
           </table>
         </div>
@@ -195,6 +197,7 @@
         </div>
         <div class="head" style="margin-top: 10px"><b>档案信息</b></div>
         <ul class="kv">
+          <li><span>最近所在群</span><b>{{ data.last_group_name || data.last_group_id || "私聊" }}</b></li>
           <li><span>最近抽签</span><b>{{ data.profile.last_draw_date || "—" }}</b></li>
           <li><span>换签种子序号</span><b>{{ data.profile.seed_nonce }}</b></li>
           <li><span>昵称快照</span><b>{{ data.nickname || "—" }}</b></li>

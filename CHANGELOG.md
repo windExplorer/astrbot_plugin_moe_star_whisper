@@ -2,6 +2,24 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v1.9.3 (2026-09-28)
+
+群名记录与展示 + 过程提示不再 @ 用户（版本 v1.9.2 -> v1.9.3）。
+
+**需求 1：群名记录与展示**
+
+- **此前的问题**：`fortunes.group_name` 这一列从建库起就没被写过——`fortune_cmd` 只把 `group_id` 传给了 `save_fortune`，群名既没取也没存。所以控制台里所有「来源」都只能显示一串群号。
+- **记录**：新增 `_group_name_of(event)`——优先读事件自带的群名（OneBot/NapCat 下发的 `message_obj.group.group_name`，零成本），取不到时兜底 `await event.get_group()`（aiocqhttp 下会走 OneBot `get_group_info`）；私聊或彻底失败返回空串，**取群名失败绝不影响抽签**，只记日志。抽签时随 `save_fortune(group_name=...)` 入库。
+- **展示**：抽签记录页/总览的「来源」列、统计页群活跃榜与占比图、用户列表卡片的「最近在 X 群」、用户详情（今日签标签 + 历史记录新增「来源」列 + 档案区新增「最近所在群」）、调试页的「所在群」标签，全部**优先群名、空则回落群号**。
+- **历史数据回填**：本版之前的记录没有群名。新增 `store.group_names()`（group_id → 最近一次记录到的群名），`list_records` / `user_history` / `list_users` 输出时对空群名回填——**只要该群之后有人再抽过一次签，老记录也会显示群名**，不必一直看群号。
+
+**需求 2：过程提示不再 @ 用户**
+
+- **根因**：AstrBot 的 `core/pipeline/result_decorate/stage.py` 在 `platform_settings.reply_with_mention` 打开时，会给「只含 Plain/Image 的结果链」在最前面插一个 `At(发送者)`——所以「🔮 占卜中，星盘铺开……」这条过程提示同样被 @ 了。
+- **修复**：新增 `_send_plain(event, text)`，用 `event.send(MessageChain([Plain(...)]))` **直发**：直发不进结果链，因此不会被装饰、也就不会 @；`event.send()` 同时会置 `_has_send_oper`，不影响「插件已回复」的判定。只有「占卜中」改直发，**结果消息仍走 `yield`，保持 @ 发送者**。
+- **顺带修掉同类问题**：结果原本是多次 `yield`（图一条、`图卡+文本` 模式再加一条、封面图失败提示再来一条），每条都会被各自 @ 一次——一次抽签最多能 @ 三下。现在图 + 文本 + 失败提示**合并成一条 `chain_result`**，群里只 @ 一次；「一日一签」复用分支与并发撞车分支同步合并。
+- 测试：`test_main_structure` 新增 5 条源码守卫（必须传 `group_name`、必须调 `_group_name_of`、过程提示必须走 `_send_plain`、不得再用 `plain_result` 发「占卜中」、结果必须合并成 `chain_result`）；`test_store` 新增群名记录/回填断言（含「同群新记录未带群名时历史行仍显示群名」）；`test_webui` 新增用户详情的群名断言。
+
 ## v1.9.2 (2026-09-28)
 
 联动绘图的插件名统一叫「萌绘」（版本 v1.9.1 -> v1.9.2）。

@@ -78,6 +78,7 @@ def main() -> int:
         "_roll_daily", "_economy_on", "_price_of",
         "_try_render_card", "_try_utility_card", "_accent_hex", "_try_llm_sign",
         "_try_draw_background", "_try_build_image_prompt",
+        "_group_name_of", "_send_plain",
         "_push_loop", "_do_daily_push", "_next_push_delay",
         "initialize", "terminate",
     }
@@ -94,6 +95,18 @@ def main() -> int:
     # 没有这个键（v1.8.6 及以前只读 payload → 当日第二次抽签必然退回纯文本）
     check('existing.get("card_path")' in src,
           "fortune_cmd 复用分支必须读 existing['card_path']（列），不能只读 payload")
+
+    # v1.9.3：群名必须随抽签落库（group_name 一直是空的，控制台只能显示群号）
+    check("group_name=group_name" in src,
+          "save_fortune 必须带 group_name（否则控制台只能显示群号）")
+    check("await self._group_name_of(event)" in src, "fortune_cmd 必须调用 _group_name_of 取群名")
+    # v1.9.3：过程提示必须直发（不进结果链），否则会被框架自动 @ 一次
+    check("await self._send_plain(event" in src,
+          "「占卜中」提示必须用 _send_plain 直发，避免被 ResultDecorateStage 自动 @")
+    check('yield event.plain_result("🔮 占卜中' not in src,
+          "「占卜中」提示不能再用 plain_result（会被自动 @）")
+    # 结果图 + 文合并成一条链，群里只 @ 一次
+    check("yield event.chain_result(comps)" in src, "抽签结果必须合并为单条 chain_result")
 
     # 热重载列表必须包含 webui_api（v1.9.0）：控制台接口都在里面，
     # 不重载的话热更上来的实例会一直跑旧接口（新增路由静默 404）
