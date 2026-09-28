@@ -150,9 +150,15 @@
     "type": "text",
     "default": ""
   },
+  "draw_negative_enabled": {
+    "description": "启用负面提示词",
+    "hint": "关闭后完全不传 negative_prompt（内置默认也不传）——出图可能再次出现男性角色、白边、边框裁切等问题，仅在你自己想全权控制出图风格时关闭",
+    "type": "bool",
+    "default": true
+  },
   "draw_negative_prompt": {
     "description": "负向提示词",
-    "hint": "附加给萌绘的 negative_prompt，如低质量标签；留空使用内置默认（排除男性角色：1boy, male, man, boy），填写则整体覆盖（若要保留排除男性请在自定义内容里自行带上）",
+    "hint": "附加给萌绘的 negative_prompt；开关打开时生效——留空使用内置默认（排除男性角色与白边/裁切/构图偏移等），填写则整体覆盖（若要保留排除男性请在自定义内容里自行带上）",
     "type": "string",
     "default": ""
   },

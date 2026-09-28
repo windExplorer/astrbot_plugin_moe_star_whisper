@@ -118,8 +118,8 @@ const GROUP_META: { name: string; description: string; keys: string[] }[] = [
     description: "联动萌绘（astrbot-comfyui-anima）出卡面底图",
     keys: [
       "draw_enabled", "draw_workflow", "draw_prompt_lang", "draw_prompt_format",
-      "draw_llm_prompt", "draw_negative_prompt", "draw_silent", "draw_raw_prompt",
-      "draw_timeout", "draw_fail_hint",
+      "draw_llm_prompt", "draw_negative_enabled", "draw_negative_prompt",
+      "draw_silent", "draw_raw_prompt", "draw_timeout", "draw_fail_hint",
     ],
   },
   {

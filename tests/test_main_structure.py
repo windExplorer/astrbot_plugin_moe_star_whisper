@@ -188,6 +188,13 @@ def main() -> int:
     # v1.10.5：塔罗双联左联只放 AI 牌面原图，不得叠加渲染层装饰（AI 图自带边框）
     check("sdraw.rectangle" not in card_src and "_sparkle(sdraw" not in card_src,
           "双联左联不得再画塔罗框/星饰（会与 AI 自带边框叠成双边）")
+
+    # v1.10.7：负向提示词必须有开关（关闭后完全不传，含内置兜底）
+    check('self._cfg("draw_negative_enabled", True)' in src,
+          "负向提示词必须受 draw_negative_enabled 开关控制")
+    schema_txt = (root / "_conf_schema.json").read_text(encoding="utf-8")
+    check('"draw_negative_enabled"' in schema_txt,
+          "schema 必须声明 draw_negative_enabled 开关")
     check("extra_font_dirs=self._font_dirs(data_dir)" in src,
           "运势卡渲染必须使用 _font_dirs 的候选目录")
     schema_src = (root / "_conf_schema.json").read_text(encoding="utf-8")
