@@ -205,3 +205,11 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ===== Vue3 控制台前端（webui-src/） =====
+# 源码进 git；node_modules / 构建缓存 / 构建时注入的版本常量不入库。
+# 注意：pages/console/（构建产物）必须进 git（zip 打包依赖它），勿忽略。
+webui-src/node_modules/
+webui-src/dist/
+webui-src/.vite/
+webui-src/src/version.ts

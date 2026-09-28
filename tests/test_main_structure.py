@@ -95,6 +95,21 @@ def main() -> int:
     check('existing.get("card_path")' in src,
           "fortune_cmd 复用分支必须读 existing['card_path']（列），不能只读 payload")
 
+    # 热重载列表必须包含 webui_api（v1.9.0）：控制台接口都在里面，
+    # 不重载的话热更上来的实例会一直跑旧接口（新增路由静默 404）
+    import re as _re
+
+    root = Path(__file__).resolve().parents[1]
+    m = _re.search(r"def _reload_modules\(self\):(.*?)(?=\n    (?:async )?def )", src, _re.S)
+    check(bool(m), "找不到 _reload_modules 方法体")
+    check(bool(m) and '"webui_api"' in m.group(1),
+          "_reload_modules 必须包含 webui_api（否则控制台接口热更不生效）")
+
+    # v1.9.0：控制台页面产物必须与源码一起进仓库（zip 打包依赖 pages/console）
+    check((root / "webui-src" / "package.json").is_file(), "缺少 webui-src/package.json（控制台源码）")
+    check((root / "pages" / "console" / "index.html").is_file(),
+          "缺少 pages/console/index.html（控制台构建产物，需先跑 build_webui.ps1）")
+
     # 调试面板（M7.5）：后端模块与页面文件必须存在，聊天侧不得再出现调试指令
     root = Path(__file__).resolve().parents[1]
     check((root / "webui_api.py").is_file(), "缺少 webui_api.py（调试面板后端）")

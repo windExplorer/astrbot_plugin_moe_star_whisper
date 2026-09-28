@@ -26,6 +26,27 @@ if (-not (Test-Path $metaPath)) {
     exit 1
 }
 
+# --- WebUI: rebuild pages/console from webui-src before packaging ---
+# (keeps the shipped console in sync with the frontend sources; the built
+#  directory IS tracked in git, so a stale build would silently ship)
+if (Test-Path (Join-Path $root "webui-src/package.json")) {
+    $webuiScript = Join-Path $root "build_webui.ps1"
+    if (-not (Test-Path $webuiScript)) {
+        Write-Host "ERROR: webui-src/ exists but build_webui.ps1 is missing" -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "==> building WebUI (pages/console)..." -ForegroundColor Cyan
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $webuiScript
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: WebUI build failed, aborting package" -ForegroundColor Red
+        exit 1
+    }
+    if (-not (Test-Path (Join-Path $root "pages/console/index.html"))) {
+        Write-Host "ERROR: pages/console/index.html missing after WebUI build" -ForegroundColor Red
+        exit 1
+    }
+}
+
 # --- version from metadata.yaml (explicit UTF-8: the file has CJK comments) ---
 $metaRaw = [System.IO.File]::ReadAllText($metaPath, [System.Text.Encoding]::UTF8)
 $version = ""
@@ -89,7 +110,7 @@ $zip = [System.IO.Compression.ZipFile]::Open($zipPath, [System.IO.Compression.Zi
 $entryCount = 0
 try {
     # explicit directory entries first (AstrBot needs them)
-    foreach ($d in @("$pluginName/", "$pluginName/data/", "$pluginName/data/lexicon/", "$pluginName/pages/", "$pluginName/pages/debug/")) {
+    foreach ($d in @("$pluginName/", "$pluginName/data/", "$pluginName/data/lexicon/", "$pluginName/pages/", "$pluginName/pages/debug/", "$pluginName/pages/console/", "$pluginName/pages/console/assets/")) {
         [void]$zip.CreateEntry($d)
         $entryCount++
     }

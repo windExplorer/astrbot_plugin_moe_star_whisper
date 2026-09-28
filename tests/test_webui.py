@@ -100,6 +100,95 @@ async def main_async() -> int:
     check(r["status"] == "ok" and fs.deleted and not card_file.exists(),
           "reset core：删行且卡文件被清")
 
+    # ---- v1.9.0 控制台：聚合端点（真库真数据，验证 SQL 与形状） ----
+    from store import Store as _Store
+
+    tmp2 = Path(tempfile.mkdtemp(prefix="moe_console_"))
+    st2 = _Store(tmp2 / "c.db")
+    today_str = webui_api.fortune.local_today("Asia/Shanghai")
+    st2.save_fortune("c1", today_str, {
+        "grade": "大吉", "score": 90, "dims": {"恋爱运": 5}, "streak": 3,
+        "lucky_item": "四叶草", "lucky_color": {"name": "樱粉", "hex": "#F0A0B8"},
+        "constellation": "天蝎座", "sign_text": "很好。",
+    }, nickname="面板甲", group_id="cg1", group_name="面板群", card_path="")
+    st2.add_ledger("c1", 30, "draw", today_str)
+
+    cfg_stub = lambda k, d=None: {"output_mode": "图卡", "timezone": "Asia/Shanghai"}.get(k, d)  # noqa: E731
+    ov = webui_api._overview_core(st2, cfg_stub, "Asia/Shanghai", days=7)
+    check(ov["status"] == "ok" and ov["data"]["totals"]["draws"] == 1, "overview core 聚合")
+    check(ov["data"]["day"]["date"] == webui_api.fortune.local_today("Asia/Shanghai"),
+          "overview core 用插件时区算今天")
+    check(ov["data"]["switches"]["output_mode"] == "图卡", "overview core 带关键开关快照")
+
+    rc = webui_api._records_core(st2, "Asia/Shanghai", page=1, size=10, days=30)
+    check(rc["data"]["records"]["total"] == 1 and rc["data"]["records"]["rows"][0]["uid"] == "c1",
+          "records core 返回记录行")
+    check(rc["data"]["groups"][0]["group_id"] == "cg1", "records core 带群筛选项")
+
+    stt = webui_api._stats_core(st2, "Asia/Shanghai", days=30)
+    check(stt["status"] == "ok" and stt["data"]["grades"]["大吉"] == 1, "stats core 档位聚合")
+    check(stt["data"]["ledger"]["income"] == 30, "stats core 星尘收支")
+    check(stt["data"]["dims"]["恋爱运"] == 5.0, "stats core 六维均值")
+
+    usr = webui_api._user_core(st2, cfg_stub, "Asia/Shanghai", "c1", 1)
+    check(usr["data"]["uid"] == "c1" and usr["data"]["balance"] == 30, "user core 余额")
+    check(len(usr["data"]["history"]) == 1 and len(usr["data"]["calendar"]) == 1, "user core 历史与日历")
+    check(usr["data"]["fortune"] is not None and usr["data"]["fortune"]["has_card"] is False,
+          "user core 今日签摘要")
+    st2.close()
+
+    # ---- v1.9.0 配置页：类型转换与白名单（防「一次保存清空配置」） ----
+    check(webui_api._coerce_by_schema(True, {"type": "bool"}) is True, "bool 直通")
+    check(webui_api._coerce_by_schema("off", {"type": "bool"}) is False, "bool 文本归一")
+    check(webui_api._coerce_by_schema(None, {"type": "bool"}) is webui_api._SKIP,
+          "None 必须被拒绝（否则一次保存把开关清成 False）")
+    check(webui_api._coerce_by_schema("x", {"type": "int"}) is webui_api._SKIP, "int 非法值拒绝")
+    check(webui_api._coerce_by_schema("42", {"type": "int"}) == 42, "int 字符串可转")
+    check(webui_api._coerce_by_schema(1, {"type": "int", "slider": {"min": 30, "max": 600}}) == 30,
+          "int 低于 slider 下限被夹紧")
+    check(webui_api._coerce_by_schema(999, {"type": "int", "slider": {"min": 30, "max": 600}}) == 600,
+          "int 高于 slider 上限被夹紧")
+    check(webui_api._coerce_by_schema("x", {"type": "string", "options": ["a"]}) is webui_api._SKIP,
+          "枚举外取值拒绝")
+    check(webui_api._coerce_by_schema("a", {"type": "string", "options": ["a"]}) == "a", "枚举内取值通过")
+    check(webui_api._coerce_by_schema({"大吉": "20"}, {"type": "dict"}) == {"大吉": 20}, "dict 数值转 int")
+    check(webui_api._coerce_by_schema("a,b", {"type": "list"}) == ["a", "b"], "list 逗号串拆分")
+    check(webui_api._coerce_by_schema([1, " b "], {"type": "list"}) == ["1", "b"], "list 元素归一")
+
+    schema = webui_api._load_schema()
+    check(bool(schema), "能读到 _conf_schema.json")
+    key_bool = next((k for k, m in schema.items() if m.get("type") == "bool"), "")
+    key_int = next((k for k, m in schema.items() if m.get("type") == "int"), "")
+    check(bool(key_bool) and bool(key_int), "schema 里能找到 bool/int 字段")
+
+    class FakeCfg(dict):
+        def __init__(self):
+            super().__init__({key_bool: False, key_int: 10})
+            self.saved = 0
+
+        def save_config(self):
+            self.saved += 1
+
+    plugin_stub = types.SimpleNamespace(config=FakeCfg())
+    res = webui_api._config_set_core(plugin_stub, {
+        key_bool: True, key_int: 77, "不存在的键": 1, key_bool + "_x": None,
+    })
+    check(res["status"] == "ok", "config set 返回 ok")
+    check(res["data"]["changed"] == [key_bool, key_int],
+          f"只写入白名单内且合法的键，实际 {res['data']['changed']}")
+    check(len(res["data"]["skipped"]) == 2, f"白名单外的键被跳过，实际 {res['data']['skipped']}")
+    check(plugin_stub.config[key_bool] is True and plugin_stub.config[key_int] == 77, "配置写入内存")
+    check(plugin_stub.config.saved == 1, "写盘恰好一次")
+
+    bad = webui_api._config_set_core(plugin_stub, {key_bool: None})
+    check(bad["status"] == "ok" and bad["data"]["changed"] == [] and plugin_stub.config.saved == 1,
+          "None 不触发写盘（防清空配置）")
+
+    cfg_view = webui_api._config_get_core(types.SimpleNamespace(config=FakeCfg()))
+    check(cfg_view["status"] == "ok" and cfg_view["data"]["meta"]["field_count"] == len(schema),
+          "config get 返回 schema 与字段数")
+    check(set(cfg_view["data"]["values"]) == set(schema), "config get 的 values 覆盖全部 schema 键")
+
     if FAILED:
         print(f"\n{len(FAILED)} 项失败")
         return 1

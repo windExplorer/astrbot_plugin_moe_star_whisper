@@ -2,6 +2,22 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v1.9.0 (2026-09-28)
+
+WebUI 从「只有一个调试页」升级为完整控制台（版本 v1.8.7 -> v1.9.0）。
+
+- **形态变更**：新增 Vue3 + Naive UI + ECharts 前端工程 `webui-src/`，构建产物落 `pages/console/`。AstrBot 按 `pages/` 子目录名字典序决定入口，`console` 排在 `debug` 之前，所以 Dashboard 侧边栏默认打开控制台；旧的单文件调试页 `pages/debug/` 保留可回退（调试功能也已在控制台里重建）。
+- **六个视图**：①总览（累计/今日指标、近 14 天趋势双轴、吉凶分布、最近 10 条记录、活跃用户快捷入口、关键开关快照）；②抽签记录（时间区间/档位/群/关键词筛选 + 分页 + 详情抽屉）；③数据统计（档位饼、每日档位堆叠、六维雷达均值、时段分布、幸运色/幸运物 Top、星座分布、连签档位、群活跃榜、星尘收支、绘图任务成功率）；④用户查询（档案/今日签/近 N 月运势日历/历史记录/星尘流水/今日绘图任务）；⑤参数配置（schema 驱动表单 + 分区保存）；⑥调试工具（原调试页的状态/重抽/重绘/重置）。
+- **后端数据层**：`store.py` 新增「统计与面板查询」一节——`stats_totals/stats_day/stats_trend/stats_grades/stats_grade_daily/stats_hours/stats_groups/stats_payload/stats_jobs/stats_ledger`、`list_records`（分页 + 条件）、`list_groups`、`recent_users`、`user_history`、`user_ledger`、`count_all`。需要读 payload 的分布（六维/幸运物/幸运色/星座/连签）在 Python 侧解析 JSON，不依赖 SQLite 的 JSON1 扩展。
+- **后端接口层**：`webui_api.py` 新增 `/overview`、`/records`、`/users`、`/stats`、`/user`、`/config`(GET/POST) 六组路由，原 `/debug/*` 五条完整保留。路由仍挂在同一 `ROUTE_PREFIX` 下，前端用「不带前导斜杠、不带插件名」的端点写法。
+- **配置读写的安全边界（重点）**：字段定义以插件自己的 `_conf_schema.json` 为唯一来源（schema 外的键一律忽略，等于白名单）；按 schema 的 `type/options/slider` 做转换——bool 支持 `开/关/on/off/1/0` 文本归一、int 夹紧到 slider 区间、枚举外的取值直接拒绝、dict 值转数值、list 支持逗号串；**`None` 一律拒绝写入**，这是 box v0.12.7「点一次保存把真实配置清空」的根因防线。前端也只提交**被改动过**的字段（对比初始值），保存后回写基线。
+- **前端工程约束**（沿用 user_gateway 踩实的规则，勿改）：`base: './'`（AstrBot 会重写相对资源并追加 asset_token）、单文件产物（`inlineDynamicImports`，跨 chunk 的 import 会被 token 重写搞成 401 白屏）、CSS 内联进 JS、hash 路由、图片内联（`assetsInlineLimit` 300KB）。`bridge.ts` 对 sandbox iframe（`allow-scripts` 但没有 `allow-same-origin`）做安全存储兜底：`localStorage` 直接访问会抛 `SecurityError`，发生在 setup/mount 阶段会整页白屏。
+- **构建与打包**：新增 `build_webui.ps1`（从 `metadata.yaml` 注入 `src/version.ts` → 首次 `npm install` → `vite build` → `pages/console/`）；`build_zip.ps1` 在打包前**强制执行**它，产物缺失直接拒绝打包（避免仓库里有源码、包里是旧界面）。`.gitignore` 忽略 `webui-src/{node_modules,dist,.vite}` 与构建注入的 `src/version.ts`，而 `pages/console/` 必须入库（zip 依赖它）。
+- **热重载**：`_reload_modules` 列表加入 `webui_api`——控制台接口都在里面，不重载的话热更上来的实例会一直跑旧接口（新增路由静默 404）。
+- **顺手修的真 bug**：`stats_payload` 的 SQL 里 select 了不存在的 `streak` 列（`fortunes` 表没有这一列，连签只存在 payload JSON 里），会让统计页直接 500。测试写的时候一眼抓到。
+- 测试：`test_store` 新增 20 余条统计聚合断言（改在**独立库**上验证，避免与前面段落的数据互相污染）、`test_webui` 新增控制台端点与配置转换/白名单断言（含 `None` 不触发写盘）、`test_main_structure` 新增「热重载含 webui_api」与「pages/console 产物存在」守卫。
+- 说明：不做 i18n（页面标题回落为目录名 `console`，中文标题写在页面内）；控制台是管理员向的运维面板，不改变聊天侧任何指令行为。
+
 ## v1.8.7 (2026-09-28)
 
 修复「当日第二次抽签退回纯文本」（版本 v1.8.6 -> v1.8.7）。

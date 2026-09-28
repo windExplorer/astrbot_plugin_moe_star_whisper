@@ -15,6 +15,7 @@ AstrBot 今日运势插件：每个用户每天一支专属「星语签」——
 - **道具经济**：星尘积分（每签必得、越倒霉补偿越多）+ 换签卡/厄运护身符/幸运香烛/连签保护卡四道具；全流水落库，不可转账不可兑换。
 - **群玩法**：`/星语榜`（日/周）、`/星语PK`、群开关、连签徽章。
 - **数据全量落库**：SQLite 于 `data/plugin_data/astrbot_plugin_moe_star_whisper/star_whisper.db`（抽签/档案/绘图任务/星尘流水），为统计功能预留口径。
+- **WebUI 控制台**（v1.9.0）：Vue3 + Naive UI + ECharts 面板（插件 Page `pages/console/`）——总览指标与趋势、抽签记录检索、六维/幸运物/星座统计、单用户档案与运势日历、参数配置分区读写、调试工具（重抽/重绘/重置）；另有单文件旧调试页 `pages/debug/` 可回退。
 
 ## 指令
 
@@ -34,7 +35,8 @@ AstrBot 今日运势插件：每个用户每天一支专属「星语签」——
 | `/星语补签` | 断签 3 天内消耗连签保护卡补回昨天 |
 | `/星语开关 on\|off` | 群级启停（仅 AstrBot 管理员） |
 | `/星语发放 @用户 <±n>` | 手动调整星尘（仅 AstrBot 管理员） |
-| WebUI 调试面板 | 仅管理员（插件 Page）：按 QQ 号查看状态 / 重抽 / 重绘 / 重置 |
+| WebUI 控制台 | 仅管理员（插件 Page `pages/console/`）：总览 / 抽签记录 / 数据统计 / 用户查询 / 参数配置 / 调试工具 |
+| WebUI 调试页（旧版） | 仅管理员（`pages/debug/`）：按 QQ 号查看状态 / 重抽 / 重绘 / 重置 |
 
 > v1.8.4 起主指令统一「星语」前缀；旧的「运势」系指令名（`/运势` `/运势商店` `/运势PK` 等）全部保留为别名，老习惯不受影响。`/运势背包` 仍指向 `/星尘`。
 
@@ -62,6 +64,10 @@ uv run --no-project python tests/test_fortune.py
 uv run --no-project python tests/test_store.py
 uv run --no-project --with pillow python tests/test_card.py
 uv run --no-project python tests/test_main_structure.py
+
+# 构建 WebUI 控制台（Vue3 + Naive UI + ECharts，产物 pages/console/；需 Node.js）
+# build_zip.ps1 打包前会自动调用它，只有单独调前端时才需要手动跑
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build_webui.ps1
 
 # 打包（产物在 dist/，同名版本已存在会拒绝打包）
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build_zip.ps1

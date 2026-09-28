@@ -77,9 +77,13 @@ class StarWhisperPlugin(Star):
     # ---------- 生命周期 ----------
 
     def _reload_modules(self):
-        """热重载自研子模块（依赖序），避免热更后跑旧代码（PRD §7.7）。"""
+        """热重载自研子模块（依赖序），避免热更后跑旧代码（PRD §7.7）。
+
+        v1.9.0 起把 webui_api 也纳入：控制台接口（总览/统计/配置读写）都在里面，
+        不重载的话热更上来的实例会一直跑旧接口（新增路由静默 404）。
+        """
         pkg = __package__
-        for name in ("lexicon", "fortune", "store"):
+        for name in ("lexicon", "fortune", "store", "webui_api"):
             mod = sys.modules.get(f"{pkg}.{name}")
             if mod is not None:
                 try:
