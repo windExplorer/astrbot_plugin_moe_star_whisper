@@ -337,7 +337,8 @@ def _overview_core(store, cfg_get, tz_name: str, days: int = 14) -> dict:
         "trend": store.stats_trend(date_from),
         "grades": store.stats_grades(date_from),
         "recent": store.list_records(page=1, size=10)["rows"],
-        "recent_users": store.recent_users(12),
+        # 带头像/昵称的用户列表（与「用户查询」页同一份数据，取最近活跃 12 人）
+        "recent_users": store.list_users(page=1, size=12, order="last")["rows"],
         "counts": store.count_all(),
         "switches": {
             "timezone": cfg_get("timezone", ""),
@@ -408,18 +409,50 @@ async def h_records(plugin) -> dict:
     )
 
 
+def _users_core(store, page=1, size=24, keyword: str = "", order: str = "last") -> dict:
+    """抽过签的用户列表（头像/昵称/QQ/抽签天数/最近与首次日期），支持搜索与排序。
+
+    order: last（最近活跃，默认）/ draws（抽签最多）/ score（均分最高）
+    """
+    order = str(order or "last")
+    if order not in ("last", "draws", "score"):
+        order = "last"
+    data = store.list_users(page=page, size=size, keyword=str(keyword or ""), order=order)
+    return ok({"users": data, "keyword": str(keyword or ""), "order": order})
+
+
 async def h_users(plugin) -> dict:
-    """最近抽签用户（控制台快捷入口）。"""
+    """抽过签的用户列表（控制台「用户查询」页顶部列表）。"""
     if plugin._store is None:
         return err("插件未初始化完成")
-    return ok({"users": plugin._store.recent_users(12)})
+    return _users_core(
+        plugin._store,
+        page=_q("page", 1), size=_q("size", 24),
+        keyword=_q("q", ""), order=_q("order", "last"),
+    )
 
 
 # ---------- 数据统计 ----------
 
+def _group_share(groups: list, top: int = 8) -> list[dict]:
+    """群聊抽签占比（供饼图）：Top N + 其他群。
+
+    口径：每条 fortunes 记录即「用户当天第一次抽签所在的群」
+    （主键 user_id+date + INSERT OR IGNORE，换签不改群），故不会重复计算。
+    """
+    rows = sorted(groups, key=lambda g: -int(g.get("draws") or 0))
+    head = rows[:top]
+    rest = sum(int(g.get("draws") or 0) for g in rows[top:])
+    out = [{"name": g.get("group_name") or g.get("group_id"), "value": int(g.get("draws") or 0)} for g in head]
+    if rest:
+        out.append({"name": "其他群", "value": rest})
+    return out
+
+
 def _stats_core(store, tz_name: str, days: int = 30) -> dict:
     date_from = _days_from(tz_name, days)
     payload = store.stats_payload(date_from)
+    groups_all = store.stats_groups(date_from, 100)
     return ok({
         "days": int(days),
         "range_from": date_from,
@@ -429,7 +462,10 @@ def _stats_core(store, tz_name: str, days: int = 30) -> dict:
         "grades_all": store.stats_grades(""),
         "grade_daily": store.stats_grade_daily(date_from),
         "hours": store.stats_hours(date_from),
-        "groups": store.stats_groups(date_from, 10),
+        "groups": groups_all[:10],
+        "groups_all": groups_all,
+        "group_share": _group_share(groups_all),
+        "private": store.stats_private(date_from),
         "jobs": store.stats_jobs(date_from),
         "ledger": store.stats_ledger(date_from),
         "dims": payload["dims"],

@@ -18,6 +18,8 @@
       <div class="stat"><div class="k">星尘发放</div><div class="v">{{ data.ledger.income }}</div><div class="d">消耗 {{ data.ledger.spend }}</div></div>
       <div class="stat"><div class="k">历史累计抽签</div><div class="v">{{ allDraws }}</div><div class="d">全量统计</div></div>
       <div class="stat"><div class="k">星座覆盖</div><div class="v">{{ data.constellations.length }}</div><div class="d">已绑定生日</div></div>
+      <div class="stat"><div class="k">群聊抽签</div><div class="v">{{ groupDraws }}</div><div class="d">私聊 {{ data.private.draws }} 次</div></div>
+      <div class="stat"><div class="k">活跃群数</div><div class="v">{{ data.groups_all.length }}</div><div class="d">区间内有人抽签</div></div>
     </section>
 
     <div class="grid2">
@@ -76,27 +78,60 @@
       </section>
     </div>
 
+    <section class="panel">
+      <div class="head">
+        <b>群聊使用分布</b>
+        <span class="sub">
+          口径：每条记录 = 该用户<b>当天第一次抽签所在的那个群</b>——一天一签（主键 user_id+date），
+          当天换到别的群再抽不会新增记录，换签卡也不改群归属，所以一人一天只计入一个群，不会重复计算。
+        </span>
+      </div>
+      <div class="grid2">
+        <div>
+          <div class="head"><b>抽签占比</b><span class="sub">Top 8 + 其他群</span></div>
+          <EChart :option="groupPie" height="250px" />
+        </div>
+        <div>
+          <div class="head">
+            <b>群活跃榜</b>
+            <span class="sub">
+              {{ data.groups_all.length }} 个群有人抽签 · 私聊 {{ data.private.draws }} 次（{{ data.private.users }} 人）
+            </span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>#</th><th>群</th><th>抽签</th><th>人数</th><th>均分</th><th>大吉</th><th>凶签</th><th>图卡</th><th>最近</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="(g, i) in data.groups_all.slice(0, 20)" :key="g.group_id">
+                  <td>{{ i + 1 }}</td>
+                  <td>{{ g.group_name || g.group_id }}</td>
+                  <td>{{ g.draws }}</td>
+                  <td>{{ g.users }}</td>
+                  <td>{{ g.avg_score }}</td>
+                  <td>{{ g.great }}</td>
+                  <td>{{ g.bad }}</td>
+                  <td>{{ g.cards }}</td>
+                  <td>{{ g.last_date }}</td>
+                </tr>
+                <tr v-if="!data.groups_all.length">
+                  <td colspan="9" class="empty">区间内还没有群聊抽签数据</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <div class="grid2">
       <section class="panel">
-        <div class="head"><b>群活跃榜</b><span class="sub">区间内抽签数</span></div>
-        <table>
-          <thead><tr><th>#</th><th>群</th><th>抽签</th><th>人数</th><th>均分</th></tr></thead>
-          <tbody>
-            <tr v-for="(g, i) in data.groups" :key="g.group_id">
-              <td>{{ i + 1 }}</td>
-              <td>{{ g.group_name || g.group_id }}</td>
-              <td>{{ g.draws }}</td>
-              <td>{{ g.users }}</td>
-              <td>{{ g.avg_score }}</td>
-            </tr>
-            <tr v-if="!data.groups.length"><td colspan="5" class="empty">暂无群数据</td></tr>
-          </tbody>
-        </table>
+        <div class="head"><b>连签档位分布</b><span class="sub">抽签时的连签天数</span></div>
+        <EChart :option="streakBar" height="240px" />
       </section>
       <section class="panel">
-        <div class="head"><b>连签档位分布</b><span class="sub">抽签时的连签天数</span></div>
-        <EChart :option="streakBar" height="200px" />
-        <div class="head" style="margin-top: 4px"><b>星尘流水构成</b></div>
+        <div class="head"><b>星尘流水构成</b><span class="sub">按原因聚合</span></div>
         <ul class="kv">
           <li v-for="r in data.ledger.by_reason" :key="r.reason">
             <span>{{ reasonLabel(r.reason) }}</span>
@@ -320,6 +355,34 @@ const itemBar = computed(() => {
     ],
   };
 });
+
+const groupDraws = computed(() =>
+  (data.value?.groups_all || []).reduce((s, g) => s + Number(g.draws || 0), 0)
+);
+
+const groupPie = computed(() => ({
+  tooltip: { trigger: "item", ...tip.value },
+  legend: {
+    type: "scroll",
+    bottom: 0,
+    textStyle: { color: palette.value.textDim, fontSize: 11 },
+  },
+  series: [
+    {
+      type: "pie",
+      radius: ["38%", "64%"],
+      center: ["50%", "44%"],
+      itemStyle: { borderWidth: 2, borderColor: isDark.value ? "#262336" : "#fff" },
+      label: { show: false },
+      emphasis: { label: { show: true, color: palette.value.text, fontSize: 12, formatter: "{b}\n{c} 次" } },
+      data: (data.value?.group_share || []).map((g, i) => ({
+        name: g.name,
+        value: g.value,
+        itemStyle: { color: PALETTE[i % PALETTE.length] },
+      })),
+    },
+  ],
+}));
 
 const constelPie = computed(() => ({
   tooltip: { trigger: "item", ...tip.value },

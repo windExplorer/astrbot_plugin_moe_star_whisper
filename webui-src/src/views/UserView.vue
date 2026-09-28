@@ -1,20 +1,80 @@
 <template>
   <section class="panel">
-    <div class="filters">
+    <div class="head">
+      <b>抽过签的用户</b>
+      <span class="sub">共 {{ users.total }} 人 · 一人一天只算一次（按当天首次抽签所在会话归属）</span>
+      <span class="spacer"></span>
       <n-input
-        v-model:value="uid"
-        placeholder="输入 QQ 号查询该用户的星语档案"
-        style="width: 260px"
+        v-model:value="keyword"
+        placeholder="搜 QQ 号或昵称"
+        style="width: 200px"
+        size="small"
         clearable
-        @keyup.enter="load"
+        @keyup.enter="loadUsers(1)"
       />
-      <n-select v-model:value="months" :options="monthOptions" style="width: 130px" @update:value="load" />
-      <n-button type="primary" size="small" @click="load">查询</n-button>
-      <span class="sub">最近查询：</span>
-      <span class="chip link" v-for="u in recentUids" :key="u" @click="pick(u)">{{ u }}</span>
+      <n-select
+        v-model:value="order"
+        :options="orderOptions"
+        style="width: 150px"
+        size="small"
+        @update:value="loadUsers(1)"
+      />
+      <n-button size="small" type="primary" @click="loadUsers(1)">搜索</n-button>
+    </div>
+
+    <div class="users">
+      <div
+        class="user"
+        v-for="u in users.rows"
+        :key="u.uid"
+        :class="{ active: u.uid === activeUid }"
+        @click="openUser(u.uid)"
+      >
+        <UserAvatar :uid="u.uid" :src="u.avatar" :name="u.nickname" :size="44" />
+        <div class="info">
+          <div class="nick">{{ u.nickname || "（未记录昵称）" }}</div>
+          <div class="uid">QQ {{ u.uid }}</div>
+          <div class="uid" v-if="u.last_group_name || u.last_group_id">
+            最近在 {{ u.last_group_name || u.last_group_id }}
+          </div>
+        </div>
+        <div class="mini">
+          <span class="badge">{{ u.draws }} 签</span>
+          <span>均分 {{ u.avg_score }}</span>
+          <span>最近 {{ u.last_date }}</span>
+        </div>
+      </div>
+      <div v-if="!users.rows.length" class="empty">
+        {{ usersLoading ? "加载中…" : "还没有人抽过签" }}
+      </div>
+    </div>
+
+    <div class="pager" v-if="users.total > users.size">
+      <n-pagination
+        v-model:page="page"
+        :page-count="Math.ceil(users.total / users.size)"
+        :page-slot="7"
+        size="small"
+        @update:page="loadUsers()"
+      />
+    </div>
+  </section>
+
+  <section class="panel" v-if="activeUid">
+    <div class="filters">
+      <UserAvatar :uid="activeUid" :name="data?.nickname || activeUid" :size="28" />
+      <b>{{ data?.nickname || activeUid }}</b>
+      <span class="sub">QQ {{ activeUid }}</span>
+      <span class="spacer"></span>
+      <n-select v-model:value="months" :options="monthOptions" style="width: 130px" size="small" @update:value="load" />
+      <n-button size="small" quaternary @click="clearActive">关闭</n-button>
     </div>
     <div v-if="errorMsg" class="empty err">{{ errorMsg }}</div>
-    <div v-else-if="!data" class="empty">输入 QQ 号后点「查询」，或从总览页的表格进入</div>
+    <div v-else-if="!data" class="empty">正在加载该用户档案…</div>
+  </section>
+
+  <section class="panel" v-else>
+    <div class="empty">点上方任意用户查看档案与运势日历（也可从总览页的表格点击进入）</div>
   </section>
 
   <template v-if="data">
@@ -148,13 +208,15 @@
 import { NButton, NInput, NSelect, useMessage } from "naive-ui";
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
-import { apiGet, type UserPayload } from "../api";
+import { apiGet, type UserPayload, type UsersPayload } from "../api";
 import { gradeColor } from "../theme";
+import UserAvatar from "../components/UserAvatar.vue";
 
 const message = useMessage();
 const route = useRoute();
 
 const uid = ref("");
+const activeUid = ref("");
 const months = ref(3);
 const data = ref<UserPayload | null>(null);
 const errorMsg = ref("");
@@ -177,10 +239,35 @@ function reasonLabel(s: string): string {
   return s;
 }
 
-const recentFallback = ref<string[]>([]);
-const recentUids = computed(() =>
-  data.value?.recent_uids?.length ? data.value.recent_uids : recentFallback.value
-);
+// 用户列表（头像 / 昵称 / QQ / 抽签天数）：分页 + 搜索 + 排序
+const keyword = ref("");
+const order = ref("last");
+const page = ref(1);
+const usersLoading = ref(false);
+const users = ref<UsersPayload["users"]>({ total: 0, page: 1, size: 24, rows: [] });
+const orderOptions = [
+  { label: "最近活跃", value: "last" },
+  { label: "抽签最多", value: "draws" },
+  { label: "均分最高", value: "score" },
+];
+
+async function loadUsers(toPage?: number) {
+  if (typeof toPage === "number") page.value = toPage;
+  usersLoading.value = true;
+  try {
+    const res = await apiGet<UsersPayload>("users", {
+      page: page.value,
+      size: 24,
+      q: keyword.value.trim(),
+      order: order.value,
+    });
+    users.value = res.users;
+  } catch (e: any) {
+    message.error("加载用户列表失败：" + (e?.message || e));
+  } finally {
+    usersLoading.value = false;
+  }
+}
 
 interface Cell {
   day: number;
@@ -219,9 +306,16 @@ const calendarMonths = computed(() => {
     .map(([month, days]) => ({ month, weeks: buildWeeks(month, days) }));
 });
 
-function pick(u: string) {
+function openUser(u: string) {
+  activeUid.value = u;
   uid.value = u;
   load();
+}
+
+function clearActive() {
+  activeUid.value = "";
+  data.value = null;
+  errorMsg.value = "";
 }
 
 async function load() {
@@ -243,28 +337,14 @@ async function load() {
 watch(
   () => route.query.uid,
   (v) => {
-    if (typeof v === "string" && v) {
-      uid.value = v;
-      load();
-    }
+    if (typeof v === "string" && v) openUser(v);
   }
 );
 
 onMounted(() => {
+  loadUsers(1);
   const q = route.query.uid;
-  if (typeof q === "string" && q) {
-    uid.value = q;
-    load();
-    return;
-  }
-  // 未指定用户时，用「最近调试过的 QQ 号」当快捷入口
-  apiGet<{ recent_uids: string[] }>("debug/history")
-    .then((d) => {
-      recentFallback.value = d?.recent_uids || [];
-    })
-    .catch(() => {
-      /* 忽略：没有历史也能正常查询 */
-    });
+  if (typeof q === "string" && q) openUser(q);
 });
 </script>
 
@@ -281,6 +361,70 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+.spacer {
+  flex: 1;
+}
+.users {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(286px, 1fr));
+  gap: 10px;
+}
+.user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--msw-line);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.user:hover {
+  border-color: var(--msw-accent);
+  background: rgba(232, 106, 138, 0.06);
+}
+.user.active {
+  border-color: var(--msw-accent);
+  background: rgba(232, 106, 138, 0.12);
+}
+.user .info {
+  flex: 1;
+  min-width: 0;
+}
+.user .nick {
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.user .uid {
+  color: var(--msw-sub);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.user .mini {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  color: var(--msw-sub);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.badge {
+  background: rgba(232, 106, 138, 0.16);
+  color: var(--msw-text);
+  border-radius: 8px;
+  padding: 1px 7px;
+}
+.pager {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
 }
 .stats {
   display: grid;

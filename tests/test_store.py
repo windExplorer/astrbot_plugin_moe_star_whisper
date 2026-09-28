@@ -195,6 +195,10 @@ def main() -> int:
     groups = [g for g in st.stats_groups("2026-09-20", 50) if g["group_id"] == "sg1"]
     check(groups and groups[0]["draws"] == 3 and groups[0]["users"] == 2,
           f"stats_groups sg1 抽签 3/人数 2，实际 {groups}")
+    check(groups[0]["great"] == 1 and groups[0]["bad"] == 1 and groups[0]["cards"] == 1,
+          f"stats_groups 大吉/凶签/图卡列，实际 {groups[0]}")
+    check(groups[0]["last_date"] == "2026-09-21", f"stats_groups 最近活跃日期，实际 {groups[0]['last_date']}")
+    check(st.stats_private("2026-09-20") == {"draws": 0, "users": 0}, "区间内没有私聊抽签")
 
     pdata = st.stats_payload("2026-09-20")
     check(pdata["sampled"] == 3, f"stats_payload 采样 3 条，实际 {pdata['sampled']}")
@@ -246,6 +250,43 @@ def main() -> int:
     counts = st.count_all()
     check(counts["fortunes"] >= 3 and set(counts) == {"fortunes", "profiles", "items", "ledger", "draw_jobs"},
           f"count_all 表行数，实际 {counts}")
+
+    # 群归属口径（v1.9.1，需求明确要求）：同一用户当天先在 A 群抽签，之后换到 B 群
+    # 再抽 —— 一日一签主键拒绝第二次写入，群归属保持第一次那个群，不会被重复计算
+    st.save_fortune("t1", "2026-09-22", payload("吉", 60, 3, "松果", "雾蓝", "#A8C8E8", 1),
+                    nickname="归属甲", avatar="http://a/t1.png",
+                    group_id="tgA", group_name="A群")
+    again = st.save_fortune("t1", "2026-09-22", payload("大凶", 10, 1, "松果", "雾蓝", "#A8C8E8", 1),
+                            nickname="归属甲", group_id="tgB", group_name="B群")
+    check(again is False, "同日换群再抽必须被拒绝（不写新行）")
+    row_t1 = st.get_fortune("t1", "2026-09-22")
+    check(row_t1["group_id"] == "tgA" and row_t1["score"] == 60,
+          f"群归属与内容保持当天第一次的值，实际 {row_t1['group_id']}/{row_t1['score']}")
+    group_draws = {g["group_id"]: g["draws"] for g in st.stats_groups("2026-09-22", 50)}
+    check(group_draws.get("tgA") == 1 and "tgB" not in group_draws,
+          f"群维度只计入首签所在群，实际 {group_draws}")
+    check(len(st.user_history("t1", 5)) == 1, "该用户当天只有一条记录")
+    check(st.stats_private("2026-09-22")["draws"] == 0, "该日无私聊记录")
+
+    # 用户列表（v1.9.1）：头像 / 昵称 / QQ / 抽签天数 / 群数 / 排序与分页
+    ulist = st.list_users(page=1, size=10)
+    check(ulist["total"] == 3, f"抽过签的用户 3 人（s1/s2/t1），实际 {ulist['total']}")
+    first = ulist["rows"][0]
+    check(first["uid"] == "t1" and first["draws"] == 1 and first["groups"] == 1,
+          f"list_users 默认按最近活跃排序，实际 {first}")
+    check(first["nickname"] == "归属甲" and first["avatar"] == "http://a/t1.png",
+          f"list_users 昵称与头像取最近有值的记录，实际 {first['nickname']}/{first['avatar']}")
+    check(first["last_group_id"] == "tgA" and first["last_group_name"] == "A群", "list_users 最近所在群")
+    check({"uid", "nickname", "avatar", "draws", "first_date", "last_date",
+           "avg_score", "best_score", "groups", "last_group_id", "last_group_name"}
+          <= set(first.keys()), "list_users 字段齐备")
+    check(st.list_users(keyword="统计甲")["total"] == 1, "list_users 昵称模糊搜索")
+    check(st.list_users(keyword="s2")["total"] == 1, "list_users QQ 号搜索")
+    check(st.list_users(order="draws")["rows"][0]["draws"] == 2, "list_users 按抽签数排序")
+    check(st.list_users(order="score")["rows"][0]["avg_score"] >= 60, "list_users 按均分排序")
+    check(st.list_users(order="乱写")["rows"][0]["uid"] == "t1", "list_users 非法排序回落最近活跃")
+    paged_users = st.list_users(page=2, size=1)
+    check(len(paged_users["rows"]) == 1 and paged_users["page"] == 2, "list_users 分页")
 
     st.close()
     if FAILED:

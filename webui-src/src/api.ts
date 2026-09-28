@@ -125,6 +125,7 @@ export interface DayStat {
 export interface RecordRow {
   uid: string;
   nickname: string;
+  avatar?: string;
   date: string;
   grade: string;
   score: number;
@@ -148,9 +149,43 @@ export interface Overview {
   trend: DayStat[];
   grades: Record<string, number>;
   recent: RecordRow[];
-  recent_users: { uid: string; nickname: string; last_date: string; draws: number }[];
+  recent_users: UserRow[];
   counts: Record<string, number>;
   switches: Record<string, any>;
+}
+
+/** 抽过签的用户（用户列表页 / 总览快捷入口）。 */
+export interface UserRow {
+  uid: string;
+  nickname: string;
+  avatar: string;
+  draws: number;
+  first_date: string;
+  last_date: string;
+  avg_score: number;
+  best_score: number;
+  groups: number;
+  last_group_id: string;
+  last_group_name: string;
+}
+
+export interface UsersPayload {
+  users: { total: number; page: number; size: number; rows: UserRow[] };
+  keyword: string;
+  order: string;
+}
+
+/** 群活跃行（口径：每条记录=用户当天第一次抽签所在的群，不会重复计算）。 */
+export interface GroupRow {
+  group_id: string;
+  group_name: string;
+  draws: number;
+  users: number;
+  avg_score: number;
+  great: number;
+  bad: number;
+  cards: number;
+  last_date: string;
 }
 
 export interface RecordsPayload {
@@ -170,7 +205,10 @@ export interface StatsPayload {
   grades_all: Record<string, number>;
   grade_daily: { date: string; grade: string; n: number }[];
   hours: number[];
-  groups: { group_id: string; group_name: string; draws: number; users: number; avg_score: number }[];
+  groups: GroupRow[];
+  groups_all: GroupRow[];
+  group_share: { name: string; value: number }[];
+  private: { draws: number; users: number };
   jobs: {
     by_status: Record<string, { n: number; avg_ms: number }>;
     total: number;

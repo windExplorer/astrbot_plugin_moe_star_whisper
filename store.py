@@ -515,10 +515,20 @@ class Store:
         return out
 
     def stats_groups(self, date_from: str = "", limit: int = 10) -> list[dict]:
-        """群活跃榜：抽签数降序。"""
+        """群活跃榜：抽签数降序。
+
+        ⚠️ 归属口径（需求明确要求，勿改）：fortunes 主键是 (user_id, date)，
+        且 save_fortune 用 INSERT OR IGNORE —— 同一用户当天在别的群再抽不会写新行，
+        换签卡也只改 payload/card_path 不动 group_id。所以每条记录天然就是
+        「该用户当天第一次抽签所在的群」，一人一天只计入一个群，不会重复计算。
+        """
         sql = (
             "SELECT group_id, MAX(group_name) AS group_name, COUNT(*) AS draws,"
-            " COUNT(DISTINCT user_id) AS users, COALESCE(ROUND(AVG(score), 1), 0) AS avg_score"
+            " COUNT(DISTINCT user_id) AS users, COALESCE(ROUND(AVG(score), 1), 0) AS avg_score,"
+            " SUM(CASE WHEN grade='大吉' THEN 1 ELSE 0 END) AS great,"
+            " SUM(CASE WHEN grade IN ('凶','大凶') THEN 1 ELSE 0 END) AS bad,"
+            " COALESCE(SUM(CASE WHEN card_path!='' THEN 1 ELSE 0 END), 0) AS cards,"
+            " MAX(date) AS last_date"
             " FROM fortunes WHERE group_id!=''"
         )
         params: list = []
@@ -534,9 +544,23 @@ class Store:
                 "draws": int(r["draws"] or 0),
                 "users": int(r["users"] or 0),
                 "avg_score": float(r["avg_score"] or 0),
+                "great": int(r["great"] or 0),
+                "bad": int(r["bad"] or 0),
+                "cards": int(r["cards"] or 0),
+                "last_date": r["last_date"] or "",
             }
             for r in self._query(sql, tuple(params))
         ]
+
+    def stats_private(self, date_from: str = "") -> dict:
+        """私聊抽签的占比（与群聊互补口径，同样一人一天一次）。"""
+        sql = "SELECT COUNT(*) AS draws, COUNT(DISTINCT user_id) AS users FROM fortunes WHERE group_id=''"
+        params: tuple = ()
+        if date_from:
+            sql += " AND date>=?"
+            params = (date_from,)
+        row = self._one(sql, params)
+        return {"draws": int(row.get("draws") or 0), "users": int(row.get("users") or 0)}
 
     def stats_payload(self, date_from: str = "") -> dict:
         """payload 分布聚合：六维均值、幸运物/色 Top、星座分布、连签档位。
@@ -725,7 +749,7 @@ class Store:
         size = max(1, min(int(size), 200))
         page = max(1, int(page))
         rows = self._query(
-            "SELECT user_id, nickname, date, grade, score, group_id, group_name,"
+            "SELECT user_id, nickname, avatar, date, grade, score, group_id, group_name,"
             " card_path, created_at, payload FROM fortunes"
             + clause
             + " ORDER BY date DESC, created_at DESC LIMIT ? OFFSET ?",
@@ -743,6 +767,7 @@ class Store:
             out.append({
                 "uid": r["user_id"],
                 "nickname": r["nickname"] or "",
+                "avatar": r.get("avatar") or "",
                 "date": r["date"],
                 "grade": payload.get("grade_display") or r["grade"],
                 "score": int(r["score"] or 0),
@@ -791,6 +816,67 @@ class Store:
                 (max(1, int(limit)),),
             )
         ]
+
+    def list_users(self, page: int = 1, size: int = 24, keyword: str = "",
+                   order: str = "last") -> dict:
+        """抽过签的用户列表（头像/昵称/QQ/抽签数/最近与首次日期/均分/最高分/群数）。
+
+        口径：fortunes 主键 (user_id, date) → draws 就是「有效抽签天数」，
+        也就是「参与天数」，不存在同一用户同一天重复计数。
+        头像与昵称取该用户**最近一条有值**的记录（旧数据可能没存头像）。
+        """
+        where: list[str] = []
+        params: list = []
+        if keyword:
+            where.append("(user_id LIKE ? OR nickname LIKE ?)")
+            params.extend([f"%{keyword}%", f"%{keyword}%"])
+        clause = (" WHERE " + " AND ".join(where)) if where else ""
+
+        total = int(self._one(
+            "SELECT COUNT(DISTINCT user_id) AS n FROM fortunes" + clause, tuple(params)
+        ).get("n") or 0)
+
+        order_sql = {
+            "draws": "draws DESC, last_date DESC",
+            "score": "avg_score DESC, draws DESC",
+        }.get(str(order), "last_date DESC, draws DESC")
+
+        size = max(1, min(int(size), 100))
+        page = max(1, int(page))
+        rows = self._query(
+            "SELECT f.user_id, COUNT(*) AS draws, MIN(f.date) AS first_date,"
+            " MAX(f.date) AS last_date, COALESCE(ROUND(AVG(f.score), 1), 0) AS avg_score,"
+            " MAX(f.score) AS best_score,"
+            " COUNT(DISTINCT CASE WHEN f.group_id!='' THEN f.group_id END) AS groups,"
+            " (SELECT nickname FROM fortunes WHERE user_id=f.user_id AND nickname!=''"
+            "  ORDER BY date DESC LIMIT 1) AS nickname,"
+            " (SELECT avatar FROM fortunes WHERE user_id=f.user_id AND avatar!=''"
+            "  ORDER BY date DESC LIMIT 1) AS avatar,"
+            " (SELECT group_name FROM fortunes WHERE user_id=f.user_id AND group_name!=''"
+            "  ORDER BY date DESC LIMIT 1) AS last_group_name,"
+            " (SELECT group_id FROM fortunes WHERE user_id=f.user_id AND group_id!=''"
+            "  ORDER BY date DESC LIMIT 1) AS last_group_id"
+            " FROM fortunes f"
+            + clause
+            + f" GROUP BY f.user_id ORDER BY {order_sql} LIMIT ? OFFSET ?",
+            tuple(params) + (size, (page - 1) * size),
+        )
+        out = []
+        for r in rows:
+            out.append({
+                "uid": r["user_id"],
+                "nickname": r["nickname"] or "",
+                "avatar": r["avatar"] or "",
+                "draws": int(r["draws"] or 0),
+                "first_date": r["first_date"] or "",
+                "last_date": r["last_date"] or "",
+                "avg_score": float(r["avg_score"] or 0),
+                "best_score": int(r["best_score"] or 0),
+                "groups": int(r["groups"] or 0),
+                "last_group_id": r["last_group_id"] or "",
+                "last_group_name": r["last_group_name"] or "",
+            })
+        return {"total": total, "page": page, "size": size, "rows": out}
 
     def user_history(self, user_id: str, limit: int = 60) -> list[dict]:
         """单用户最近签记录（新→旧，含卡文件状态）。"""

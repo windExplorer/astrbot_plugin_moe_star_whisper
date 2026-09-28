@@ -54,7 +54,10 @@
           <tbody>
             <tr v-for="row in data?.recent || []" :key="row.uid + row.date">
               <td>{{ row.date }}</td>
-              <td>{{ row.nickname || row.uid }}</td>
+              <td class="user-cell">
+                <UserAvatar :uid="row.uid" :src="row.avatar" :name="row.nickname" :size="24" />
+                <span>{{ row.nickname || row.uid }}</span>
+              </td>
               <td><span class="grade" :style="{ background: gradeColor(row.grade) }">{{ row.grade }}</span></td>
               <td>{{ row.score }}</td>
               <td>{{ row.streak }}</td>
@@ -70,12 +73,23 @@
     </section>
 
     <section class="panel">
-      <div class="head"><b>最近活跃用户</b><span class="sub">点击进入用户查询</span></div>
-      <div class="chips">
-        <span class="chip link" v-for="u in data?.recent_users || []" :key="u.uid" @click="openUser(u.uid)">
-          {{ u.nickname || u.uid }} · {{ u.draws }} 签 · {{ u.last_date }}
-        </span>
-        <span v-if="!(data?.recent_users || []).length" class="sub">暂无数据</span>
+      <div class="head">
+        <b>最近活跃用户</b>
+        <span class="sub">点击查看档案与运势日历（完整名单见「用户查询」页）</span>
+      </div>
+      <div class="users">
+        <div class="user" v-for="u in data?.recent_users || []" :key="u.uid" @click="openUser(u.uid)">
+          <UserAvatar :uid="u.uid" :src="u.avatar" :name="u.nickname" :size="36" />
+          <div class="info">
+            <div class="nick">{{ u.nickname || "（未记录昵称）" }}</div>
+            <div class="uid">QQ {{ u.uid }}</div>
+          </div>
+          <div class="mini">
+            {{ u.draws }} 签<br />
+            {{ u.last_date }}
+          </div>
+        </div>
+        <div v-if="!(data?.recent_users || []).length" class="sub">暂无数据</div>
       </div>
     </section>
   </template>
@@ -86,6 +100,7 @@ import { computed, onMounted, ref } from "vue";
 import { useMessage } from "naive-ui";
 import { useRouter } from "vue-router";
 import EChart from "../EChart.vue";
+import UserAvatar from "../components/UserAvatar.vue";
 import { apiGet, type Overview } from "../api";
 import { GRADE_COLORS, GRADE_ORDER, chartPalette, gradeColor } from "../theme";
 import { isDark } from "../store";
@@ -328,6 +343,51 @@ onMounted(load);
 .chip.link:hover {
   background: var(--msw-accent);
   color: #fff;
+}
+.user-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.users {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(248px, 1fr));
+  gap: 8px;
+}
+.user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--msw-line);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.user:hover {
+  border-color: var(--msw-accent);
+  background: rgba(232, 106, 138, 0.06);
+}
+.user .info {
+  flex: 1;
+  min-width: 0;
+}
+.user .nick {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.user .uid {
+  color: var(--msw-sub);
+  font-size: 11px;
+}
+.user .mini {
+  color: var(--msw-sub);
+  font-size: 11px;
+  text-align: right;
+  white-space: nowrap;
 }
 .table-wrap {
   max-height: 360px;

@@ -135,6 +135,36 @@ async def main_async() -> int:
     check(len(usr["data"]["history"]) == 1 and len(usr["data"]["calendar"]) == 1, "user core 历史与日历")
     check(usr["data"]["fortune"] is not None and usr["data"]["fortune"]["has_card"] is False,
           "user core 今日签摘要")
+
+    # ---- v1.9.1 用户列表（头像/昵称/QQ）与群聊维度 ----
+    ul = webui_api._users_core(st2, page=1, size=10)
+    check(ul["status"] == "ok" and ul["data"]["users"]["total"] == 1
+          and ul["data"]["users"]["rows"][0]["uid"] == "c1", "users core 列表")
+    check("avatar" in ul["data"]["users"]["rows"][0] and ul["data"]["order"] == "last",
+          "users core 含头像字段且默认按最近活跃")
+    check(webui_api._users_core(st2, order="乱写")["data"]["order"] == "last",
+          "users core 非法排序回落 last")
+
+    st2.save_fortune("c2", today_str, {"grade": "吉", "score": 70, "streak": 1},
+                     nickname="面板乙", group_id="cg2", group_name="面板群2")
+    st2.save_fortune("c3", today_str, {"grade": "凶", "score": 40, "streak": 1}, nickname="面板丙")
+    stt2 = webui_api._stats_core(st2, "Asia/Shanghai", days=30)
+    check(len(stt2["data"]["groups_all"]) == 2,
+          f"stats core 群列表 2 个，实际 {stt2['data']['groups_all']}")
+    check(stt2["data"]["private"]["draws"] == 1, "stats core 私聊单独统计（不计入群榜）")
+    share = stt2["data"]["group_share"]
+    check(sum(s["value"] for s in share) == 2
+          and {s["name"] for s in share} == {"面板群", "面板群2"},
+          f"group_share 汇总等于群签数，实际 {share}")
+    g_row = {g["group_name"]: g for g in stt2["data"]["groups_all"]}["面板群"]
+    check("great" in g_row and "cards" in g_row and "last_date" in g_row,
+          "群行带大吉/图卡/最近活跃字段")
+
+    fake_groups = [{"group_id": f"g{i}", "group_name": f"群{i}", "draws": 10 - i} for i in range(10)]
+    share2 = webui_api._group_share(fake_groups, top=8)
+    check(len(share2) == 9 and share2[-1]["name"] == "其他群" and share2[-1]["value"] == 3,
+          f"group_share Top8 + 其他群，实际 {share2}")
+    check(webui_api._group_share([], top=8) == [], "group_share 空表返回空")
     st2.close()
 
     # ---- v1.9.0 配置页：类型转换与白名单（防「一次保存清空配置」） ----
