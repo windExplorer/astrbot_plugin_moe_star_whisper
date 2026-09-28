@@ -320,10 +320,13 @@ class Store:
         rows = self._db.execute(
             "SELECT * FROM fortunes WHERE date=? ORDER BY score DESC", (date,)
         ).fetchall()
+        names = self.group_names()  # 历史行群名回填（v1.9.3）
         out = []
         for row in rows:
             data = dict(row)
             data["payload"] = json.loads(data.get("payload") or "{}")
+            if not data.get("group_name") and data.get("group_id"):
+                data["group_name"] = names.get(str(data["group_id"]), "")
             out.append(data)
         return out
 
@@ -348,6 +351,40 @@ class Store:
             (group_id, date_from, limit),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def list_range_avg_all(self, date_from: str, limit: int = 200) -> list[dict]:
+        """区间内**全体**用户的均分榜（不限群，v1.9.4）。
+
+        与 `list_group_range_avg` 的区别：不按 group_id 过滤——调用方拿到结果后用
+        群成员集合自行过滤，这样「今天在别的群抽签、但人在本群」的成员也能上榜。
+        """
+        rows = self._query(
+            "SELECT f.user_id, AVG(f.score) AS avg_score, COUNT(*) AS days,"
+            " MAX(f.date) AS last_date,"
+            " (SELECT nickname FROM fortunes WHERE user_id=f.user_id AND nickname!=''"
+            "  ORDER BY date DESC LIMIT 1) AS nickname,"
+            " (SELECT group_id FROM fortunes WHERE user_id=f.user_id AND group_id!=''"
+            "  ORDER BY date DESC LIMIT 1) AS last_group_id,"
+            " (SELECT group_name FROM fortunes WHERE user_id=f.user_id AND group_name!=''"
+            "  ORDER BY date DESC LIMIT 1) AS last_group_name"
+            " FROM fortunes f WHERE f.date>=? GROUP BY f.user_id"
+            " ORDER BY avg_score DESC, days DESC LIMIT ?",
+            (date_from, max(1, int(limit))),
+        )
+        names = self.group_names()
+        return [
+            {
+                "user_id": r["user_id"],
+                "nickname": r["nickname"] or "",
+                "avg_score": float(r["avg_score"] or 0),
+                "days": int(r["days"] or 0),
+                "last_date": r["last_date"] or "",
+                "last_group_id": r["last_group_id"] or "",
+                "last_group_name": r["last_group_name"]
+                or names.get(str(r["last_group_id"] or ""), ""),
+            }
+            for r in rows
+        ]
 
     # ---------- profiles ----------
 

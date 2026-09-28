@@ -305,6 +305,20 @@ def main() -> int:
     t2_row = st.list_users(keyword="归属乙")["rows"][0]
     check(t2_row["last_group_name"] == "A群", "list_users 最近群名也回填")
 
+    # 全体均分榜（v1.9.4 星语榜口径）：不限群，调用方再用群成员集合过滤，
+    # 这样「人在本群、今天在别群抽签」的成员也能上榜
+    st.save_fortune("t3", "2026-09-23", payload("大吉", 95, 5, "四叶草", "樱粉", "#F0A0B8", 1),
+                    nickname="归属丙", group_id="tgB", group_name="B群")
+    allavg = st.list_range_avg_all("2026-09-22", 50)
+    check({r["user_id"] for r in allavg} == {"t1", "t2", "t3"},
+          f"list_range_avg_all 不限群地含全部用户，实际 {[r['user_id'] for r in allavg]}")
+    check(allavg[0]["user_id"] == "t3" and allavg[0]["avg_score"] == 95.0,
+          f"按均分降序，实际 {allavg[0]}")
+    check(allavg[0]["nickname"] == "归属丙" and allavg[0]["days"] == 1, "带昵称与抽签天数")
+    check(allavg[0]["last_group_name"] == "B群" and allavg[0]["last_group_id"] == "tgB",
+          "带最近所在群（供榜单标注来源）")
+    check(st.list_range_avg_all("2027-01-01", 50) == [], "区间外返回空表")
+
     st.close()
     if FAILED:
         print(f"\n{len(FAILED)} 项失败")

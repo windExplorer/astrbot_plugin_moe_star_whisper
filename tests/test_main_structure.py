@@ -78,7 +78,7 @@ def main() -> int:
         "_roll_daily", "_economy_on", "_price_of",
         "_try_render_card", "_try_utility_card", "_accent_hex", "_try_llm_sign",
         "_try_draw_background", "_try_build_image_prompt",
-        "_group_name_of", "_send_plain",
+        "_group_name_of", "_send_plain", "_group_member_ids", "_from_tag",
         "_push_loop", "_do_daily_push", "_next_push_delay",
         "initialize", "terminate",
     }
@@ -107,6 +107,15 @@ def main() -> int:
           "「占卜中」提示不能再用 plain_result（会被自动 @）")
     # 结果图 + 文合并成一条链，群里只 @ 一次
     check("yield event.chain_result(comps)" in src, "抽签结果必须合并为单条 chain_result")
+
+    # v1.9.4：星语榜按「本群成员」筛（人在本群就该上榜，哪怕今天在别的群抽签）
+    check("await self._group_member_ids(event, gid)" in src,
+          "rank_cmd 必须取本群成员集合（榜单口径）")
+    check("self._store.list_range_avg_all(monday" in src,
+          "周榜必须用不限群的 list_range_avg_all + 成员过滤")
+    check("in members][:10]" in src, "榜单必须按成员集合过滤后再取前 10")
+    check("list_group_range_avg(gid, monday)" in src and "list_group_day(gid, today)" in src,
+          "取不到群成员时必须保留「本群抽签」回落口径")
 
     # 热重载列表必须包含 webui_api（v1.9.0）：控制台接口都在里面，
     # 不重载的话热更上来的实例会一直跑旧接口（新增路由静默 404）

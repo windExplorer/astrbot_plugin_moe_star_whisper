@@ -72,6 +72,7 @@ class StarWhisperPlugin(Star):
         self.config = config
         self._store = None
         self._push_task = None
+        self._member_cache: dict = {}  # group_id -> (monotonic_ts, {成员 id})，榜单用（v1.9.4）
         self._reload_modules()
 
     # ---------- 生命周期 ----------
@@ -197,6 +198,53 @@ class StarWhisperPlugin(Star):
                 f"[{PLUGIN_NAME}] 取群名失败，本次只记录群号\n{traceback.format_exc()}"
             )
             return ""
+
+    # 群成员缓存的 TTL（秒）：榜单是高频指令，不宜每次都打平台 API（v1.9.4）
+    _MEMBER_TTL = 600
+    _MEMBER_CACHE_MAX = 200
+
+    async def _group_member_ids(self, event: AstrMessageEvent, gid: str) -> set | None:
+        """本群成员 id 集合（带 TTL 缓存）；取不到返回 None。
+
+        用途（v1.9.4 榜单口径）：用户今天可能在别的群抽签，但只要他人在本群，
+        就应该出现在本群的星语榜里——所以榜是按「群成员」筛，而不是按「在本群抽签」筛。
+        取群成员走 `event.get_group()`（aiocqhttp 下会调 OneBot `get_group_info` +
+        `get_group_member_list`）；平台不支持或调用失败时返回 None，调用方回落旧口径。
+        """
+        gid = str(gid or "")
+        if not gid:
+            return None
+        now = time.monotonic()
+        cached = self._member_cache.get(gid)
+        if cached and (now - cached[0]) < self._MEMBER_TTL:
+            return cached[1]
+        ids: set = set()
+        try:
+            group = await event.get_group()
+            for member in (getattr(group, "members", None) or []):
+                uid = str(getattr(member, "user_id", "") or "").strip()
+                if uid:
+                    ids.add(uid)
+        except Exception:
+            logger.warning(
+                f"[{PLUGIN_NAME}] 取群成员失败，星语榜回落「本群抽签」口径\n{traceback.format_exc()}"
+            )
+            return None
+        if not ids:
+            logger.info(f"[{PLUGIN_NAME}] 群 {gid} 成员列表为空，星语榜回落「本群抽签」口径")
+            return None
+        if len(self._member_cache) >= self._MEMBER_CACHE_MAX:
+            self._member_cache.clear()
+        self._member_cache[gid] = (now, ids)
+        return ids
+
+    @staticmethod
+    def _from_tag(row: dict, gid: str) -> str:
+        """榜单行的小注：抽签来源群（本群不标注，别群才标注，便于理解口径）。"""
+        row_gid = str((row or {}).get("group_id") or "")
+        if not row_gid or row_gid == str(gid or ""):
+            return ""
+        return f"来自 {row.get('group_name') or row_gid}"
 
     @staticmethod
     async def _send_plain(event: AstrMessageEvent, text: str) -> None:
@@ -777,7 +825,12 @@ class StarWhisperPlugin(Star):
 
     @filter.command("星语榜", alias={"运势榜"})
     async def rank_cmd(self, event: AstrMessageEvent):
-        """群内幸运指数排行（/星语榜 日|周，默认日；榜单卡）"""
+        """群内幸运指数排行（/星语榜 日|周，默认日；榜单卡）
+
+        口径（v1.9.4）：**本群成员**——用户今天可能在别的群抽的签，只要他人在本群
+        就该上榜，所以按群成员筛而不是按「在本群抽签」筛；群成员列表取不到时回落
+        到「本群抽签」口径，并在标题里如实标注，绝不假装。
+        """
         if self._store is None:
             yield event.plain_result("星语者还没整理好星盘，稍后再试～")
             return
@@ -789,28 +842,46 @@ class StarWhisperPlugin(Star):
         span = "周" if ("周" in arg or "week" in arg.lower()) else "日"
         tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
         today = fortune.local_today(tz_name)
-        title, rows_src = "", []
+        members = await self._group_member_ids(event, gid)
+
         if span == "周":
             d = datetime.strptime(today, "%Y-%m-%d").date()
             monday = (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
-            rows_src = self._store.list_group_range_avg(gid, monday)
-            title = f"本周星语榜（{monday[5:]} 起）"
-            rows = [
-                (i, r.get("nickname") or "旅人", f"{r['avg_score']:.0f}", f"均分 · {r['days']} 天")
-                for i, r in enumerate(rows_src, 1)
-            ]
+            if members is not None:
+                src = self._store.list_range_avg_all(monday, 300)
+                rows_src = [r for r in src if str(r.get("user_id") or "") in members][:10]
+                scope = f"本群成员 {len(members)} 人"
+            else:
+                rows_src = self._store.list_group_range_avg(gid, monday)
+                scope = "本群抽签"
+            title = f"本周星语榜（{monday[5:]} 起）· {scope}"
+            rows = []
+            for i, r in enumerate(rows_src, 1):
+                tag = self._from_tag(r, gid)
+                sub = (tag + " · " if tag else "") + f"均分 · {r['days']} 天"
+                rows.append((i, r.get("nickname") or "旅人", f"{r['avg_score']:.0f}", sub))
         else:
-            rows_src = self._store.list_group_day(gid, today)
-            title = "今日星语榜"
+            if members is not None:
+                src = self._store.list_day(today)
+                rows_src = [r for r in src if str(r.get("user_id") or "") in members][:10]
+                scope = f"本群成员 {len(members)} 人"
+            else:
+                rows_src = self._store.list_group_day(gid, today)
+                scope = "本群抽签"
+            title = f"今日星语榜 · {scope}"
             rows = [
-                (i, r.get("nickname") or "旅人", str(r["score"]), "")
+                (i, r.get("nickname") or "旅人", str(r["score"]), self._from_tag(r, gid))
                 for i, r in enumerate(rows_src, 1)
             ]
+        empty_text = ("本群成员都还没抽签，快来当第一个！"
+                      if members is not None else "本群还没有人抽签，快来当第一个！")
         card_path = None
         if self._utility_cards_on():
             card_path = self._try_utility_card(
-                render_rank_card, title=title, rows=rows,
-                date_str=today, file_key=f"{span}_{gid}_{today}",
+                render_rank_card, title=title, rows=rows, date_str=today,
+                empty_text=empty_text,
+                # file_key 带口径标记：同一天换了口径不会复用旧卡（v1.9.4）
+                file_key=f"{span}_{gid}_{today}_{'mem' if members is not None else 'grp'}",
             )
         if card_path:
             yield event.image_result(card_path)
@@ -823,7 +894,7 @@ class StarWhisperPlugin(Star):
                     f"{i}. {name} · {main_text}" + (f"（{sub_text}）" if sub_text else "")
                 )
         else:
-            lines.append("还没有人抽签，快来当第一个！")
+            lines.append(empty_text)
         yield event.plain_result("\n".join(lines))
 
     @filter.command("星语PK", alias={"星语pk", "运势PK", "运势pk"})
