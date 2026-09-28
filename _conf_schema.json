@@ -27,25 +27,27 @@
     "labels": ["跟随默认", "亮色", "暗色"],
     "default": "auto"
   },
-  "card_font_path": {
-    "description": "卡面字体路径",
-    "hint": "留空=按下面的「卡面字体风格」自动选（一般用这个就够）。想指定具体字体时，可填三种写法：① 字体文件名（ResourceHanRoundedCN-Medium.woff2，忽略大小写）② 字体名（Resource Han Rounded，空格/连字符/大小写都不影响，模糊匹配）③ 文件路径（/AstrBot/data/fonts/x.ttf，绝对路径最稳；相对路径按 AstrBot 进程工作目录解析）——①②会在「插件 fonts/ → AstrBot data/fonts/」里找。填了就以它为准（优先于字体风格）；解析不到会告警并回落到字体风格。支持 ttf/otf/ttc/woff2",
-    "type": "string",
-    "default": ""
-  },
   "card_font_style": {
-    "description": "卡面字体风格",
-    "hint": "仅在「卡面字体」留空（或填的值解析不到）时生效。跟随默认=正文黑体 + 展示楷体（现有观感）；圆体=全卡统一圆体——把圆体字体放进 AstrBot 的公共字体目录 data/fonts/ 或本插件数据目录的 fonts/ 即可，文件名建议含 rounded（例如 Resource Han Rounded，SIL OFL 授权）；想用名字不含 rounded 的字体（如 LXGW WenKai），请改用上面的「卡面字体」直接填字体名。找不到或本机读不了该格式时自动回落默认字体并记日志",
+    "description": "字体选择",
+    "hint": "默认 = 正文黑体 + 展示文字（吉凶/牌名/大数字）楷体；圆体 = 全卡统一圆体，把圆体字体放进 AstrBot 的公共目录 data/fonts/ 或本插件数据目录的 fonts/ 即可（文件名需含 rounded，例如 Resource Han Rounded，SIL OFL 授权）；自定义 = 使用下面的「自定义字体」，想指定某个具体字体、或字体名不含 rounded（如 LXGW WenKai 霞鹜文楷）时选它。字体找不到或本机读不了时自动回落默认字体并记日志",
     "type": "string",
     "options": [
       "auto",
-      "rounded"
+      "rounded",
+      "custom"
     ],
     "labels": [
-      "跟随默认（黑体 + 楷体）",
-      "圆体（资料卡同款）"
+      "默认（黑体 + 楷体）",
+      "圆体",
+      "自定义"
     ],
     "default": "auto"
+  },
+  "card_font_path": {
+    "description": "自定义字体",
+    "hint": "仅在「字体选择」为「自定义」时生效，可填三种写法（前两种会在「插件 fonts/ → AstrBot 的 data/fonts/」里找）：① 字体名，如 Resource Han Rounded（忽略大小写/空格/连字符）② 字体文件名，如 ResourceHanRoundedCN-Medium.woff2 ③ 文件路径，如 /AstrBot/data/fonts/x.ttf（绝对路径最稳，相对路径按 AstrBot 进程工作目录解析）。支持 ttf/otf/ttc/woff2；留空或解析不到会告警并回落默认字体",
+    "type": "string",
+    "default": ""
   },
   "card_width": {
     "description": "卡面单面宽度",

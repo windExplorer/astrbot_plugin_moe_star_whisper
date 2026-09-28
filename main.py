@@ -64,8 +64,11 @@ _ITEM_ALIASES = {
 }
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.8.5")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.10.0")
 class StarWhisperPlugin(Star):
+    # 「字体选择」不是「自定义」却还留着「自定义字体」时，只提示一次（v1.10.0）
+    _font_conflict_noted = False
+
     def __init__(self, context: Context, config: AstrBotConfig = None):
         # ⚠️ 必须接受 config kwarg：star_manager 注入 AstrBotConfig 时若构造函数
         # 不接受该参数会 TypeError 被静默降级（只传 context），self.config 缺失
@@ -299,34 +302,43 @@ class StarWhisperPlugin(Star):
         return None
 
     def _card_font_path(self, data_dir: Path) -> str | None:
-        """本次渲染实际使用的字体路径（v1.9.9）。
+        """本次渲染实际使用的字体路径（v1.10.0）。
 
-        与「卡面字体风格」的关系（明确从属，不是并列，避免两个配置打架）：
+        「字体选择」(card_font_style) 是唯一的字体开关，三选一，不再有两个并列配置：
 
-          1. `card_font_path` 非空 → 以它为准。支持三种写法（路径 / 文件名 / 字体名），
-             由 `card.resolve_font` 解析；**解析失败时告警，然后继续按风格开关兜底**，
-             而不是直接掉到系统字体（否则用户填错一次就完全看不出问题在哪）。
-          2. `card_font_path` 留空（或填的值解析不到）→ 完全按 `card_font_style`：
-             `rounded` 走「挑文件名含 rounded 的字体」，`auto` 交给 card.find_font
-             （插件 fonts/ → data/fonts/ → 系统字体）。
+          auto（默认）→ 正文黑体 + 展示楷体（返回 None，交给 card.find_font 走系统字体）
+          rounded     → 圆体：在候选目录里挑文件名含 rounded 的字体
+          custom      → 自定义：读「自定义字体」(card_font_path)，支持字体名/文件名/路径；
+                        留空或解析不到 → 告警并回落默认字体（不会偷偷换成圆体）
 
+        只有自定义才读 card_font_path；其余取值下它被忽略（首次记一条 info 说明）。
         任何一步失败都只记日志、不抛错，绝不影响出卡。
         """
         if card is None:  # 图卡模块不可用（PIL 缺失等），调用方本就不会走到这里
             return None
-        dirs = self._font_dirs(data_dir)
+        style = str(self._cfg("card_font_style", "auto")).strip().lower()
         spec = str(self._cfg("card_font_path", "") or "").strip()
-        if spec:
-            resolved, why = card.resolve_font(spec, dirs)
-            if resolved:
-                logger.info(f"[{PLUGIN_NAME}] 卡面字体：{resolved}（card_font_path={spec}，{why}）")
-                return resolved
+
+        if style != "custom":
+            if spec and not self._font_conflict_noted:
+                self._font_conflict_noted = True
+                logger.info(
+                    f"[{PLUGIN_NAME}] 「字体选择」不是「自定义」，已忽略「自定义字体」配置：{spec}"
+                )
+            return self._find_rounded_font(data_dir) if style == "rounded" else None
+
+        if not spec:
             logger.warning(
-                f"[{PLUGIN_NAME}] card_font_path 未解析到可用字体：{spec} —— {why}；"
-                "改为按「卡面字体风格」自动选择"
+                f"[{PLUGIN_NAME}] 「字体选择」为「自定义」但未填「自定义字体」——本次使用默认字体"
             )
-        if str(self._cfg("card_font_style", "auto")).strip().lower() == "rounded":
-            return self._find_rounded_font(data_dir)
+            return None
+        resolved, why = card.resolve_font(spec, self._font_dirs(data_dir))
+        if resolved:
+            logger.info(f"[{PLUGIN_NAME}] 自定义字体：{resolved}（{why}）")
+            return resolved
+        logger.warning(
+            f"[{PLUGIN_NAME}] 自定义字体未解析到可用字体：{spec} —— {why}；本次使用默认字体"
+        )
         return None
 
     def _try_render_card(self, result: dict, uid: str, nickname: str = "",

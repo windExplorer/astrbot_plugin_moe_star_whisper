@@ -48,33 +48,30 @@ AstrBot 今日运势插件：每个用户每天一支专属「星语签」——
 
 ## 字体说明（图卡）
 
-不打包字体，按以下顺序查找：配置 `card_font_path` → `data/plugin_data/astrbot_plugin_moe_star_whisper/fonts/` → `data/fonts/` → 系统字体（Windows 微软雅黑 / Linux Noto CJK）。支持 `ttf / otf / ttc / woff2`（woff2 需 Pillow 所带 FreeType 支持 brotli，读不了的候选会被自动跳过）。找不到可用字体时自动回退纯文本出签。
-
-**字体风格**（配置 `card_font_style`）：
-
-| 取值 | 效果 | 字体来源 |
-| --- | --- | --- |
-| `跟随默认` | 正文黑体 + 展示文字（吉凶/牌名/大数字）楷体 | 系统字体（现有观感） |
-| `圆体` | 全卡统一圆体（标题/正文/名次/分数） | 在下方候选目录里按文件名挑 `*rounded*` 字体 |
-
-字体来源只认两个位置（**不依赖任何其它插件**）：
+字体不打包、也不依赖其它插件，只认两个位置：
 
 1. **AstrBot 的公共字体目录 `data/fonts/`**（推荐——放这里所有插件都能用）；
 2. 本插件数据目录的 `data/plugin_data/astrbot_plugin_moe_star_whisper/fonts/`。
 
-选「圆体」时若这些目录里没有圆体（或该格式本机读不了），会**自动回落**默认字体并记一条日志，不会导致出卡失败。圆体推荐 [Resource Han Rounded](https://github.com/CyanoHao/Resource-Han-Rounded)（SIL OFL 1.1，文件名形如 `ResourceHanRoundedCN-Medium.woff2`）。
+两处都没有可用字体时继续走系统字体（Windows 微软雅黑 / Linux Noto CJK）；全都没有则回退纯文本出签。支持 `ttf / otf / ttc / woff2`（woff2 需 Pillow 所带 FreeType 支持 brotli，读不了的候选会被自动跳过）。
 
-**两个配置的关系**：`card_font_path`（卡面字体）优先——填了就以它为准，留空时才看 `card_font_style`（卡面字体风格）。所以不用两个都配：常规需求只配后者（「圆体」）即可。
+**字体选择**（配置 `card_font_style`，一个开关三选一）：
 
-`card_font_path` 支持三种写法，写法 ① ② 都会在「插件 `fonts/` → AstrBot `data/fonts/`」里找：
+| 取值 | 效果 |
+| --- | --- |
+| `默认（黑体 + 楷体）` | 正文黑体 + 展示文字（吉凶/牌名/大数字）楷体 |
+| `圆体` | 全卡统一圆体——在候选目录里挑文件名含 `rounded` 的字体 |
+| `自定义` | 使用「自定义字体」`card_font_path`（**选了它才会出现这一项**） |
+
+「自定义字体」支持三种写法（写法 ①② 在候选目录里找）：
 
 | 写法 | 例子 |
 | --- | --- |
-| 字体名（最省事，模糊匹配，忽略大小写/空格/连字符） | `Resource Han Rounded`、`resourcehanrounded` |
+| 字体名（最省事，忽略大小写/空格/连字符） | `Resource Han Rounded`、`resourcehanrounded` |
 | 文件名（忽略大小写） | `ResourceHanRoundedCN-Medium.woff2` |
 | 文件路径（绝对路径最稳，相对路径按 AstrBot 进程工作目录解析） | `/AstrBot/data/fonts/ResourceHanRoundedCN-Medium.woff2` |
 
-支持 `ttf` / `otf` / `ttc` / `woff2`。填了却解析不到时会**在日志里给出具体原因**（文件不存在 / 有匹配但本机读不了 / 候选目录里没有这个名字），然后回落到「卡面字体风格」自动选择。想用名字不含 `rounded` 的字体（例如 LXGW WenKai 霞鹜文楷），就填在这一项里。
+选「圆体」但目录里没有圆体（或本机读不了该格式）、选「自定义」但字体留空或解析不到时，都会**在日志里给出具体原因**（没有这个文件 / 有匹配但本机读不了 / 路径不存在）并回落默认字体，不会导致出卡失败。圆体推荐 [Resource Han Rounded](https://github.com/CyanoHao/Resource-Han-Rounded)（SIL OFL 1.1，文件名形如 `ResourceHanRoundedCN-Medium.woff2`）；字体名不含 `rounded` 的（例如 LXGW WenKai 霞鹜文楷）用「自定义」填进去即可。
 
 ## 依赖
 

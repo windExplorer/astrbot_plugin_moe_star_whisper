@@ -2,6 +2,17 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v1.10.0 (2026-09-28)
+
+字体配置重构为「一个开关三选一」（版本 v1.9.9 -> v1.10.0）。
+
+- **动机**：v1.9.9 之后字体相关配置是两个并列项（`card_font_style` 风格开关 + `card_font_path` 字体），靠隐式优先级共存，语义含糊。重构为用户提出的模型——**字体选择：① 默认（黑体+楷体）② 圆体 ③ 自定义**；选「自定义」才需要（才会出现）字体输入。
+- **schema**：`card_font_style` 改名说明为「字体选择」，新增 `custom` 选项（`auto/rounded/custom`，中文标签「默认（黑体 + 楷体）/ 圆体 / 自定义」）；`card_font_path` 说明改为「自定义字体」，hint 注明仅在自定义时生效、支持字体名/文件名/路径三种写法（`card.resolve_font` 逻辑不变）。
+- **行为**：`main._card_font_path` 按三值分派——`auto` 走系统字体（黑体+楷体），`rounded` 按文件名挑圆体，`custom` 解析 `card_font_path`（留空或解析不到 → 告警并回落默认字体，**不会**偷偷换成圆体）。非自定义取值下 `card_font_path` 被忽略（首次记一条 info 提示，兼容旧配置里残留的值）。
+- **控制台配置页**（`ConfigView.vue`）新增条件字段机制 `DEPENDS_ON`：`card_font_path` 仅在 `card_font_style=custom` 时渲染，隐藏时分区底部提示「另有 N 项依赖选项」；**保存只提交当前可见字段的改动**，被隐藏的键不会被一起提交。AstrBot 原生配置页没有联动，靠 description/hint 说明。
+- **顺带**：`@register` 元信息里的版本号从遗留的 `1.8.5` 同步为当前版本（之前一直没跟 `metadata.yaml` 对齐）。
+- 测试：`test_main_structure` 新增——schema 必须是三选一且带中文标签、`card_font_path` 说明为「自定义字体」、非自定义必须忽略 `card_font_path`、控制台必须联动且保存过滤隐藏字段；其余守卫沿用。
+
 ## v1.9.9 (2026-09-28)
 
 `card_font_path` 支持字体名，并明确它与「卡面字体风格」的从属关系（版本 v1.9.8 -> v1.9.9）。

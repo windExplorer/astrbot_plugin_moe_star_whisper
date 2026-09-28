@@ -30,7 +30,7 @@
       </div>
 
       <div class="fields">
-        <div class="field" v-for="key in group.keys" :key="key">
+        <div class="field" v-for="key in visibleKeys(group)" :key="key">
           <div class="label">
             <span>{{ titleOf(key) }}</span>
             <code>{{ key }}</code>
@@ -68,7 +68,10 @@
             <div class="hint" v-if="hintOf(key)">{{ hintOf(key) }}</div>
           </div>
         </div>
-        <div v-if="!group.keys.length" class="empty">该分区暂无字段</div>
+        <div v-if="!visibleKeys(group).length" class="empty">该分区暂无字段</div>
+        <div v-else-if="visibleKeys(group).length < group.keys.length" class="sub">
+          另有 {{ group.keys.length - visibleKeys(group).length }} 项依赖「字体选择」等选项，选择后才会出现。
+        </div>
       </div>
     </section>
 
@@ -103,7 +106,7 @@ const GROUP_META: { name: string; description: string; keys: string[] }[] = [
     name: "基础与出签",
     description: "时区、种子盐、出签方式与卡面外观",
     keys: [
-      "timezone", "salt", "output_mode", "card_theme", "card_font_path", "card_font_style",
+      "timezone", "salt", "output_mode", "card_theme", "card_font_style", "card_font_path",
       "card_width", "card_height", "fortune_signer", "tarot_label_on_image",
     ],
   },
@@ -126,6 +129,22 @@ const GROUP_META: { name: string; description: string; keys: string[] }[] = [
   },
   { name: "群与权限", description: "停用的群号", keys: ["disabled_groups"] },
 ];
+
+// 条件字段（v1.10.0）：某些键只在该组配置取特定值时才需要填。
+// 「自定义字体」只在「字体选择 = 自定义」时出现——避免两个并列配置互相打架。
+const DEPENDS_ON: Record<string, { key: string; values: string[] }> = {
+  card_font_path: { key: "card_font_style", values: ["custom"] },
+};
+
+function visible(key: string): boolean {
+  const rule = DEPENDS_ON[key];
+  if (!rule) return true;
+  return rule.values.includes(String(form.value[rule.key] ?? ""));
+}
+
+function visibleKeys(group: { keys: string[] }): string[] {
+  return group.keys.filter(visible);
+}
 
 const groups = computed(() => {
   const all = Object.keys(schema.value);
@@ -196,7 +215,9 @@ function sameValue(a: any, b: any): boolean {
 }
 
 function dirtyKeys(group: { keys: string[] }): string[] {
-  return group.keys.filter((k) => !sameValue(form.value[k], initial.value[k]));
+  // 只提交「当前可见」的改动：被条件隐藏的键（如字体选择非自定义时的「自定义字体」）
+  // 不参与保存，避免用户看不到却把它一起提交上去（v1.10.0）
+  return visibleKeys(group).filter((k) => !sameValue(form.value[k], initial.value[k]));
 }
 
 function buildPayload(keys: string[]): { values: Record<string, any>; bad: string[] } {

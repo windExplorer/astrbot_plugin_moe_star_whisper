@@ -143,8 +143,26 @@ def main() -> int:
     # v1.9.9：card_font_path 支持「字体名 / 文件名 / 路径」三种写法
     check("def resolve_font" in card_src, "card.py 需提供 resolve_font（解析字体名/文件名/路径）")
     check("card.resolve_font" in src, "card_font_path 必须走 card.resolve_font")
-    check("card_font_path 未解析到可用字体" in src,
-          "card_font_path 解析失败必须告警（不能静默回落）")
+    check("自定义字体未解析到可用字体" in src,
+          "自定义字体解析失败必须告警（不能静默回落）")
+
+    # v1.10.0：「字体选择」是唯一的字体开关（默认/圆体/自定义），自定义字体条件出现
+    import json
+
+    schema = json.loads((root / "_conf_schema.json").read_text(encoding="utf-8"))
+    style = schema.get("card_font_style") or {}
+    check(style.get("options") == ["auto", "rounded", "custom"],
+          f"「字体选择」必须是三选一，实际 {style.get('options')}")
+    check(len(style.get("labels") or []) == 3, "「字体选择」三个选项都要有中文标签")
+    check((schema.get("card_font_path") or {}).get("description") == "自定义字体",
+          "card_font_path 的说明应为「自定义字体」")
+    check('style != "custom"' in src, "非自定义时必须忽略 card_font_path（不能两个配置打架）")
+    check("_font_conflict_noted" in src, "忽略 card_font_path 时应有一次性日志提示")
+    vue = (root / "webui-src" / "src" / "views" / "ConfigView.vue").read_text(encoding="utf-8")
+    check('card_font_path: { key: "card_font_style", values: ["custom"] }' in vue,
+          "控制台配置页必须把「自定义字体」联动到「字体选择=自定义」")
+    check("visibleKeys(group)" in vue, "配置页渲染必须按可见性过滤字段")
+    check("visibleKeys(group).filter" in vue, "保存时不应提交被条件隐藏的字段")
     check("extra_font_dirs=self._font_dirs(data_dir)" in src,
           "运势卡渲染必须使用 _font_dirs 的候选目录")
     schema_src = (root / "_conf_schema.json").read_text(encoding="utf-8")
