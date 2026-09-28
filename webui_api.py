@@ -202,7 +202,7 @@ async def h_debug_history(plugin) -> dict:
 async def h_debug_redraw(plugin) -> dict:
     """重抽：换种子重算运势 + LLM 签文 + 重渲染卡（复用当日成功 AI 底图）。
 
-    说明：WebUI 触发没有聊天事件，无法新绘 anima 底图；底图复用当日
+    说明：WebUI 触发没有聊天事件，无法新绘萌绘底图；底图复用当日
     draw_jobs 的成功记录或默认幸运色渐变。AI 底图新绘请在聊天内抽签触发。
     """
     if plugin._store is None:

@@ -126,7 +126,7 @@ def main() -> int:
     now = fortune.now_in("UTC")
     check(now.tzinfo is not None, "now_in 应返回 aware datetime")
 
-    # 10) M6：生图提示词与 anima 响应解析
+    # 10) M6：生图提示词与萌绘响应解析
     tpl = fortune.builtin_draw_prompt("en", "tags")
     check("Danbooru" in tpl and "{facts}" in tpl, "en+tags 模板应含 Danbooru 约束与 facts 占位")
     tpl_zh = fortune.builtin_draw_prompt("zh", "natural")

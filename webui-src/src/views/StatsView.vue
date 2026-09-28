@@ -66,7 +66,7 @@
         <EChart :option="ledgerOption" height="250px" />
       </section>
       <section class="panel">
-        <div class="head"><b>绘图任务</b><span class="sub">anima 联动质量</span></div>
+        <div class="head"><b>绘图任务</b><span class="sub">萌绘联动质量</span></div>
         <EChart :option="jobsOption" height="190px" />
         <ul class="kv">
           <li v-for="(v, k) in data.jobs.by_status" :key="k">
@@ -150,6 +150,7 @@ import { computed, onMounted, ref } from "vue";
 import EChart from "../EChart.vue";
 import { apiGet, type StatsPayload } from "../api";
 import { DIM_KEYS, GRADE_COLORS, GRADE_ORDER, PALETTE, chartPalette } from "../theme";
+import { reasonLabel, statusLabel } from "../labels";
 import { isDark } from "../store";
 
 const message = useMessage();
@@ -165,33 +166,6 @@ const dayOptions = [
   { label: "90 天", value: 90 },
   { label: "365 天", value: 365 },
 ];
-
-const STATUS_LABELS: Record<string, string> = {
-  ok: "成功",
-  error: "失败",
-  timeout: "超时",
-  skipped_no_anima: "未装 anima",
-  disabled: "未开启",
-};
-const REASON_LABELS: Record<string, string> = {
-  draw: "每日抽签发放",
-  reroll: "换签卡消耗",
-  amulet: "护身符消耗",
-  candle: "幸运香烛消耗",
-  streak_guard: "连签保护卡消耗",
-  grant: "管理员发放",
-  birthday: "生日彩蛋",
-};
-
-function statusLabel(s: string): string {
-  return STATUS_LABELS[s] || s;
-}
-function reasonLabel(s: string): string {
-  if (REASON_LABELS[s]) return REASON_LABELS[s];
-  if (s.startsWith("buy:")) return "购买 " + s.slice(4);
-  if (s.startsWith("use:")) return "使用 " + s.slice(4);
-  return s;
-}
 
 const palette = computed(() => chartPalette(isDark.value));
 const tip = computed(() => ({

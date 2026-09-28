@@ -112,7 +112,7 @@ const GROUP_META: { name: string; description: string; keys: string[] }[] = [
   { name: "每日推送", description: "定时向活跃群推送今日星象卡", keys: ["daily_push_enabled", "daily_push_time"] },
   {
     name: "AI 封面图",
-    description: "联动 astrbot-comfyui-anima 出卡面底图",
+    description: "联动萌绘（astrbot-comfyui-anima）出卡面底图",
     keys: [
       "draw_enabled", "draw_workflow", "draw_prompt_lang", "draw_prompt_format",
       "draw_llm_prompt", "draw_negative_prompt", "draw_silent", "draw_raw_prompt",

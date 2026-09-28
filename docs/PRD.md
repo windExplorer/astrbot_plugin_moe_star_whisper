@@ -21,7 +21,7 @@
 | D8 | 道具经济 | ✅ 做：插件内**独立「星尘」**积分（不对接 user_gateway 额度——两者语义不同，留 ledger 流水可迁移）+ 四道具，明细见 §4 | 2026-09-27 |
 | D9 | 卡面话语 | ✅ 卡面不止吉凶：签文/话语是卡面主体文字区（F6 升级为卡面主角） | 2026-09-27 |
 | D10 | 身份快照 | ✅ 落库用户QQ号、昵称、头像、群号/群名（抽签时快照）；卡面头部展示 头像+昵称+**QQ号** | 2026-09-27 |
-| D11 | 绘图=底图 | ✅ anima 出图不单独发送，作为**卡面底图**合卡发送；**尺寸随卡布透传**（width/height 参数）；底图一人一天一张（种子含用户）；成品卡按 QQ 号落盘 `cards/<qq>/<date>.png`，重复发送直接取盘 | 2026-09-27 |
+| D11 | 绘图=底图 | ✅ 萌绘出图不单独发送，作为**卡面底图**合卡发送；**尺寸随卡布透传**（width/height 参数）；底图一人一天一张（种子含用户）；成品卡按 QQ 号落盘 `cards/<qq>/<date>.png`，重复发送直接取盘 | 2026-09-27 |
 
 ---
 
@@ -51,7 +51,7 @@
 - 不做积分/货币系统（道具、改运卡涉及经济体系，复杂度大增，见 §4 P2 与开放问题 Q6）。
 - 不做多语言界面（工作区约定：文案只做中文）。
 - 不做与 AstrBot 内置「定时任务」面板的深度集成（见 §7.5 定时方案说明）。
-- 不自己实现 ComfyUI 客户端——绘图一律联动 astrbot-comfyui-anima（见 §7.6；anima 对接文档明令禁止旁路实现）。
+- 不自己实现 ComfyUI 客户端——绘图一律联动 astrbot-comfyui-anima（见 §7.6；萌绘对接文档明令禁止旁路实现）。
 
 ---
 
@@ -121,7 +121,7 @@ seed = SHA-256(f"{date}|{user_id}|{salt}")     # date 为插件时区的当日 Y
 | F13 | 星座绑定 | `/星语绑定 <生日MM-DD>` → 存星座；运势卡显示星座角标，签文拼入星座元素；`/星语 @某人` 查看他人星座（仅公开信息：星座+今日吉凶，不泄露生日） |
 | F14 | 特殊日期彩蛋 | 用户生日（当天大吉 + 专属卡面描边）；4/1 全员「大吉（？）」整活签；春节/圣诞/元旦等节日词库池；周五摸鱼加成文案 |
 | F15 | 暗色卡面 | 按消息环境或配置自动切暗色主题（Pillow 双主题） |
-| F23 | 运势绘图（D6/D11） | anima 联动：LLM 依当日运势生成提示词 → `comfyui_draw` 出图（尺寸透传）→ **作为卡面底图**合卡发送（不单独发图），成品卡按 QQ 号落盘复用；失败静默回退幸运色默认底图，见 §7.6 |
+| F23 | 运势绘图（D6/D11） | 萌绘联动：LLM 依当日运势生成提示词 → `comfyui_draw` 出图（尺寸透传）→ **作为卡面底图**合卡发送（不单独发图），成品卡按 QQ 号落盘复用；失败静默回退幸运色默认底图，见 §7.6 |
 | F22 | 道具经济（D8） | 独立「星尘」积分 + 四道具 + 商店/背包/补签/发放；明细见下方小节，数据见 §6，配置见 §8 |
 
 #### 道具经济明细（F22/D8）
@@ -217,7 +217,7 @@ CREATE TABLE draw_jobs (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id     TEXT NOT NULL,
   date        TEXT NOT NULL,        -- YYYY-MM-DD（插件时区；一人一天最多一条，D5）
-  workflow    TEXT,                 -- 使用的工作流名（空 = anima 默认）
+  workflow    TEXT,                 -- 使用的工作流名（空 = 萌绘默认）
   prompt_lang TEXT,                 -- en / zh（D6 提示词语言约束）
   prompt_fmt  TEXT,                 -- tags / natural
   image_prompt TEXT NOT NULL,       -- LLM 生成的最终绘图提示词（原文落库）
@@ -225,7 +225,7 @@ CREATE TABLE draw_jobs (
   status      TEXT NOT NULL,        -- ok / timeout / error / skipped_no_anima
   error       TEXT,
   duration_ms INTEGER,
-  image_path  TEXT,                 -- 成功时的本地路径（取 anima 返回 image_paths[0]，仅作追溯）
+  image_path  TEXT,                 -- 成功时的本地路径（取 萌绘返回 image_paths[0]，仅作追溯）
   card_path   TEXT,                 -- 我方成品卡落盘路径 cards/<qq>/<date>.png（当日复用依据）
   created_at  TEXT NOT NULL
 );
@@ -250,7 +250,7 @@ CREATE TABLE ledger (
 ```
 
 - `fortunes.payload` 同时记录当日加成状态（护身符生效、香烛 +8、换签 reroll_count），保证统计口径一致。
-- **成品卡自持落盘（D11）**：`data/plugin_data/astrbot_plugin_moe_star_whisper/cards/<qq>/<date>.png`（成品卡）与 `<date>_bg.png`（底图原件，换签对比/重合成用）——**不依赖 anima 的图库目录**（其可能被清理或迁移，防止日后取不到）；当日重复发送直接读盘，`draw_jobs.image_path` 仅作追溯。
+- **成品卡自持落盘（D11）**：`data/plugin_data/astrbot_plugin_moe_star_whisper/cards/<qq>/<date>.png`（成品卡）与 `<date>_bg.png`（底图原件，换签对比/重合成用）——**不依赖 萌绘的图库目录**（其可能被清理或迁移，防止日后取不到）；当日重复发送直接读盘，`draw_jobs.image_path` 仅作追溯。
 - 不建词库表：内置词库走 Python/JSON 文件随包分发；自定义词库（F21）做之前都无需入库。
 - 榜单/PK 直接 `SELECT` 当日 `fortunes`；月报按 `date` 前缀聚合；星尘收支按 `ledger.reason` 聚合。
 
@@ -307,11 +307,11 @@ build_zip.ps1      # 打包（显式 $includeList + 顶层 .py 守卫，沿 box/
 - AstrBot 源码 `astrbot/core/cron/manager.py` 是**面板级**定时任务（basic job 跑内部 handler、agent job 唤醒主 agent），**没有**插件侧 `@filter.scheduled` 装饰器，插件指令无法被内置 cron 直接触发。
 - 因此 F17 的每日推送由插件自管：`asyncio.create_task` 循环（计算距下次触发时间的 sleep → 推送 → 重算），`terminate` 中取消。时区、推送时间、推送群列表均走配置。
 
-### 7.6 anima 绘图联动（F23/D6，已对照 anima 对接文档与源码核实）
+### 7.6 萌绘绘图联动（F23/D6，已对照 萌绘对接文档与源码核实）
 
-> 依据：`astrbot-comfyui-anima/docs/cross-plugin-draw-guide.md`（对接契约）、`docs/prompt-language-guide.md`（提示词语言规范），及 anima `main.py` 源码实测。
+> 依据：`astrbot-comfyui-anima/docs/cross-plugin-draw-guide.md`（对接契约）、`docs/prompt-language-guide.md`（提示词语言规范），及萌绘 `main.py` 源码实测。
 
-**调用契约（anima 官方推荐的方式 A）**：
+**调用契约（萌绘官方推荐的方式 A）**：
 
 ```python
 manager = self.context.get_llm_tool_manager()      # astrbot/core/star/context.py:381（已核实）
@@ -320,13 +320,13 @@ handler = getattr(tool, "handler", None) or tool
 result = await handler(event, prompt=<LLM 生成的提示词>, source="我会永远陪着你", workflow=<配置>, seed=<运势子种子>)
 ```
 
-1. **source 必传约定值**：anima 以 `source == SOURCE_COMPANION_PLUGIN`（main.py:620，值为 `"我会永远陪着你"`）**精确比对**判定「调用方自管发图」——命中才返回 JSON `{"image_paths": [...], "note": ...}`（main.py:14811 附近），由我方取路径落库并发图；不命中时 anima 自己把图发进聊天、我方拿不到路径。对接文档第 3/5 节明确任何宿主插件均可传此值取路径。
-2. **工作流可配**：`draw_workflow` 填 anima 里的真实工作流名（管理员先用 anima 的 `/绘图工作流` 指令查名，再填入本插件配置）；留空走 anima 默认工作流。禁止传 `text2img` 之类语义值（对接文档「禁止事项」）。
-3. **提示词约束（D6）**：按 anima `prompt-language-guide.md`——动漫工作流（`is_anima=true`）**必须英文 Danbooru 标签**、真人工作流**首选中文自然语言**。本插件配置 `draw_prompt_lang`（en/zh）+ `draw_prompt_format`（tags/natural），默认 `en + tags`（萌系运势图走动漫工作流）；约束写进 LLM 生成模板，并要求「只输出提示词本身、单行」。
+1. **source 必传约定值**：萌绘以 `source == SOURCE_COMPANION_PLUGIN`（main.py:620，值为 `"我会永远陪着你"`）**精确比对**判定「调用方自管发图」——命中才返回 JSON `{"image_paths": [...], "note": ...}`（main.py:14811 附近），由我方取路径落库并发图；不命中时 萌绘自己把图发进聊天、我方拿不到路径。对接文档第 3/5 节明确任何宿主插件均可传此值取路径。
+2. **工作流可配**：`draw_workflow` 填 萌绘里的真实工作流名（管理员先用 萌绘的 `/绘图工作流` 指令查名，再填入本插件配置）；留空走 萌绘默认工作流。禁止传 `text2img` 之类语义值（对接文档「禁止事项」）。
+3. **提示词约束（D6）**：按萌绘 `prompt-language-guide.md`——动漫工作流（`is_anima=true`）**必须英文 Danbooru 标签**、真人工作流**首选中文自然语言**。本插件配置 `draw_prompt_lang`（en/zh）+ `draw_prompt_format`（tags/natural），默认 `en + tags`（萌系运势图走动漫工作流）；约束写进 LLM 生成模板，并要求「只输出提示词本身、单行」。
 4. **LLM 生成提示词**：`draw_llm_prompt` 模板可配（内置默认模板注入吉凶/六维/幸运色/宜忌/签文等当日事实 + 语言与格式约束）；用 `context.get_using_provider().text_chat()` 调用，失败/超时/空输出 → 跳过绘图，绝不阻塞运势卡。
-5. **时序（D11：先绘后卡）**：绘图是卡面底图 ⇒ 先出图再合卡：LLM 提示词 → `comfyui_draw`（透传 `seed`＝运势子种子、`width/height`＝卡面画布尺寸——参数签名已核实，底图天生与卡布同尺寸，**不需要裁切**）→ 取 `image_paths[0]` → Pillow 叠遮罩与信息层合成成品卡 → 落盘 `cards/<qq>/<date>.png` → 发送。种子由 `date|user_id|salt` 派生 ⇒ **底图一人一天一张，绝不跨用户重复**；换签卡换 seed 即换图。`draw_timeout` 默认 120s（anima 单张实测约 20-25s）；生成只发生在当日首次抽签。
-6. **降级矩阵（D11）**：anima 未安装 / `get_func` 返回 None / ComfyUI 超时或报错 → 落库 status（`skipped_no_anima` / `timeout` / `error`），**静默回退幸运色默认底图**，运势卡照常发送、体验不断（`draw_fail_hint` 可选附加一句提示，默认空=静默）。
-7. **频率天然受限**：ComfyUI 生成只发生在当日首次抽签 ⇒ 每人每天最多 1 次生成请求；之后的重复请求（跨群/私聊）全部直接回发盘上成品卡，零生成成本，不冲击 anima 队列。
+5. **时序（D11：先绘后卡）**：绘图是卡面底图 ⇒ 先出图再合卡：LLM 提示词 → `comfyui_draw`（透传 `seed`＝运势子种子、`width/height`＝卡面画布尺寸——参数签名已核实，底图天生与卡布同尺寸，**不需要裁切**）→ 取 `image_paths[0]` → Pillow 叠遮罩与信息层合成成品卡 → 落盘 `cards/<qq>/<date>.png` → 发送。种子由 `date|user_id|salt` 派生 ⇒ **底图一人一天一张，绝不跨用户重复**；换签卡换 seed 即换图。`draw_timeout` 默认 120s（萌绘单张实测约 20-25s）；生成只发生在当日首次抽签。
+6. **降级矩阵（D11）**：萌绘未安装 / `get_func` 返回 None / ComfyUI 超时或报错 → 落库 status（`skipped_no_anima` / `timeout` / `error`），**静默回退幸运色默认底图**，运势卡照常发送、体验不断（`draw_fail_hint` 可选附加一句提示，默认空=静默）。
+7. **频率天然受限**：ComfyUI 生成只发生在当日首次抽签 ⇒ 每人每天最多 1 次生成请求；之后的重复请求（跨群/私聊）全部直接回发盘上成品卡，零生成成本，不冲击 萌绘队列。
 
 ### 7.7 关键实现约束
 
@@ -356,14 +356,14 @@ result = await handler(event, prompt=<LLM 生成的提示词>, source="我会永
 | `daily_push_time` | string | `08:00` | F17 推送时刻 |
 | `disabled_groups` | list | 空 | 默认停用的群（配合 `/运势开关`） |
 | `draw_enabled` | bool | false | F23 绘图联动总开关（需安装 astrbot-comfyui-anima） |
-| `draw_workflow` | string | 空 | anima 工作流名（空 = anima 默认；用 anima `/绘图工作流` 查名后填） |
+| `draw_workflow` | string | 空 | 萌绘工作流名（空 = 萌绘默认；用 萌绘`/绘图工作流` 查名后填） |
 | `draw_prompt_lang` | enum | `en` | 绘图提示词语言（en=动漫标签 / zh=真人自然语言，D6） |
 | `draw_prompt_format` | enum | `tags` | 提示词形式（tags=英文标签 / natural=自然语言） |
 | `draw_llm_prompt` | text | 内置 | 生成绘图提示词的 LLM 模板（注入当日运势事实与语言/格式约束） |
-| `draw_negative_prompt` | string | 空（用内置默认） | 负向提示词（透传 anima）；留空用内置 `1boy, male, man, boy, masculine, male focus`，填写整体覆盖 |
+| `draw_negative_prompt` | string | 空（用内置默认） | 负向提示词（透传 萌绘）；留空用内置 `1boy, male, man, boy, masculine, male focus`，填写整体覆盖 |
 | `draw_timeout` | int | 120 | 等待出图上限（秒） |
-| `card_width` | int | 1024 | 卡面画布宽（同时透传给 anima 作为出图宽） |
-| `card_height` | int | 1536 | 卡面画布高（同时透传给 anima 作为出图高） |
+| `card_width` | int | 1024 | 卡面画布宽（同时透传给 萌绘作为出图宽） |
+| `card_height` | int | 1536 | 卡面画布高（同时透传给 萌绘作为出图高） |
 | `draw_fail_hint` | string | 空（静默） | 底图生成失败回退默认底图时附加的一句提示（D11，默认静默） |
 | `economy_enabled` | bool | true | 道具经济（F22）总开关 |
 | `item_prices` | dict | 见 §4 明细 | 各道具价格（reroll / amulet / streak_guard / candle） |
@@ -385,7 +385,7 @@ result = await handler(event, prompt=<LLM 生成的提示词>, source="我会永
 | M3 群玩法 | streak + `/运势榜` + `/运势PK` + `/运势开关` | v0.4.0 |
 | M4 星座与彩蛋 | 星座绑定 + 生日/节日/愚人节彩蛋 + 暗色主题 | v0.5.0 |
 | M5 增强 | F16 LLM 星语（可选）+ F17 每日推送 | v0.6.0 |
-| M6 绘图联动 | F23 anima 底图（LLM 提示词 + comfyui_draw + 先绘后合卡 + 降级）+ draw_jobs 落库 | v0.7.0 |
+| M6 绘图联动 | F23 萌绘底图（LLM 提示词 + comfyui_draw + 先绘后合卡 + 降级）+ draw_jobs 落库 | v0.7.0 |
 | M7 道具经济 | F22 星尘 + 四道具 + 商店/背包/补签/发放 + items/ledger 落库 | v0.8.0 |
 | M6+ 远期 | F18~F22 按反馈排期 | - |
 
@@ -403,7 +403,7 @@ result = await handler(event, prompt=<LLM 生成的提示词>, source="我会永
 | 榜单引发攀比不适 | 榜单默认展示昵称+指数，不展示吉凶文字；`/运势开关` 可整群关闭 |
 | 群成员量大的群 SELECT 压力 | `fortunes` 主键 (user_id, date)，榜单按 date 索引查询，量级可控；单群单日抽签数本身有限 |
 | 热更新后词库/渲染不生效 | main.py 建 `importlib.reload` 热重载列表（按依赖序：lexicon → fortune → card → store → main 自身不 reload）；新增模块同步清单与打包 `$includeList` |
-| anima 未安装 / 版本变更致联动失效 | `get_func` 判空 + 超时与异常全面兜底，绘图失败不影响运势卡；契约以 anima 对接文档为准，anima 升级后回归 |
+| 萌绘未安装 / 版本变更致联动失效 | `get_func` 判空 + 超时与异常全面兜底，绘图失败不影响运势卡；契约以 萌绘对接文档为准，萌绘升级后回归 |
 | 经济通胀 / 囤积破坏循环 | 持有上限 + 无转账无兑换 + 价格集中可配；F24 统计上线后按真实收支数据再调数值 |
 | 头像/昵称获取失败或平台字段不一致 | 昵称用 `event.get_sender_name()`（源码已核实）；头像 QQ 平台用 qlogo 标准地址兜底、下载失败用占位头像；具体字段实现时在 aiocqhttp 适配器确认 |
 
@@ -428,4 +428,4 @@ result = await handler(event, prompt=<LLM 生成的提示词>, source="我会永
 - 源码依据均标注于 §7.2，以 `_Refs/AstrBot`（4.28.1）为准
 - 工程约定：本工作区 `AGENTS.md`（版本/打包/提交/配置同步/热重载等）
 - 实现经验复用：model_panel `card_render.py`（Pillow 卡片与字体查找）、`store.py`（plugin_data 落库）、box（$includeList 守卫打包）、user_gateway（PRD 流程与 WebUI bridge 约束，F21 时适用）
-- anima 绘图联动契约：`astrbot-comfyui-anima/docs/cross-plugin-draw-guide.md`（调用方式与 source 约定）、`docs/prompt-language-guide.md`（提示词语言/格式规范）
+- 萌绘绘图联动契约：`astrbot-comfyui-anima/docs/cross-plugin-draw-guide.md`（调用方式与 source 约定）、`docs/prompt-language-guide.md`（提示词语言/格式规范）

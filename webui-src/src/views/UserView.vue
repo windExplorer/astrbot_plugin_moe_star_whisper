@@ -184,7 +184,7 @@
             <tbody>
               <tr v-for="j in data.draw_jobs" :key="j.id">
                 <td>{{ j.id }}</td>
-                <td><span class="tag" :class="{ ok: j.status === 'ok' }">{{ j.status }}</span></td>
+                <td><span class="tag" :class="{ ok: j.status === 'ok' }">{{ statusLabel(j.status) }}</span></td>
                 <td>{{ j.workflow || "默认" }}</td>
                 <td>{{ j.duration_ms == null ? "—" : j.duration_ms + "ms" }}</td>
                 <td class="err-cell">{{ j.error || "" }}</td>
@@ -210,6 +210,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { apiGet, type UserPayload, type UsersPayload } from "../api";
 import { gradeColor } from "../theme";
+import { reasonLabel, statusLabel } from "../labels";
 import UserAvatar from "../components/UserAvatar.vue";
 
 const message = useMessage();
@@ -222,22 +223,6 @@ const data = ref<UserPayload | null>(null);
 const errorMsg = ref("");
 
 const monthOptions = [1, 2, 3, 6, 12].map((m) => ({ label: `近 ${m} 个月`, value: m }));
-
-const REASON_LABELS: Record<string, string> = {
-  draw: "每日抽签",
-  reroll: "换签卡",
-  amulet: "护身符",
-  candle: "幸运香烛",
-  streak_guard: "连签保护卡",
-  grant: "管理员发放",
-  birthday: "生日彩蛋",
-};
-function reasonLabel(s: string): string {
-  if (REASON_LABELS[s]) return REASON_LABELS[s];
-  if (s.startsWith("buy:")) return "购买 " + s.slice(4);
-  if (s.startsWith("use:")) return "使用 " + s.slice(4);
-  return s;
-}
 
 // 用户列表（头像 / 昵称 / QQ / 抽签天数）：分页 + 搜索 + 排序
 const keyword = ref("");

@@ -89,7 +89,7 @@
             <tbody>
               <tr v-for="j in state.draw_jobs" :key="j.id">
                 <td>{{ j.id }}</td>
-                <td><span class="tag" :class="{ ok: j.status === 'ok' }">{{ j.status }}</span></td>
+                <td><span class="tag" :class="{ ok: j.status === 'ok' }">{{ statusLabel(j.status) }}</span></td>
                 <td>{{ j.workflow || "默认" }}</td>
                 <td>{{ j.duration_ms == null ? "—" : j.duration_ms + "ms" }}</td>
                 <td class="err-cell">{{ j.error || "" }}</td>
@@ -108,6 +108,7 @@ import { NButton, NInput, NPopconfirm, useMessage } from "naive-ui";
 import { onMounted, ref } from "vue";
 import { apiGet, apiPost } from "../api";
 import { gradeColor } from "../theme";
+import { statusLabel } from "../labels";
 
 const message = useMessage();
 

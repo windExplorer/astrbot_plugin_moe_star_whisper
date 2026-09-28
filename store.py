@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS draw_jobs (
   prompt_fmt  TEXT,
   image_prompt TEXT,
   llm_prompt  TEXT,
-  status      TEXT NOT NULL,
+  status      TEXT NOT NULL,        -- ok / timeout / error / skipped_no_anima（该值保留：历史枚举，界面显示「萌绘未安装」）
   error       TEXT,
   duration_ms INTEGER,
   image_path  TEXT,
@@ -637,7 +637,7 @@ class Store:
         }
 
     def stats_jobs(self, date_from: str = "") -> dict:
-        """绘图任务成功率与耗时（anima 联动质量）。"""
+        """绘图任务成功率与耗时（萌绘联动质量）。"""
         sql = (
             "SELECT status, COUNT(*) AS n, COALESCE(ROUND(AVG(duration_ms)), 0) AS avg_ms"
             " FROM draw_jobs"

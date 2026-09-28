@@ -227,7 +227,7 @@ def llm_facts(result: dict) -> str:
     )
 
 
-# ---------- M6：anima 底图联动的提示词与响应解析 ----------
+# ---------- M6：萌绘底图联动的提示词与响应解析 ----------
 
 # v1.8.6：卡面主角一律为女性角色，不出现男性形象（可被内置负向提示词进一步兜底）
 FEMALE_SUBJECT_ZH = "画面主体必须是一位女性角色（动漫少女），不要出现任何男性角色、男孩或男性形象"
@@ -328,9 +328,9 @@ def local_draw_prompt(result: dict, lang: str, fmt: str) -> str:
 
 
 def parse_draw_response(raw) -> list:
-    """解析 anima comfyui_draw 的返回文本 → 本地图片路径列表。
+    """解析萌绘 comfyui_draw 的返回文本 → 本地图片路径列表。
 
-    source 命中约定值时 anima 返回 JSON 文本：{"image_paths": [...], ...}
+    source 命中约定值时萌绘返回 JSON 文本：{"image_paths": [...], ...}
     （兼容旧的单数 image_path 字段）；容错：截取花括号段再解析，失败返回空表。
     """
     text = str(raw or "")

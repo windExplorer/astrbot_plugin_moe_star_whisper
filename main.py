@@ -262,7 +262,7 @@ class StarWhisperPlugin(Star):
             )
             return None
 
-    # ---------- anima 底图联动（F23/D6/D11，契约见 PRD §7.6） ----------
+    # ---------- 萌绘底图联动（F23/D6/D11，契约见 PRD §7.6） ----------
 
     async def _try_build_image_prompt(self, result: dict, event: AstrMessageEvent | None = None):
         """生图提示词：LLM 生成（受语言/形式约束）→ 失败回退本地模板（PRD §7.6-4）。"""
@@ -300,11 +300,11 @@ class StarWhisperPlugin(Star):
 
     async def _try_draw_background(self, event: AstrMessageEvent, result: dict,
                                    uid: str, date: str, salt: str):
-        """anima comfyui_draw 出底图。返回 (bg_path|None, job|None)。
+        """萌绘 comfyui_draw 出底图。返回 (bg_path|None, job|None)。
 
-        契约（anima docs/cross-plugin-draw-guide.md，源码已核实）：
+        契约（萌绘 docs/cross-plugin-draw-guide.md，源码已核实）：
         get_llm_tool_manager().get_func("comfyui_draw") → handler(event, ...)；
-        source 必传 anima 约定值「我会永远陪着你」才返回 JSON 路径由我方发图；
+        source 必传萌绘约定值「我会永远陪着你」才返回 JSON 路径由我方发图；
         seed/width/height 透传（D11：底图一人一天一张、尺寸与卡布一致）；
         超时/异常静默降级到幸运色默认底图，绝不阻塞出卡。
         """
@@ -328,6 +328,8 @@ class StarWhisperPlugin(Star):
         except Exception:
             handler = None
         if handler is None:
+            # ⚠️ 状态值 skipped_no_anima 是历史落库枚举（draw_jobs 里已有旧记录），
+            # 只把界面文案改成「萌绘未安装」，不要改这个值，否则新旧数据要双份映射
             job["status"] = "skipped_no_anima"
             return None, job
 
@@ -350,7 +352,7 @@ class StarWhisperPlugin(Star):
         negative = str(self._cfg("draw_negative_prompt", "") or "") or fortune.DEFAULT_DRAW_NEGATIVE
         if negative:
             kwargs["negative_prompt"] = negative
-        # anima v7.7.46+：静默生图（不发过程消息）与提示词透传（跳过其 LLM 处理/翻译）
+        # 萌绘 v7.7.46+：静默生图（不发过程消息）与提示词透传（跳过其 LLM 处理/翻译）
         if bool(self._cfg("draw_silent", True)):
             kwargs["silent"] = True
         if bool(self._cfg("draw_raw_prompt", True)):
@@ -684,7 +686,7 @@ class StarWhisperPlugin(Star):
         card_path = None
         bg_fail_hint = ""
         if mode != "纯文本":
-            # D11 先绘后卡：anima 底图（可选）→ 合卡 → 发送；失败静默回退幸运色渐变
+            # D11 先绘后卡：萌绘底图（可选）→ 合卡 → 发送；失败静默回退幸运色渐变
             if bool(self._cfg("draw_enabled", False)):
                 yield event.plain_result("🔮 占卜中，星盘铺开……请稍候")
             bg_path, job = await self._try_draw_background(event, result, uid, date, salt)
