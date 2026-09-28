@@ -78,6 +78,7 @@ class StarWhisperPlugin(Star):
         self._store = None
         self._push_task = None
         self._member_cache: dict = {}  # group_id -> (monotonic_ts, {成员 id})，榜单用（v1.9.4）
+        self._avatar_cache: dict = {}  # uid -> (monotonic_ts, bytes|None)，榜单头像用（v1.10.3）
         self._reload_modules()
 
     # ---------- 生命周期 ----------
@@ -207,6 +208,9 @@ class StarWhisperPlugin(Star):
     # 群成员缓存的 TTL（秒）：榜单是高频指令，不宜每次都打平台 API（v1.9.4）
     _MEMBER_TTL = 600
     _MEMBER_CACHE_MAX = 200
+    # 头像缓存的 TTL（秒）：榜单一次要拉 10 个头像，10 分钟内不重复下载（v1.10.3）
+    _AVATAR_TTL = 600
+    _AVATAR_CACHE_MAX = 300
 
     async def _group_member_ids(self, event: AstrMessageEvent, gid: str) -> set | None:
         """本群成员 id 集合（带 TTL 缓存）；取不到返回 None。
@@ -260,7 +264,26 @@ class StarWhisperPlugin(Star):
             )
 
     async def _fetch_avatar_bytes(self, uid: str) -> bytes | None:
-        """服务端下载头像 bytes（aiohttp，box 同款接口）；失败返回 None。"""
+        """服务端下载头像 bytes（aiohttp，box 同款接口）；失败返回 None。
+
+        v1.10.3 起带 TTL 缓存：榜单一次要拉 10 个头像，10 分钟内的重复请求
+        直接用缓存（失败的也记 None，避免每条指令都重试打挂的接口）。
+        """
+        uid = str(uid or "")
+        if not uid:
+            return None
+        now = time.monotonic()
+        cached = self._avatar_cache.get(uid)
+        if cached and (now - cached[0]) < self._AVATAR_TTL:
+            return cached[1]
+        data = await self._download_avatar_bytes(uid)
+        if len(self._avatar_cache) >= self._AVATAR_CACHE_MAX:
+            self._avatar_cache.clear()
+        self._avatar_cache[uid] = (now, data)
+        return data
+
+    async def _download_avatar_bytes(self, uid: str) -> bytes | None:
+        """实际下载头像（无缓存版，供 _fetch_avatar_bytes 调用）。"""
         url = f"https://q4.qlogo.cn/headimg_dl?dst_uin={uid}&spec=640"
         try:
             async with aiohttp.ClientSession() as session:
@@ -989,10 +1012,17 @@ class StarWhisperPlugin(Star):
                       if members is not None else "本群还没有人抽签，快来当第一个！")
         card_path = None
         if self._utility_cards_on():
+            # 头像列（v1.10.3）：并发拉取上榜成员的 QQ 头像（带 TTL 缓存），
+            # 单个失败不影响整榜（渲染回落「名字首字」占位圆）
+            uids = [str(r.get("user_id") or "") for r in rows_src]
+            avatars = list(await asyncio.gather(
+                *(self._fetch_avatar_bytes(u) for u in uids)
+            )) if uids else []
             card_path = self._try_utility_card(
                 render_rank_card, title=title, rows=rows, date_str=today,
                 subtitle=f"萌萌星语 · {scope}",
                 empty_text=empty_text,
+                avatars=avatars,
                 # file_key 带口径标记：同一天换了口径不会复用旧卡（v1.9.4）
                 file_key=f"{span}_{gid}_{today}_{'mem' if members is not None else 'grp'}",
             )

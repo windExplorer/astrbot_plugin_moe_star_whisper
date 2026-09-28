@@ -346,11 +346,12 @@ def _circle_img(img: Image.Image, diameter: int) -> Image.Image:
 
 
 def _gradient(w: int, h: int, base_rgb: tuple, dark: bool = False,
-              top_mix: float | None = None, bottom_mix: float | None = None) -> Image.Image:
+              top_mix: float | None = None, bottom_mix: float | None = None,
+              dark_rgb: tuple = (24, 25, 38)) -> Image.Image:
     """纵向渐变：light=白底混幸运色；dark=暗夜底混幸运色。混合度可调。"""
     if dark:
-        top = _mix(base_rgb, (24, 25, 38), top_mix if top_mix is not None else 0.86)
-        bottom = _mix(base_rgb, (24, 25, 38), bottom_mix if bottom_mix is not None else 0.94)
+        top = _mix(base_rgb, dark_rgb, top_mix if top_mix is not None else 0.86)
+        bottom = _mix(base_rgb, dark_rgb, bottom_mix if bottom_mix is not None else 0.94)
     else:
         top = _mix(base_rgb, (255, 255, 255), top_mix if top_mix is not None else 0.74)
         bottom = _mix(base_rgb, (255, 255, 255), bottom_mix if bottom_mix is not None else 0.92)
@@ -362,11 +363,13 @@ def _gradient(w: int, h: int, base_rgb: tuple, dark: bool = False,
     return img.resize((w, h))
 
 
-def _panel_base(w: int, h: int, base_rgb: tuple, dark: bool, radius: int) -> Image.Image:
+def _panel_base(w: int, h: int, base_rgb: tuple, dark: bool, radius: int,
+                dark_rgb: tuple = (24, 25, 38)) -> Image.Image:
     """圆角面板的幸运色渐变底（顶浓底淡、全不透明）——告别纯白。"""
     grad = _gradient(w, h, base_rgb, dark=dark,
                      top_mix=(0.78 if dark else 0.52),
-                     bottom_mix=(0.92 if dark else 0.90)).convert("RGBA")
+                     bottom_mix=(0.92 if dark else 0.90),
+                     dark_rgb=dark_rgb).convert("RGBA")
     mask = Image.new("L", (w, h), 0)
     ImageDraw.Draw(mask).rounded_rectangle([0, 0, w - 1, h - 1], radius=radius, fill=255)
     grad.putalpha(mask)
@@ -1032,7 +1035,7 @@ def render_help_card(
     H = int((218 + 12) * u0 + sum(h for h, _t, _r, _c in sec_geo)
             + sec_gap * max(0, len(sec_geo) - 1) + (96 + 14) * u0)
     ctx = _utility_card_base(width, H, accent_hex, font_file,
-                             subtitle=subtitle, title="星语帮助", dark=dark)
+                             subtitle=subtitle, title="星语帮助", dark=dark, theme=theme)
     draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
     left, right = ctx["left"], ctx["right"]
     y = ctx["y"]
@@ -1067,7 +1070,10 @@ def render_help_card(
             ry += row_h + row_gap
         y += h + sec_gap
 
-    return _utility_card_save(ctx, cards_root, "help.png", signer, footer=footer)
+    # 文件名带主题（v1.10.3）：换了风格就是新文件，QQ/协议端不会拿旧缓存图充数
+    return _utility_card_save(ctx, cards_root,
+                              f"help_{str(theme or 'light').strip().lower()}.png",
+                              signer, footer=footer)
 
 
 # ---------------------------------------------------------------------- #
@@ -1082,6 +1088,50 @@ _CALENDAR_GRADE_COLORS = {
 }
 
 
+def _draw_card_frame(draw, W: int, H: int, style: str, accent_rgb: tuple, u: float) -> None:
+    """提示卡外框装饰（v1.10.3）：随主题变化，不只是换颜色。
+
+    soft  = light/dark 默认，维持原观感（不画外框）
+    tarot = 塔罗牌风：金色双线框 + 四角小星
+    dots  = 樱花：细圆角框 + 四角双圆环
+    frame = 薄荷：单细圆角框
+    """
+    if style == "tarot":
+        gold = (212, 175, 55)
+        i1, i2 = int(10 * u), int(18 * u)
+        draw.rectangle([i1, i1, W - i1, H - i1], outline=gold + (235,), width=max(2, int(2.5 * u)))
+        draw.rectangle([i2, i2, W - i2, H - i2], outline=gold + (120,), width=1)
+        for cx, cy in ((i2, i2), (W - i2, i2), (i2, H - i2), (W - i2, H - i2)):
+            _sparkle(draw, cx, cy, 7 * u, gold, 230)
+    elif style == "dots":
+        c = accent_rgb + (170,)
+        i = int(12 * u)
+        draw.rounded_rectangle([i, i, W - i, H - i], radius=int(10 * u), outline=c, width=1)
+        r = int(4 * u)
+        for cx, cy in ((i, i), (W - i, i), (i, H - i), (W - i, H - i)):
+            draw.ellipse([cx - 2 * r, cy - 2 * r, cx + 2 * r, cy + 2 * r], outline=c, width=1)
+    elif style == "frame":
+        i = int(12 * u)
+        draw.rounded_rectangle([i, i, W - i, H - i], radius=int(8 * u),
+                               outline=accent_rgb + (150,), width=max(1, int(1.5 * u)))
+    # soft：不画外框
+
+
+# 提示卡主题表（v1.10.3）：不只是换色——底色、面板、文字、线条、边框装饰一起变。
+# accent 固定的主题（tarot）会用主题色替换幸运色，避免金框配粉底不伦不类。
+_THEME_DEFS = {
+    "light": dict(dark=False, border="soft"),
+    "dark": dict(dark=True, border="soft"),
+    "tarot": dict(dark=True, border="tarot", dark_rgb=(28, 24, 42),
+                  ink=(238, 226, 200), sub=(176, 160, 134), line=(120, 104, 74, 255),
+                  accent="#D4AF37"),
+    "sakura": dict(dark=False, border="dots",
+                   ink=(96, 62, 80), sub=(176, 130, 150), line=(247, 186, 207, 255)),
+    "mint": dict(dark=False, border="frame",
+                 ink=(48, 92, 76), sub=(124, 166, 148), line=(140, 205, 178, 255)),
+}
+
+
 def _utility_card_base(
     width: int,
     height: int,
@@ -1091,22 +1141,34 @@ def _utility_card_base(
     title: str,
     dark: bool = False,
     title_right: str = "",
+    theme: str = "",
 ) -> dict:
-    """提示卡通用底座：渐变背景 + 圆角面板 + 星饰 + 标题区。
+    """提示卡通用底座：渐变背景 + 圆角面板 + 星饰 + 标题区 + 主题化外框。
 
+    theme 优先于 dark：在 _THEME_DEFS 里登记的主题（tarot/sakura/mint）会连
+    边框与装饰一起换；light/dark/auto/未知值保持原观感。
     返回 ctx 字典（img/draw/left/right/y/u/ink/sub/disp/accent/line/W/H/margin/
     font_file），内容从 ctx["y"] 起画，收尾调 _utility_card_save。
     """
     W, H = int(width), int(height)
     u = W / 900.0
-    accent = _hex_rgb(accent_hex)
-    if dark:
+    tdef = _THEME_DEFS.get(str(theme or "").strip().lower())
+    if tdef is None:
+        tdef = _THEME_DEFS["dark" if dark else "light"]
+    dark = bool(tdef["dark"])
+    dark_rgb = tuple(tdef.get("dark_rgb") or (24, 25, 38))
+    accent = _hex_rgb(tdef["accent"]) if tdef.get("accent") else _hex_rgb(accent_hex)
+    if tdef.get("ink"):
+        ink, sub = tuple(tdef["ink"]), tuple(tdef["sub"])
+    elif dark:
         ink, sub = (232, 230, 240), (158, 160, 178)
-        line_rgb = (62, 63, 80, 255)
     else:
         ink, sub = (74, 74, 96), (150, 150, 168)
-        line_rgb = (238, 236, 242, 255)
-    img = _gradient(W, H, accent, dark=dark).convert("RGBA")
+    if tdef.get("line"):
+        line_rgb = tuple(tdef["line"])
+    else:
+        line_rgb = (62, 63, 80, 255) if dark else (238, 236, 242, 255)
+    img = _gradient(W, H, accent, dark=dark, dark_rgb=dark_rgb).convert("RGBA")
     deco = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     dd = ImageDraw.Draw(deco)
     # 星饰放在面板外的上下留白条里，避免被面板边缘切出一半像缺口
@@ -1114,9 +1176,11 @@ def _utility_card_base(
     _sparkle(dd, W * 0.16, H - int(20 * u), 8 * u, accent, 90)
     img = Image.alpha_composite(img, deco)
     margin = int(44 * u)
-    panel = _panel_base(W - 2 * margin, H - 2 * margin, accent, dark, int(36 * u))
+    panel = _panel_base(W - 2 * margin, H - 2 * margin, accent, dark, int(36 * u),
+                        dark_rgb=dark_rgb)
     img.paste(panel, (margin, margin), panel)
     draw = ImageDraw.Draw(img)
+    _draw_card_frame(draw, W, H, str(tdef.get("border") or "soft"), accent, u)
     left, right = margin + int(42 * u), W - margin - int(42 * u)
     y = margin + int(32 * u)
     disp = _display_font_file(font_file)
@@ -1226,7 +1290,7 @@ def render_wallet_card(
     H = int((218 + 112 + 171 + 44 + grid_rows * 100 + 96) * u0)
     ctx = _utility_card_base(width, H, accent_hex, font_file,
                              subtitle="萌萌星语 · 道具经济", title="星尘钱包",
-                             dark=dark, title_right=date_str)
+                             dark=dark, title_right=date_str, theme=theme)
     _identity_row(ctx, nickname, uid, avatar_data)
     draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
     left, right = ctx["left"], ctx["right"]
@@ -1293,7 +1357,7 @@ def render_shop_card(
     H = int((218 + 96 + sum(row_hs) + len(row_hs) * 14 * u0 + 96) * u0)
     ctx = _utility_card_base(width, H, accent_hex, font_file,
                              subtitle="萌萌星语 · 道具经济", title="道具商店",
-                             dark=dark)
+                             dark=dark, theme=theme)
     _identity_row(ctx, nickname, uid, avatar_data)
     draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
     left, right = ctx["left"], ctx["right"]
@@ -1334,9 +1398,12 @@ def render_rank_card(
     signer: str = "星语者",
     width: int = 900,
     theme: str = "light",
+    avatars=None,
 ) -> str:
     """星语榜卡：rows=[(名次, 昵称, 右侧主文本, 右侧小注)]，前三名奖牌色。
 
+    avatars（v1.10.3）：与 rows 等长的 (bytes|None) 列表——传了就在名次后画
+    圆形 QQ 头像，取不到的行画「名字首字」占位圆。
     标题（title）只放榜名，统计口径走 subtitle（小字，空间充裕），
     这样标题不会因为口径文字太长被截断（v1.9.5）。
     """
@@ -1349,7 +1416,7 @@ def render_rank_card(
     H = int((218 + 30 + max(1, len(rows)) * row_h + 96 + 16) * u0)
     ctx = _utility_card_base(width, H, accent_hex, font_file,
                              subtitle=subtitle, title=title,
-                             dark=dark, title_right=date_str)
+                             dark=dark, title_right=date_str, theme=theme)
     draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
     left, right = ctx["left"], ctx["right"]
     y = ctx["y"]
@@ -1376,7 +1443,11 @@ def render_rank_card(
         rank_size -= int(4 * u)
         rank_font = _font(ctx["disp"], rank_size)
     rank_col = max(draw_len(str(r[0]), rank_font) for r in rows)
-    name_x = left + int(rank_col) + int(22 * u)
+    # 头像列（v1.10.3）：名次与昵称之间画圆形头像
+    avatars = list(avatars or [])
+    has_av = bool(avatars)
+    av_d, av_gap = int(46 * u), int(14 * u)
+    name_x = left + int(rank_col) + int(22 * u) + ((av_d + av_gap) if has_av else 0)
     # 右侧信息列宽取「所有行的主文本/小注里最宽的那个」，昵称右边界因此对齐全表
     sub_font = _font(ff, int(20 * u))
     right_w = max(
@@ -1392,6 +1463,28 @@ def render_rank_card(
         rank_rgb = medal[rank - 1] if isinstance(rank, int) and 1 <= rank <= 3 else ctx["sub"]
         draw.text((left, cy + row_h / 2), str(rank),
                   font=rank_font, fill=rank_rgb, anchor="lm")
+        if has_av:
+            # 圆形 QQ 头像；取不到的画「名字首字」占位圆（与运势卡头像同风格）
+            av_x = left + int(rank_col) + int(22 * u)
+            av_y = cy + row_h // 2 - av_d // 2
+            data = avatars[i] if i < len(avatars) else None
+            av_img = None
+            if data:
+                try:
+                    av_img = _circle_img(Image.open(io.BytesIO(data)).convert("RGBA"), av_d)
+                except Exception:
+                    av_img = None
+            if av_img is not None:
+                ctx["img"].paste(av_img, (av_x, av_y), av_img)
+            else:
+                ph = Image.new("RGBA", (av_d, av_d), (0, 0, 0, 0))
+                pd = ImageDraw.Draw(ph)
+                pd.ellipse([0, 0, av_d - 1, av_d - 1],
+                           fill=_mix(ctx["accent"], (255, 255, 255) if not dark else (30, 30, 48),
+                                     0.5) + (255,))
+                pd.text((av_d / 2, av_d / 2), (name or "星")[0],
+                        font=_font(ff, int(22 * u)), fill=ctx["ink"], anchor="mm")
+                ctx["img"].paste(ph, (av_x, av_y), ph)
         draw.text((name_x, cy + row_h / 2), _fit_text(name, name_font, name_avail),
                   font=name_font, fill=ctx["ink"], anchor="lm")
         if sub_text:
@@ -1436,7 +1529,7 @@ def render_pk_card(
     H = int((218 + 260 + 36 + 78 + len(flavor_lines) * 44 + 96) * u0)
     ctx = _utility_card_base(width, H, accent_hex, font_file,
                              subtitle="萌萌星语", title="星语 PK",
-                             dark=dark)
+                             dark=dark, theme=theme)
     draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
     left, right = ctx["left"], ctx["right"]
     y = ctx["y"]
@@ -1505,7 +1598,7 @@ def render_notice_card(
         wrapped += _wrap(str(line), body, inner_w)[:3]
     H = int((218 + len(wrapped) * 54 + 40 + 96) * u0)
     ctx = _utility_card_base(width, H, accent_hex, font_file,
-                             subtitle=subtitle, title=title, dark=dark)
+                             subtitle=subtitle, title=title, dark=dark, theme=theme)
     draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
     left = ctx["left"]
     y = ctx["y"]
@@ -1557,7 +1650,7 @@ def render_calendar_card(
     H = int((218 + 50 + weeks * (cell_h + 10 * u0) + 88 + 96) * u0)
     ctx = _utility_card_base(width, H, accent_hex, font_file,
                              subtitle=f"{year} 年 {month} 月 · {nickname or '旅行者'}",
-                             title="运势日历", dark=dark)
+                             title="运势日历", dark=dark, theme=theme)
     draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
     left, right = ctx["left"], ctx["right"]
     y = ctx["y"]

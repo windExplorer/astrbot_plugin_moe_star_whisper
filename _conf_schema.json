@@ -21,10 +21,10 @@
   },
   "card_theme": {
     "description": "卡面主题",
-    "hint": "auto 目前等同 light；dark 为墨蓝夜色卡面",
+    "hint": "作用于帮助图与全部提示卡（运势卡仍由幸运色驱动）：跟随默认=粉色渐变；暗色=墨蓝夜色；塔罗牌=暗紫底 + 金色双线框 + 四角星饰（提示词卡片同族观感）；樱花=粉白 + 圆点角饰细框；薄荷=浅绿 + 单线细框。主题不只换颜色——边框与四角装饰一起变",
     "type": "string",
-    "options": ["auto", "light", "dark"],
-    "labels": ["跟随默认", "亮色", "暗色"],
+    "options": ["auto", "light", "dark", "tarot", "sakura", "mint"],
+    "labels": ["跟随默认（粉）", "亮色", "暗色", "塔罗牌", "樱花", "薄荷"],
     "default": "auto"
   },
   "card_font_style": {

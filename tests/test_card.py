@@ -255,6 +255,43 @@ def main() -> int:
     check(len(cleaned_long) == 16 and cleaned_long.endswith("…"),
           f"超长昵称应截断到 16 字并带省略号，实际长度 {len(cleaned_long)}")
 
+    # 10) 多主题（v1.10.3）：主题不止换色——边框/装饰随主题变；榜单头像列
+    import io
+
+    for t in ("tarot", "sakura", "mint"):
+        tdef = card._THEME_DEFS.get(t)
+        check(bool(tdef) and tdef.get("border") and tdef.get("ink") and tdef.get("line"),
+              f"主题 {t} 的定义必须完整（border/ink/line）")
+    p_tarot = card.render_notice_card("主题冒烟", ["塔罗牌主题"], misc,
+                                      file_key="theme_tarot", theme="tarot")
+    im_t = Image.open(p_tarot)
+    im_t.load()
+    lo_t, hi_t = im_t.convert("L").getextrema()
+    check(hi_t - lo_t > 30, f"塔罗主题卡应正常渲染，实际 {lo_t}~{hi_t}")
+    p_sakura = card.render_notice_card("主题冒烟", ["樱花主题"], misc,
+                                       file_key="theme_sakura", theme="sakura")
+    check(Path(str(p_sakura)).is_file(), "樱花主题卡应正常渲染")
+    p_mint = card.render_notice_card("主题冒烟", ["薄荷主题"], misc,
+                                     file_key="theme_mint", theme="mint")
+    check(Path(str(p_mint)).is_file(), "薄荷主题卡应正常渲染")
+
+    # 榜单头像列：真头像 bytes 与 None（首字占位）都要渲染成功
+    av_buf = io.BytesIO()
+    Image.new("RGB", (60, 60), (200, 120, 160)).save(av_buf, "PNG")
+    p_av = card.render_rank_card(
+        "今日星语榜", [(1, "甲", "95", ""), (2, "乙", "88", "")], misc,
+        file_key="av", subtitle="萌萌星语 · 本群成员 3 人", date_str="2026-09-28",
+        avatars=[av_buf.getvalue(), None],
+    )
+    im_a = Image.open(p_av)
+    im_a.load()
+    lo_a, hi_a = im_a.convert("L").getextrema()
+    check(hi_a - lo_a > 30, f"带头像榜单应正常渲染，实际 {lo_a}~{hi_a}")
+
+    # 帮助图文件名带主题：换风格即新文件，避免协议端拿旧缓存图充数
+    p_help = card.render_help_card([("基础", [("/星语", "抽一支今日签")])], misc, theme="tarot")
+    check(Path(str(p_help)).name == "help_tarot.png", f"帮助图文件名应带主题，实际 {p_help}")
+
     # 圆体渲染冒烟：能落盘且非空白
     p_rounded = card.render_rank_card(
         "今日星语榜", [(1, "甲", "95", ""), (2, "乙", "88", "")], misc,

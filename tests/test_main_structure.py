@@ -175,6 +175,16 @@ def main() -> int:
     check("def sanitize_name" in card_src, "card.py 需提供 sanitize_name（昵称清洗）")
     uses = card_src.count("sanitize_name(")
     check(uses >= 8, f"运势卡/塔罗卡/身份行/榜单/PK/日历等入口都要清洗昵称，当前 {uses} 处")
+
+    # v1.10.3：提示卡多主题（边框/装饰随主题变）+ 榜单头像 + 帮助图按主题分文件
+    check("_THEME_DEFS" in card_src and "_draw_card_frame" in card_src,
+          "card.py 需提供主题表与主题化外框绘制")
+    check(card_src.count("theme=theme") >= 7, "每个提示卡底座调用都要传 theme")
+    check("avatars=None" in card_src and "avatars=avatars" in src,
+          "榜单卡必须有头像列参数，主程序必须传 avatars")
+    check('f"help_{str(theme' in card_src, "帮助图文件名必须带主题（换风格即新文件）")
+    check("_download_avatar_bytes" in src and "_avatar_cache" in src,
+          "头像下载必须带 TTL 缓存（榜单一次拉 10 个）")
     check("extra_font_dirs=self._font_dirs(data_dir)" in src,
           "运势卡渲染必须使用 _font_dirs 的候选目录")
     schema_src = (root / "_conf_schema.json").read_text(encoding="utf-8")
