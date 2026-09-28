@@ -2,6 +2,15 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v1.10.6 (2026-09-29)
+
+生图负向提示词排除白边与构图偏移类（版本 v1.10.5 -> v1.10.6）。
+
+- **白边**：AI 牌面四周出现空白边缘。负向追加 `white border, white edges, white frame, blank margins`，正向 `BORDER_MARGIN_ZH/_EN` 补充「画面铺满整个画布、四周不要留白边」/ `the illustration fills the entire canvas edge to edge, no blank white margins around the image`。
+- **构图类负向**（用户提供的清单，翻译为 SD 标签）：`off-center card, off-center composition, card shifted to one side`（卡片偏移/构图偏心/偏向一侧）、`tilted, skewed, perspective`（画面倾斜/透视）、`3d card`（立体卡牌）、`drop shadow, cast shadow, shadow`（投影/阴影）、`floating card`（卡片悬浮）、`missing corners`（边角缺失）。
+- **注意**：禁 `shadow` 会连带压掉画面里的常规光影，若观感变平可以把自定义 `draw_negative_prompt` 里的这一项去掉（自定义内容整体覆盖内置负向）。
+- 测试：`test_fortune` 新增 10.3 组守卫（负向含白边/构图偏移/悬浮类标签、中文模板要求铺满画布、英文模板排除白边）。
+
 ## v1.10.5 (2026-09-28)
 
 塔罗双联卡左联只放 AI 牌面原图，不再叠加装饰（版本 v1.10.4 -> v1.10.5）。

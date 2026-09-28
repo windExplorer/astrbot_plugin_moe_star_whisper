@@ -233,19 +233,30 @@ def llm_facts(result: dict) -> str:
 FEMALE_SUBJECT_ZH = "画面主体必须是一位女性角色（动漫少女），不要出现任何男性角色、男孩或男性形象"
 FEMALE_SUBJECT_EN = "1girl, solo, female focus, female only, no males, no boys"
 # v1.10.4：负向提示词加入裁切类标签——AI 倾向把装饰边框画到画布边缘，
-# 一侧被裁就会左右不对称；光靠正向的 fully visible 压不住
-DEFAULT_DRAW_NEGATIVE = ("1boy, male, man, boy, masculine, male focus, "
-                         "cropped, cropped border, cut off, out of frame, "
-                         "partially visible frame, uneven border")
+# 一侧被裁就会左右不对称；光靠正向的 fully visible 压不住。
+# v1.10.6：再加白边与构图类标签（用户反馈）：白边 / 卡片偏移 / 构图偏心 /
+# 画面倾斜 / 透视 / 立体卡牌 / 投影阴影 / 卡片悬浮 / 边角缺失
+DEFAULT_DRAW_NEGATIVE = (
+    "1boy, male, man, boy, masculine, male focus, "
+    "white border, white edges, white frame, blank margins, "
+    "cropped, cropped border, cut off, out of frame, "
+    "partially visible frame, uneven border, missing corners, "
+    "off-center card, off-center composition, card shifted to one side, "
+    "tilted, skewed, perspective, 3d card, "
+    "drop shadow, cast shadow, shadow, floating card"
+)
 DRAW_NEGATIVE_HINT_ZH = "画面中只有女性角色，禁止出现男性角色"
 # v1.10.4：正向约束——边框必须与画布四边留空隙、左右对称。
 # 只说「完整可见」没用：模型不知道贴边会被裁，必须显式要求留白。
 BORDER_MARGIN_ZH = ("配华丽对称的塔罗牌边框——边框必须完整可见、与图片四边留出空隙"
-                    "（不要贴边、不要被裁切），左右两侧粗细一致")
+                    "（不要贴边、不要被裁切），左右两侧粗细一致，"
+                    "画面铺满整个画布，四周不要留白边")
 BORDER_MARGIN_EN = ("ornate symmetrical tarot card frame, entire frame fully visible "
                     "with even empty margins on all four sides of the image, "
                     "the frame never touches or gets cut by the canvas edges, "
-                    "left and right sides of the frame equally thick")
+                    "left and right sides of the frame equally thick, "
+                    "the illustration fills the entire canvas edge to edge, "
+                    "no blank white margins around the image")
 
 
 def draw_system_hint(lang: str) -> str:

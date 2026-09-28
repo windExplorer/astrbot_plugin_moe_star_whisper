@@ -169,6 +169,16 @@ def main() -> int:
     check("cropped border" in fortune.DEFAULT_DRAW_NEGATIVE
           and "partially visible frame" in fortune.DEFAULT_DRAW_NEGATIVE,
           "内置负向提示词必须排除裁切/半截边框")
+    # 10.3) v1.10.6：负向排除白边与构图偏移类，正向要求画面铺满画布
+    check("white border" in fortune.DEFAULT_DRAW_NEGATIVE
+          and "off-center composition" in fortune.DEFAULT_DRAW_NEGATIVE
+          and "floating card" in fortune.DEFAULT_DRAW_NEGATIVE,
+          "内置负向提示词必须排除白边与构图偏移/悬浮类")
+    check("白边" in fortune.builtin_draw_prompt("zh", "natural")
+          and "铺满整个画布" in fortune.builtin_draw_prompt("zh", "natural"),
+          "中文内置模板必须要求画面铺满、不留白边")
+    check("no blank white margins" in fortune.builtin_draw_prompt("en", "tags"),
+          "英文内置模板必须排除画布白边")
     check("never cropped" in fortune.draw_system_hint("en"),
           "生图系统提示必须约束边框不被裁切")
     check(fortune.parse_draw_response('{"image_paths": ["a.png", " b.png "]}') == ["a.png", "b.png"],
