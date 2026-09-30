@@ -1036,6 +1036,8 @@ def render_help_card(
             + sec_gap * max(0, len(sec_geo) - 1) + (96 + 14) * u0)
     ctx = _utility_card_base(width, H, accent_hex, font_file,
                              subtitle=subtitle, title="星语帮助", dark=dark, theme=theme)
+    # 主题实际明暗以底座判定为准（tarot 是暗色主题，见 _THEME_DEFS）
+    dark = ctx["dark"]
     draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
     left, right = ctx["left"], ctx["right"]
     y = ctx["y"]
@@ -1210,6 +1212,10 @@ def _utility_card_base(
         "img": img, "draw": draw, "left": left, "right": right, "y": y, "u": u,
         "ink": ink, "sub": sub, "disp": disp, "accent": accent,
         "line": line_rgb, "W": W, "H": H, "margin": margin, "font_file": font_file,
+        # 实际生效的明暗标志（v1.10.11）：tarot 主题虽不是 "dark" 字面值，但本身是暗色。
+        # 调用方做「底色混白还是混暗」的判断必须用它，不能用自己按主题字符串算的那份，
+        # 否则塔罗主题会拿暗色文字配亮色底（分数看不清的根因）。
+        "dark": dark,
     }
 
 
@@ -1291,6 +1297,8 @@ def render_wallet_card(
     ctx = _utility_card_base(width, H, accent_hex, font_file,
                              subtitle="萌萌星语 · 道具经济", title="星尘钱包",
                              dark=dark, title_right=date_str, theme=theme)
+    # 主题实际明暗以底座判定为准（tarot 是暗色主题，见 _THEME_DEFS）
+    dark = ctx["dark"]
     _identity_row(ctx, nickname, uid, avatar_data)
     draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
     left, right = ctx["left"], ctx["right"]
@@ -1358,6 +1366,8 @@ def render_shop_card(
     ctx = _utility_card_base(width, H, accent_hex, font_file,
                              subtitle="萌萌星语 · 道具经济", title="道具商店",
                              dark=dark, theme=theme)
+    # 主题实际明暗以底座判定为准（tarot 是暗色主题，见 _THEME_DEFS）
+    dark = ctx["dark"]
     _identity_row(ctx, nickname, uid, avatar_data)
     draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
     left, right = ctx["left"], ctx["right"]
@@ -1422,6 +1432,8 @@ def render_rank_card(
     ctx = _utility_card_base(width, H, accent_hex, font_file,
                              subtitle=subtitle, title=title,
                              dark=dark, title_right=date_str, theme=theme)
+    # 主题实际明暗以底座判定为准（tarot 是暗色主题，见 _THEME_DEFS）
+    dark = ctx["dark"]
     draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
     left, right = ctx["left"], ctx["right"]
     y = ctx["y"]
@@ -1563,6 +1575,8 @@ def render_pk_card(
     ctx = _utility_card_base(width, H, accent_hex, font_file,
                              subtitle="萌萌星语", title="星语 PK",
                              dark=dark, theme=theme)
+    # 主题实际明暗以底座判定为准（tarot 是暗色主题，见 _THEME_DEFS）
+    dark = ctx["dark"]
     draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
     left, right = ctx["left"], ctx["right"]
     y = ctx["y"]
@@ -1632,6 +1646,8 @@ def render_notice_card(
     H = int((218 + len(wrapped) * 54 + 40 + 96) * u0)
     ctx = _utility_card_base(width, H, accent_hex, font_file,
                              subtitle=subtitle, title=title, dark=dark, theme=theme)
+    # 主题实际明暗以底座判定为准（tarot 是暗色主题，见 _THEME_DEFS）
+    dark = ctx["dark"]
     draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
     left = ctx["left"]
     y = ctx["y"]
@@ -1684,6 +1700,10 @@ def render_calendar_card(
     ctx = _utility_card_base(width, H, accent_hex, font_file,
                              subtitle=f"{year} 年 {month} 月 · {nickname or '旅行者'}",
                              title="运势日历", dark=dark, theme=theme)
+    # 主题实际明暗以底座判定为准（v1.10.11 修）：tarot 是暗色主题，但早先局部
+    # dark 只认 "dark" 字面值，塔罗主题走了亮色分支——格底混成浅米色、
+    # 分数又是主题墨色（米金），米金配米金就看不清了。
+    dark = ctx["dark"]
     draw, u, ff = ctx["draw"], ctx["u"], ctx["font_file"]
     left, right = ctx["left"], ctx["right"]
     y = ctx["y"]

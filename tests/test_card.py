@@ -319,6 +319,43 @@ def main() -> int:
     p_help = card.render_help_card([("基础", [("/星语", "抽一支今日签")])], misc, theme="tarot")
     check(Path(str(p_help)).name == "help_tarot.png", f"帮助图文件名应带主题，实际 {p_help}")
 
+    # 10.1) 主题明暗判定回归（v1.10.11）：tarot 本身是暗色主题（_THEME_DEFS.dark=True），
+    #       但早先日历/钱包等提示卡用「主题字符串 == "dark"」自判明暗，塔罗主题走了
+    #       亮色分支——日历格底混成浅米色、分数又是主题墨色（米金），米金配米金看不清。
+    #       修复后明暗唯一来源是底座 ctx["dark"]；这里锁死判定 + 塔罗日历墨色文字压暗底。
+    ctx_t = card._utility_card_base(900, 500, "#F6C6D3", ff, "探针", "探针", theme="tarot")
+    check(ctx_t.get("dark") is True, "tarot 主题底座应判定为暗色（ctx['dark']）")
+    ctx_s = card._utility_card_base(900, 500, "#F6C6D3", ff, "探针", "探针", theme="sakura")
+    check(ctx_s.get("dark") is False, "sakura 主题底座应判定为亮色（ctx['dark']）")
+    ctx_d = card._utility_card_base(900, 500, "#F6C6D3", ff, "探针", "探针", dark=True)
+    check(ctx_d.get("dark") is True, "dark=True 底座应判定为暗色（ctx['dark']）")
+
+    def _lum(rgb):
+        return 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
+
+    pc_t = card.render_calendar_card(
+        2026, 9, {"2026-09-05": ("大吉", 92), "2026-09-14": ("凶", 33), "2026-09-27": ("吉", 77)},
+        misc, file_key="tarot", today="2026-09-27", nickname="攒星人", theme="tarot")
+    im_ct = Image.open(pc_t).convert("RGB")
+    im_ct.load()
+    w_c, h_c = im_ct.size
+    px_c = im_ct.load()
+    tarot_ink = tuple(card._THEME_DEFS["tarot"]["ink"])
+    nbs = []  # 墨色像素右下方 7px 处的亮度（文字笔画外≈格底/面板底色）
+    ink_hits = 0
+    for x in range(0, w_c - 8, 2):
+        for y in range(0, h_c - 8, 2):
+            if px_c[x, y] == tarot_ink:
+                ink_hits += 1
+                nbs.append(_lum(px_c[x + 7, y + 7]))
+    check(ink_hits > 100, f"塔罗日历应画出主题墨色文字（标题/分数），命中 {ink_hits}")
+    if nbs:
+        nbs.sort()
+        med = nbs[len(nbs) // 2]
+        check(med < 120,
+              f"塔罗日历墨色文字必须压在暗底上（修复前格底走亮色分支，底约 192），实际中位 {med:.0f}")
+
+
     # 圆体渲染冒烟：能落盘且非空白
     p_rounded = card.render_rank_card(
         "今日星语榜", [(1, "甲", "95", ""), (2, "乙", "88", "")], misc,
