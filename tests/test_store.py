@@ -79,20 +79,32 @@ def main() -> int:
     check(p4["seed_nonce"] == 2, "删除签记录后种子序号仍在档案")
 
     # 群榜聚合（M3）：用独立群号，避免与前面用例的 g1 数据互相污染
-    def fake(score):
-        return {"grade": "吉", "score": score, "date": "x"}
+    def fake(score, grade="吉"):
+        return {"grade": grade, "score": score, "date": "x"}
 
     st.save_fortune("w1", "2026-09-27", fake(90), nickname="甲", group_id="wg1")
     st.save_fortune("w2", "2026-09-27", fake(70), nickname="乙", group_id="wg1")
     st.save_fortune("w3", "2026-09-27", fake(99), nickname="隔壁", group_id="wg2")
-    st.save_fortune("w1", "2026-09-28", fake(60), nickname="甲", group_id="wg1")
+    st.save_fortune("w1", "2026-09-28", fake(60, "凶"), nickname="甲", group_id="wg1")
     day = st.list_group_day("wg1", "2026-09-27")
     check([r["user_id"] for r in day] == ["w1", "w2"],
           f"日榜分数降序且只含本群，实际 {[r['user_id'] for r in day]}")
+    check(day[0]["grade"] == "吉", f"日榜行要带吉凶（徽章显示用），实际 {day[0].get('grade')}")
     week = st.list_group_range_avg("wg1", "2026-09-22")
     check(week[0]["user_id"] == "w1" and abs(week[0]["avg_score"] - 75) < 0.01,
           f"周榜甲均分 75 应第一，实际 {week[0]}")
     check(week[1]["user_id"] == "w2" and week[1]["days"] == 1, "周榜乙 1 天")
+    # v1.10.10：周榜带 last_grade（区间内最近一签）——甲 09-28 抽的「凶」，不是更早的「吉」
+    check(week[0]["last_grade"] == "凶",
+          f"周榜 last_grade 应取最近一签（09-28 的凶），实际 {week[0].get('last_grade')}")
+    check(week[1]["last_grade"] == "吉", "周榜只有一天时 last_grade 就是他那一签")
+    # 人数可配：limit 必须真的下推到 SQL（v1.10.10 前是函数内写死的 10）
+    check(len(st.list_group_range_avg("wg1", "2026-09-22", limit=1)) == 1, "周榜 limit 下推")
+    check(len(st.list_group_day("wg1", "2026-09-27", limit=1)) == 1, "日榜 limit 下推")
+    # 成员口径那条路（不限群聚合）同样要带 last_grade
+    allw = st.list_range_avg_all("2026-09-22", 300)
+    w1 = next(r for r in allw if r["user_id"] == "w1")
+    check(w1["last_grade"] == "凶", f"list_range_avg_all 也要带 last_grade，实际 {w1}")
 
     # 活跃群列表（M5 推送目标集）：近 7 天有抽签的群
     ids = [g for g, _ in st.list_active_group_ids(7)]

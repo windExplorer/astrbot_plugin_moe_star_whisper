@@ -1399,6 +1399,7 @@ def render_rank_card(
     width: int = 900,
     theme: str = "light",
     avatars=None,
+    grade_colors: dict | None = None,
 ) -> str:
     """星语榜卡：rows=[(名次, 昵称, 右侧主文本, 右侧小注)]，前三名奖牌色。
 
@@ -1406,10 +1407,14 @@ def render_rank_card(
     圆形 QQ 头像，取不到的行画「名字首字」占位圆。
     标题（title）只放榜名，统计口径走 subtitle（小字，空间充裕），
     这样标题不会因为口径文字太长被截断（v1.9.5）。
+    第 5 项（v1.10.10，可选）：吉凶档位文字，给这一行加一枚彩色徽章（配色走
+    grade_colors，缺省用内置档位色）。4 元组的老写法照旧可用，徽章列自动省略。
     """
     font_file = find_font(font_path, extra_font_dirs)
     if not font_file:
         raise RuntimeError("未找到可用中文字体")
+    # rows 统一补齐到 5 项：老调用方（4 元组）不用改，也不会因多传一项把布局带崩
+    rows = [((tuple(r) + ("",) * 5)[:5]) for r in rows]
     dark = str(theme or "light").lower() == "dark"
     u0 = width / 900.0
     row_h = int(78 * u0)
@@ -1455,9 +1460,22 @@ def render_rank_card(
             draw_len(str(r[3]), sub_font) if r[3] else 0.0)
         for r in rows
     )
-    name_avail = int(right - name_x - right_w - int(30 * u))
+    # 吉凶徽章列（v1.10.10）：夹在昵称与右侧分数列之间；宽度取最长档位（六档都是
+    # 1-2 个字，全表同宽才好对齐）。整表一个都没有时这列整体省略，老观感不变。
+    gcolors = dict(_CALENDAR_GRADE_COLORS)
+    if grade_colors:
+        gcolors.update(grade_colors)
+    pill_font = _font(ctx["disp"], int(26 * u))
+    pill_h = int(46 * u)
+    grades = [str(r[4]) for r in rows]
+    has_grade = any(grades)
+    pill_w = int(max(draw_len(g, pill_font) for g in grades if g) + int(30 * u)) if has_grade else 0
+    pill_right = right - int(right_w) - int(18 * u) if has_grade else 0
+    pill_left = pill_right - pill_w if has_grade else 0
+    name_avail = (int(pill_left - name_x - int(26 * u)) if has_grade
+                  else int(right - name_x - right_w - int(30 * u)))
 
-    for i, (rank, name, main_text, sub_text) in enumerate(rows):
+    for i, (rank, name, main_text, sub_text, grade) in enumerate(rows):
         name = sanitize_name(name)  # 榜单行也是 QQ 昵称，同样要压平空白
         cy = y + row_h * i
         rank_rgb = medal[rank - 1] if isinstance(rank, int) and 1 <= rank <= 3 else ctx["sub"]
@@ -1487,6 +1505,21 @@ def render_rank_card(
                 ctx["img"].paste(ph, (av_x, av_y), ph)
         draw.text((name_x, cy + row_h / 2), _fit_text(name, name_font, name_avail),
                   font=name_font, fill=ctx["ink"], anchor="lm")
+        if grade:
+            # 吉凶徽章（v1.10.10）：实心档位色 + 自动对比文字（亮底配深字、暗底配
+            # 白字），行内垂直居中。档位色**一律不调**——把亮档位压深会让「小吉」
+            # （亮蓝）掉进「大凶」（暗蓝灰）那一档，六档的明暗次序就乱了；
+            # 对比度靠换字色解决（实测六档 3.0:1 ~ 6.4:1 都能看清）。
+            grgb = _hex_rgb(gcolors.get(grade, "#E86A8A"))
+            lum = 0.299 * grgb[0] + 0.587 * grgb[1] + 0.114 * grgb[2]
+            draw.rounded_rectangle(
+                [pill_left, cy + (row_h - pill_h) // 2,
+                 pill_right, cy + (row_h + pill_h) // 2],
+                radius=pill_h // 2, fill=grgb + (255,))
+            draw.text(((pill_left + pill_right) / 2, cy + row_h / 2), grade,
+                      font=pill_font,
+                      fill=(58, 58, 74) if lum > 160 else (255, 255, 255),
+                      anchor="mm")
         if sub_text:
             draw.text((right, cy + int(14 * u)), str(main_text),
                       font=_font(ctx["disp"], int(40 * u)), fill=ctx["ink"], anchor="ra")

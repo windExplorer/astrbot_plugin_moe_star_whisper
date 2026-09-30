@@ -120,9 +120,10 @@ def main() -> int:
           "rank_cmd 必须取本群成员集合（榜单口径）")
     check("self._store.list_range_avg_all(monday" in src,
           "周榜必须用不限群的 list_range_avg_all + 成员过滤")
-    check("in members][:10]" in src, "榜单必须按成员集合过滤后再取前 10")
-    check("list_group_range_avg(gid, monday)" in src and "list_group_day(gid, today)" in src,
-          "取不到群成员时必须保留「本群抽签」回落口径")
+    check("in members][:limit]" in src, "榜单必须按成员集合过滤后再按配置人数截断")
+    check("list_group_range_avg(gid, monday, limit=limit)" in src
+          and "list_group_day(gid, today, limit=limit)" in src,
+          "取不到群成员时必须保留「本群抽签」回落口径（并把人数传下去）")
     # v1.9.5：榜单行不再标注「来自 X 群」（用户明确要求去掉）
     check("_from_tag" not in src and "来自 " not in src,
           "榜单不得再标注抽签来源群")
@@ -201,6 +202,20 @@ def main() -> int:
     check("card_font_style" in schema_src, "_conf_schema.json 缺少 card_font_style")
     view_src = (root / "webui-src" / "src" / "views" / "ConfigView.vue").read_text(encoding="utf-8")
     check('"card_font_style"' in view_src,
+          "新配置键必须进 ConfigView 的分区表（否则掉进「其他」分区）")
+
+    # v1.10.10：榜单人数可配（rank_size，3-50）+ 每行吉凶徽章
+    store_src = (root / "store.py").read_text(encoding="utf-8")
+    check("def _rank_size" in src, "榜单人数必须集中解析（_rank_size，含 3-50 夹取）")
+    check('self._cfg("rank_size", 10)' in src, "榜单人数必须走 rank_size 配置")
+    check("list_group_range_avg(gid, monday, limit=limit)" in src
+          and "list_group_day(gid, today, limit=limit)" in src,
+          "回落口径取数必须把 limit 传下去（不能再写死 10）")
+    check('str(r.get("grade") or "")' in src and 'str(r.get("last_grade") or "")' in src,
+          "日榜/周榜两行都要带吉凶（周榜取 last_grade）")
+    check("last_grade" in store_src, "store 周榜聚合必须返回 last_grade（最近一签吉凶）")
+    check('"rank_size"' in schema_src, "schema 必须声明 rank_size（榜单人数）")
+    check('"rank_size"' in view_src,
           "新配置键必须进 ConfigView 的分区表（否则掉进「其他」分区）")
 
     # 热重载列表必须包含 webui_api（v1.9.0）：控制台接口都在里面，

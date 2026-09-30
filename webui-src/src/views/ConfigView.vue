@@ -127,6 +127,7 @@ const GROUP_META: { name: string; description: string; keys: string[] }[] = [
     description: "星尘与四道具的价格、上限",
     keys: ["economy_enabled", "item_prices", "draw_reward_base", "item_hold_cap"],
   },
+  { name: "星语榜", description: "群内排行展示多少人", keys: ["rank_size"] },
   { name: "群与权限", description: "停用的群号", keys: ["disabled_groups"] },
 ];
 

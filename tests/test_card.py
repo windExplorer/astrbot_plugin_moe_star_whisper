@@ -288,6 +288,33 @@ def main() -> int:
     lo_a, hi_a = im_a.convert("L").getextrema()
     check(hi_a - lo_a > 30, f"带头像榜单应正常渲染，实际 {lo_a}~{hi_a}")
 
+    # 吉凶徽章（v1.10.10）：rows 第 5 项填档位就要真画出档位色徽章；
+    # 4 元组老写法（上面 pr/p_av）继续可用且不画徽章列
+    p_gr = card.render_rank_card(
+        "今日星语榜",
+        [(1, "甲", "95", "", "大吉"), (2, "乙", "90", "", "吉"), (3, "丙", "85", "", "中吉"),
+         (4, "丁", "80", "", "小吉"), (5, "戊", "75", "", "凶"), (6, "己", "70", "", "大凶")],
+        misc, file_key="grade", subtitle="萌萌星语 · 本群成员 3 人", date_str="2026-09-28",
+        accent_hex="#A8D8EA",  # 蓝色强调色，避免与档位色撞车影响下面的取色断言
+        grade_colors=lex.get("grade_colors"),
+    )
+    im_g = Image.open(p_gr).convert("RGB")
+    im_g.load()
+    gw, gh = im_g.size
+    px = im_g.load()
+
+    def _hits(rgb):
+        return sum(1 for x in range(0, gw, 2) for y in range(0, gh, 2)
+                   if px[x, y] == rgb)
+
+    # 六档徽章都必须画**词库原色**（不许调深浅：一调「小吉」就撞「大凶」），
+    # 对比度靠字色解决，所以这里只校验底色
+    for grade, want in (("大吉", (232, 106, 138)), ("吉", (240, 160, 184)),
+                        ("中吉", (232, 196, 106)), ("小吉", (168, 200, 232)),
+                        ("凶", (155, 168, 184)), ("大凶", (122, 134, 168))):
+        hit = _hits(want)
+        check(hit > 200, f"「{grade}」徽章应画出词库档位色 {want}，实际采样命中 {hit}")
+
     # 帮助图文件名带主题：换风格即新文件，避免协议端拿旧缓存图充数
     p_help = card.render_help_card([("基础", [("/星语", "抽一支今日签")])], misc, theme="tarot")
     check(Path(str(p_help)).name == "help_tarot.png", f"帮助图文件名应带主题，实际 {p_help}")

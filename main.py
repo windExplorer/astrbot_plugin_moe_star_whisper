@@ -448,6 +448,18 @@ class StarWhisperPlugin(Star):
         """提示卡跟随出签方式：纯文本模式下所有提示一并回到文字。"""
         return str(self._cfg("output_mode", "图卡")) != "纯文本"
 
+    def _rank_size(self) -> int:
+        """榜单展示人数（v1.10.10）：配置「榜单人数」`rank_size`，夹取 3-50 防手滑。
+
+        上限 50 不是拍脑袋：榜单一次要给每行拉一个 QQ 头像（`_fetch_avatar_bytes`），
+        50 个并发下载 + 卡面高度已经够呛，再大对群聊也没意义。
+        """
+        try:
+            size = int(self._cfg("rank_size", 10))
+        except (TypeError, ValueError):
+            size = 10
+        return max(3, min(50, size))
+
     def _accent_hex(self, uid: str, date: str) -> str:
         """提示卡主题色：优先用当日签的幸运色，没抽签则用默认粉。"""
         row = self._store.get_fortune(uid, date) if self._store is not None else None
@@ -967,6 +979,9 @@ class StarWhisperPlugin(Star):
         口径（v1.9.4）：**本群成员**——用户今天可能在别的群抽的签，只要他人在本群
         就该上榜，所以按群成员筛而不是按「在本群抽签」筛；群成员列表取不到时回落
         到「本群抽签」口径，并在标题里如实标注，绝不假装。
+        人数（v1.10.10）：由配置「榜单人数」`rank_size` 决定（3-50，默认 10），
+        日榜周榜共用；每行还带一个吉凶徽章——日榜是当天那一签，周榜是区间内
+        **最近一签**（`last_grade`），两榜语义统一为「他最近一签的吉凶」。
         """
         if self._store is None:
             yield event.plain_result("星语者还没整理好星盘，稍后再试～")
@@ -980,34 +995,36 @@ class StarWhisperPlugin(Star):
         tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
         today = fortune.local_today(tz_name)
         members = await self._group_member_ids(event, gid)
+        limit = self._rank_size()  # v1.10.10：人数可配（rank_size），两榜共用
 
         if span == "周":
             d = datetime.strptime(today, "%Y-%m-%d").date()
             monday = (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
             if members is not None:
                 src = self._store.list_range_avg_all(monday, 300)
-                rows_src = [r for r in src if str(r.get("user_id") or "") in members][:10]
+                rows_src = [r for r in src if str(r.get("user_id") or "") in members][:limit]
                 scope = f"本群成员 {len(members)} 人"
             else:
-                rows_src = self._store.list_group_range_avg(gid, monday)
+                rows_src = self._store.list_group_range_avg(gid, monday, limit=limit)
                 scope = "本群抽签"
             title = f"本周星语榜（{monday[5:]} 起）"
             rows = [
                 (i, r.get("nickname") or "旅人", f"{r['avg_score']:.0f}",
-                 f"均分 · {r['days']} 天")
+                 f"均分 · {r['days']} 天", str(r.get("last_grade") or ""))
                 for i, r in enumerate(rows_src, 1)
             ]
         else:
             if members is not None:
                 src = self._store.list_day(today)
-                rows_src = [r for r in src if str(r.get("user_id") or "") in members][:10]
+                rows_src = [r for r in src if str(r.get("user_id") or "") in members][:limit]
                 scope = f"本群成员 {len(members)} 人"
             else:
-                rows_src = self._store.list_group_day(gid, today)
+                rows_src = self._store.list_group_day(gid, today, limit=limit)
                 scope = "本群抽签"
             title = "今日星语榜"
             rows = [
-                (i, r.get("nickname") or "旅人", str(r["score"]), "")
+                (i, r.get("nickname") or "旅人", str(r["score"]), "",
+                 str(r.get("grade") or ""))
                 for i, r in enumerate(rows_src, 1)
             ]
         empty_text = ("本群成员都还没抽签，快来当第一个！"
@@ -1025,8 +1042,10 @@ class StarWhisperPlugin(Star):
                 subtitle=f"萌萌星语 · {scope}",
                 empty_text=empty_text,
                 avatars=avatars,
-                # file_key 带口径标记：同一天换了口径不会复用旧卡（v1.9.4）
-                file_key=f"{span}_{gid}_{today}_{'mem' if members is not None else 'grp'}",
+                grade_colors=lexicon.load_lexicon().get("grade_colors") or {},
+                # file_key 带口径标记：同一天换了口径不会复用旧卡（v1.9.4）；
+                # v1.10.10 再带上人数——改了 rank_size 后文件名跟着变，QQ 不会拿旧图缓存糊弄
+                file_key=f"{span}_{gid}_{today}_{'mem' if members is not None else 'grp'}_{limit}",
             )
         if card_path:
             yield event.image_result(card_path)
@@ -1034,9 +1053,10 @@ class StarWhisperPlugin(Star):
         lines = ["🌙 萌萌星语", f"—— {title}（{scope}）——"]
         if rows:
             for i, r in enumerate(rows, 1):
-                rank, name, main_text, sub_text = r
+                name, main_text = r[1], r[2]
+                tail = " · ".join(x for x in (r[3], r[4] if len(r) > 4 else "") if x)
                 lines.append(
-                    f"{i}. {name} · {main_text}" + (f"（{sub_text}）" if sub_text else "")
+                    f"{i}. {name} · {main_text}" + (f"（{tail}）" if tail else "")
                 )
         else:
             lines.append(empty_text)
