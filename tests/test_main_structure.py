@@ -326,6 +326,26 @@ def main() -> int:
     ):
         check(token in cmd_body, f"push_cmd 缺少：{why}")
 
+    # v1.10.18：帮助图必须与指令表严格一一对应——加了指令忘了写帮助图，
+    # 用户永远不知道有这个功能（v1.10.16 加 /星语星象 时就差了半截描述）
+    cmds_registered = set(_re.findall(r'@filter\.command\("([^"]+)"', src))
+    # 注意：help_cmd 是文件里最后一个方法，正则必须允许「到文件结尾」（\Z），
+    # 否则非贪婪匹配找不到后续 def 就直接匹配失败
+    m_help = _re.search(r"async def help_cmd\(self.*?(?=\n    (?:async )?def |\Z)", src, _re.S)
+    check(bool(m_help), "找不到 help_cmd 方法体")
+    help_body = m_help.group(0) if m_help else ""
+    help_listed = set()
+    for line in help_body.splitlines():
+        # 只认「以斜杠开头」的行——分区标题也是 ("占卜", [...)，别把它们当指令
+        mm = _re.match(r'\s*\("/([^\s"\[<]+)', line)
+        if mm:
+            help_listed.add(mm.group(1))
+    missing_in_help = sorted(cmds_registered - help_listed)
+    check(not missing_in_help, f"帮助图漏了指令: {missing_in_help}")
+    ghost_in_help = sorted(help_listed - cmds_registered)
+    check(not ghost_in_help, f"帮助图写了不存在的指令: {ghost_in_help}")
+    check(len(cmds_registered) >= 14, f"指令数异常（{len(cmds_registered)}），检查 @filter.command 是否被误删")
+
     # v1.10.13：使用道具（换签卡）也要走「先绘后卡」那条流程——过程提示 + 输出方式
     check("def _announce_drawing" in src,
           "「占卜中」过程提示必须集中到 _announce_drawing（首签/换签共用同一份）")
