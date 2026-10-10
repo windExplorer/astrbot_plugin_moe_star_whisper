@@ -120,10 +120,12 @@ def main() -> int:
           "rank_cmd 必须取本群成员集合（榜单口径）")
     check("self._store.list_range_avg_all(monday" in src,
           "周榜必须用不限群的 list_range_avg_all + 成员过滤")
-    check("in members][:limit]" in src, "榜单必须按成员集合过滤后再按配置人数截断")
-    check("list_group_range_avg(gid, monday, limit=limit)" in src
-          and "list_group_day(gid, today, limit=limit)" in src,
-          "取不到群成员时必须保留「本群抽签」回落口径（并把人数传下去）")
+    check("in members]" in src and "rows_src = candidates[:limit]" in src,
+          "榜单必须按成员集合过滤后再按配置人数截断")
+    check("list_group_range_avg(gid, monday, limit=200)" in src
+          and "list_group_day(gid, today, limit=200)" in src,
+          "取不到群成员时必须保留「本群抽签」回落口径，且显式给大 limit"
+          "（store 默认 limit=10 会把榜单和「参与 N 人」一起截到 10）")
     # v1.9.5：榜单行不再标注「来自 X 群」（用户明确要求去掉）
     check("_from_tag" not in src and "来自 " not in src,
           "榜单不得再标注抽签来源群")
@@ -217,9 +219,19 @@ def main() -> int:
     store_src = (root / "store.py").read_text(encoding="utf-8")
     check("def _rank_size" in src, "榜单人数必须集中解析（_rank_size，含 3-50 夹取）")
     check('self._cfg("rank_size", 10)' in src, "榜单人数必须走 rank_size 配置")
-    check("list_group_range_avg(gid, monday, limit=limit)" in src
-          and "list_group_day(gid, today, limit=limit)" in src,
-          "回落口径取数必须把 limit 传下去（不能再写死 10）")
+    check("list_group_range_avg(gid, monday, limit=200)" in src
+          and "list_group_day(gid, today, limit=200)" in src,
+          "回落口径取数必须显式给大 limit（store 默认 10，会隐形截榜）")
+    # v1.10.14：榜单必须自证「筛出多少人 / 取前几名」，否则「配置 20 却只看到
+    # 10 个人」这类问题分不清是配置没生效还是当天就只筛出这么多人
+    check("eligible = len(candidates)" in src and "rows_src = candidates[:limit]" in src,
+          "榜单必须先数出候选人数（eligible）再按 rank_size 截断")
+    check('note = f"参与 {eligible} 人 · 榜单取前 {limit} 名"' in src,
+          "榜单要给出「参与 N 人 · 取前 M 名」的说明")
+    check("footer=note" in src, "榜单卡页脚必须显示参与人数与取前名次")
+    check("lines.append(f\"（{note}）\")" in src, "纯文本榜单也要带上同一句说明")
+    check("_{limit}_{eligible}" in src,
+          "榜单卡文件名要带参与人数（白天陆续有人抽签时不会复用早上的旧卡）")
     check('str(r.get("grade") or "")' in src and 'str(r.get("last_grade") or "")' in src,
           "日榜/周榜两行都要带吉凶（周榜取 last_grade）")
     check("last_grade" in store_src, "store 周榜聚合必须返回 last_grade（最近一签吉凶）")

@@ -1018,31 +1018,39 @@ class StarWhisperPlugin(Star):
             monday = (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
             if members is not None:
                 src = self._store.list_range_avg_all(monday, 300)
-                rows_src = [r for r in src if str(r.get("user_id") or "") in members][:limit]
+                candidates = [r for r in src if str(r.get("user_id") or "") in members]
                 scope = f"本群成员 {len(members)} 人"
             else:
-                rows_src = self._store.list_group_range_avg(gid, monday, limit=limit)
+                # 显式给一个大 limit：store 的默认值是 10，会把榜单悄悄截到 10 行，
+                # 那样「参与 N 人」也就永远数不对（v1.10.14 修了这个隐形上限）
+                candidates = self._store.list_group_range_avg(gid, monday, limit=200)
                 scope = "本群抽签"
             title = f"本周星语榜（{monday[5:]} 起）"
             rows = [
                 (i, r.get("nickname") or "旅人", f"{r['avg_score']:.0f}",
                  f"均分 · {r['days']} 天", str(r.get("last_grade") or ""))
-                for i, r in enumerate(rows_src, 1)
+                for i, r in enumerate(candidates[:limit], 1)
             ]
         else:
             if members is not None:
                 src = self._store.list_day(today)
-                rows_src = [r for r in src if str(r.get("user_id") or "") in members][:limit]
+                candidates = [r for r in src if str(r.get("user_id") or "") in members]
                 scope = f"本群成员 {len(members)} 人"
             else:
-                rows_src = self._store.list_group_day(gid, today, limit=limit)
+                candidates = self._store.list_group_day(gid, today, limit=200)
                 scope = "本群抽签"
             title = "今日星语榜"
             rows = [
                 (i, r.get("nickname") or "旅人", str(r["score"]), "",
                  str(r.get("grade") or ""))
-                for i, r in enumerate(rows_src, 1)
+                for i, r in enumerate(candidates[:limit], 1)
             ]
+        rows_src = candidates[:limit]
+        # v1.10.14：把「筛出多少人 / 取前几名」写到卡上（页脚）与文本里。
+        # 「配置了 20 却只看到 10 个人」这类疑问，一半是配置没生效、一半是当天
+        # 就只筛出这么多人（口径=本群成员/本群抽签），以前两者从输出上无法区分。
+        eligible = len(candidates)
+        note = f"参与 {eligible} 人 · 榜单取前 {limit} 名"
         empty_text = ("本群成员都还没抽签，快来当第一个！"
                       if members is not None else "本群还没有人抽签，快来当第一个！")
         card_path = None
@@ -1059,9 +1067,12 @@ class StarWhisperPlugin(Star):
                 empty_text=empty_text,
                 avatars=avatars,
                 grade_colors=lexicon.load_lexicon().get("grade_colors") or {},
+                footer=note,
                 # file_key 带口径标记：同一天换了口径不会复用旧卡（v1.9.4）；
-                # v1.10.10 再带上人数——改了 rank_size 后文件名跟着变，QQ 不会拿旧图缓存糊弄
-                file_key=f"{span}_{gid}_{today}_{'mem' if members is not None else 'grp'}_{limit}",
+                # v1.10.10 再带上人数——改了 rank_size 后文件名跟着变，QQ 不会拿旧图缓存糊弄；
+                # v1.10.14 再带参与人数——白天陆续有人抽签时，榜单不会停在早上那张旧卡上
+                file_key=(f"{span}_{gid}_{today}_"
+                          f"{'mem' if members is not None else 'grp'}_{limit}_{eligible}"),
             )
         if card_path:
             yield event.image_result(card_path)
@@ -1076,6 +1087,7 @@ class StarWhisperPlugin(Star):
                 )
         else:
             lines.append(empty_text)
+        lines.append(f"（{note}）")
         yield event.plain_result("\n".join(lines))
 
     @filter.command("星语PK", alias={"星语pk", "运势PK", "运势pk"})

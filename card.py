@@ -1410,6 +1410,7 @@ def render_rank_card(
     theme: str = "light",
     avatars=None,
     grade_colors: dict | None = None,
+    footer: str = "",
 ) -> str:
     """星语榜卡：rows=[(名次, 昵称, 右侧主文本, 右侧小注)]，前三名奖牌色。
 
@@ -1419,6 +1420,9 @@ def render_rank_card(
     这样标题不会因为口径文字太长被截断（v1.9.5）。
     第 5 项（v1.10.10，可选）：吉凶档位文字，给这一行加一枚彩色徽章（配色走
     grade_colors，缺省用内置档位色）。4 元组的老写法照旧可用，徽章列自动省略。
+    footer（v1.10.14，可选）：左下角小字。榜单用它显示「参与 N 人 · 取前 M 名」，
+    这样「为什么只有这么几行」在卡上就能自证——是榜单人数配置生效了、还是
+    当天就只筛出这么多人，不用去翻配置和日志。
     """
     font_file = find_font(font_path, extra_font_dirs)
     if not font_file:
@@ -1446,7 +1450,8 @@ def render_rank_card(
                                          0.6 if not dark else 0.86) + (185,))
         draw.text(((left + right) // 2, y + box_h / 2), empty_text,
                   font=_font(ff, int(30 * u)), fill=ctx["sub"], anchor="mm")
-        return _utility_card_save(ctx, cards_root, f"rank_{file_key}.png", signer)
+        return _utility_card_save(ctx, cards_root, f"rank_{file_key}.png", signer,
+                                  footer=footer)
 
     # 名次列自适应（v1.9.5）：按实际最大名次宽度排版（两位数、三位数都不会挤到昵称）；
     # 名次过宽时先缩字号，昵称再按剩余宽度截断，绝不与右侧分数叠字。
@@ -1542,7 +1547,8 @@ def render_rank_card(
                       font=_font(ctx["disp"], int(42 * u)), fill=ctx["ink"], anchor="rm")
         if i < len(rows) - 1:
             draw.line([(left, cy + row_h), (right, cy + row_h)], fill=ctx["line"], width=1)
-    return _utility_card_save(ctx, cards_root, f"rank_{file_key}.png", signer)
+    return _utility_card_save(ctx, cards_root, f"rank_{file_key}.png", signer,
+                              footer=footer)
 
 
 def render_pk_card(
