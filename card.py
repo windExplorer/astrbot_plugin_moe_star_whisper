@@ -292,6 +292,20 @@ def draw_len(text: str, font: ImageFont.FreeTypeFont) -> float:
         return font.getsize(text)[0]
 
 
+def _shrink_to_fit(text: str, font_file: str, size: int, avail: float,
+                   floor: int = 18, step: int = 2, display: bool = False):
+    """先缩字号、缩到 floor 还放不下才截断；返回 (字体, 文本)。
+
+    v1.10.23：窄卡上「昵称 + 右侧日期」抢宽度时，直接 `_fit_text` 会把四个字的
+    昵称砍成「测…」，其实降两档字号就放得下——缩字号比砍字好看得多，所以两步走。
+    """
+    ff = _display_font_file(font_file) if display else font_file
+    while size > floor and draw_len(text, _font(ff, size)) > avail:
+        size -= step
+    font = _font(ff, size)
+    return font, _fit_text(text, font, avail)
+
+
 def _fit_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> str:
     """按像素宽度截断并补省略号（二分回退）；放不下一个字符时返回空串。
 
@@ -493,15 +507,38 @@ def render_card(
         avatar_img = _circle_img(placeholder, av_d)
     img.paste(avatar_img, (left, y), avatar_img)
     tx = left + av_d + int(36 * u)
-    draw.text((tx, y + int(8 * u)), nickname or "旅行者",
-              font=_font(font_file, int(50 * u)), fill=ink)
+    # v1.10.23：昵称必须给右侧日期让位。700 宽单面（塔罗版式的默认单面宽）下，
+    # 昵称稍长就会和右边的日期**叠字**（「测试旅人」+「2026-10-11」糊成一团）——
+    # 以前是按固定 x 直接画的，宽度一窄就撞。这里按「剩余可用宽度」截断兜底。
+    date_text = str(result.get("date", ""))
+    date_font = _font(font_file, int(34 * u))
+    qq_font = _font(font_file, int(34 * u))
+    full_name = nickname or "旅行者"
+    # 先试「昵称 + 右侧日期」同排；放不下就把日期挪到第二行右侧（QQ 行右边通常空着），
+    # 让昵称用满整行——比把四个字的昵称砍成「测…」好看（v1.10.23）
+    name_font, name_text = _shrink_to_fit(
+        full_name, font_file, int(50 * u),
+        right - draw_len(date_text, date_font) - int(24 * u) - tx, floor=int(40 * u))
+    date_on_line1 = name_text == full_name
+    if not date_on_line1:
+        name_font, name_text = _shrink_to_fit(
+            full_name, font_file, int(50 * u), right - tx, floor=int(40 * u))
+    draw.text((tx, y + int(8 * u)), name_text, font=name_font, fill=ink)
     qq_line = f"QQ {uid}" if uid else ""
     if result.get("constellation"):
         qq_line += f" · {result['constellation']}"
-    draw.text((tx, y + int(74 * u)), qq_line,
-              font=_font(font_file, int(34 * u)), fill=sub)
-    draw.text((right, y + int(8 * u)), str(result.get("date", "")),
-              font=_font(font_file, int(34 * u)), fill=sub, anchor="ra")
+    if date_on_line1:
+        draw.text((tx, y + int(74 * u)), qq_line, font=qq_font, fill=sub)
+        draw.text((right, y + int(8 * u)), date_text, font=date_font, fill=sub, anchor="ra")
+    else:
+        # 日期挪到第二行右侧时，QQ 行也要让位（否则「QQ 10086 · 天秤座」会和日期叠字）；
+        # 先缩字号再截断，尽量保住「· 天秤座」这类信息
+        qq_font2, qq_text = _shrink_to_fit(
+            qq_line, font_file, int(34 * u),
+            right - draw_len(date_text, date_font) - int(16 * u) - tx, floor=int(24 * u))
+        draw.text((tx, y + int(74 * u)), qq_text, font=qq_font2, fill=sub)
+        draw.text((right, y + int(74 * u)), date_text,
+                  font=date_font, fill=sub, anchor="ra")
     y += av_d + int(34 * u)
 
     # 分隔线
@@ -537,13 +574,24 @@ def render_card(
     # ⑤ 六维星数（2 列 × 3 行）
     dims = result.get("dims") or {}
     cell_w = inner_w / 2
+    label_font = _font(font_file, int(32 * u))
     for i, (k, v) in enumerate(dims.items()):
-        cx = left + cell_w * (i % 2) + int(16 * u)
+        cell_x = left + cell_w * (i % 2)
+        cx = cell_x + int(16 * u)
         cy = y + (i // 2) * int(58 * u)
-        draw.text((cx, cy), k, font=_font(font_file, int(32 * u)), fill=sub)
+        draw.text((cx, cy), k, font=label_font, fill=sub)
         stars = "★" * v + "☆" * (5 - v)
-        draw.text((cx + int(140 * u), cy), stars,
-                  font=_font(font_file, int(34 * u)), fill=grade_rgb)
+        # v1.10.23：星数**右对齐到本列右缘**并按剩余宽度缩字号。
+        # 以前是「左列标签 + 固定 140u 偏移」画星，窄单面（700）下左列星星会压到
+        # 右列标签上（「恋爱运 ★★★★☆健康运」糊成一行）。
+        star_px = cell_w - int(32 * u) - draw_len(k, label_font) - int(12 * u)
+        star_size = int(34 * u)
+        star_font = _font(font_file, star_size)
+        while star_size > int(18 * u) and draw_len(stars, star_font) > star_px:
+            star_size -= 1
+            star_font = _font(font_file, star_size)
+        draw.text((cell_x + cell_w - int(16 * u), cy), stars,
+                  font=star_font, fill=grade_rgb, anchor="ra")
     rows = (len(dims) + 1) // 2
     y += int(58 * u) * rows + int(18 * u)
 
@@ -726,13 +774,19 @@ def render_tarot_card(
             avatar_img = _circle_img(placeholder, av_d)
         canvas.paste(avatar_img, (left, y), avatar_img)
         tx = left + av_d + int(24 * u)
-        draw.text((tx, y), nickname or "旅行者", font=_font(font_file, int(40 * u)), fill=ink)
+        # 同单联：昵称给右侧日期让位（v1.10.23，窄面下昵称长会叠字）
+        date_text = str(result.get("date", ""))
+        date_font = _font(font_file, int(24 * u))
+        avail_name = right - draw_len(date_text, date_font) - int(20 * u) - tx
+        name_font, name_text = _shrink_to_fit(
+            nickname or "旅行者", font_file, int(40 * u), avail_name, floor=int(26 * u))
+        draw.text((tx, y), name_text, font=name_font, fill=ink)
         qq_line = f"QQ {uid}" if uid else ""
         if result.get("constellation"):
             qq_line += f" · {result['constellation']}"
         draw.text((tx, y + int(54 * u)), qq_line, font=_font(font_file, int(24 * u)), fill=sub)
-        draw.text((right, y), str(result.get("date", "")),
-                  font=_font(font_file, int(24 * u)), fill=sub, anchor="ra")
+        draw.text((right, y), date_text,
+                  font=date_font, fill=sub, anchor="ra")
     block(int(88 * u), b_head)
 
     def b_divider(y):

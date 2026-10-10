@@ -59,6 +59,17 @@ def main() -> int:
     _s3 = Image.open(p3).size
     check(_s3[0] == 512 and _s3[1] >= 768, f"小尺寸宽 512、高≥768，实际 {_s3}")
 
+    # 3.1) v1.10.23：窄面（700）表头不叠字——昵称先缩字号、再截断，必须放得下
+    long_name = "这是一个非常非常长的昵称"
+    f_shrunk, t_shrunk = card._shrink_to_fit(long_name, ff, 50, 160, floor=32)
+    check(card.draw_len(t_shrunk, f_shrunk) <= 160,
+          f"缩字号+截断后必须放得下（{card.draw_len(t_shrunk, f_shrunk):.0f} > 160）")
+    check(t_shrunk != long_name and t_shrunk.endswith("…"), f"超长昵称应截断补省略号：{t_shrunk}")
+    f_ok, t_ok = card._shrink_to_fit("短名", ff, 50, 400, floor=32)
+    check(t_ok == "短名", "放得下时不得改动文案")
+    # 窄卡整体仍然可渲染（无异常、宽度按配置）
+    check(Image.open(p3).size[0] == 512, "小尺寸渲染不应因表头自适应而失败")
+
     # 3.5) M4：暗色主题 / 生日描边 / 星座角标 / grade_display 渲染冒烟
     r4 = dict(r)
     r4["birthday_today"] = True

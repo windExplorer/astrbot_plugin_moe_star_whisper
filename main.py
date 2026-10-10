@@ -634,15 +634,25 @@ class StarWhisperPlugin(Star):
                 job["image_path"] = paths[0]
                 return paths[0], job
             job["error"] = f"响应中无有效图片路径: {str(raw)[:200]}"
+            # v1.10.23：出图失败要**打日志**。以前只写进 draw_jobs（控制台看得到），
+            # 日志里一条都没有——用户来问「图怎么没了」时得先去翻控制台。
+            logger.warning(
+                f"[{PLUGIN_NAME}] 萌绘未返回图片路径，已回落幸运色底图：{job['error']}"
+            )
             return None, job
         except asyncio.TimeoutError:
             job["duration_ms"] = int((time.monotonic() - t0) * 1000)
             job["status"] = "timeout"
+            logger.warning(
+                f"[{PLUGIN_NAME}] 萌绘出图超时（{job['duration_ms']}ms，"
+                f"draw_timeout={int(self._cfg('draw_timeout', 120))}s），已回落幸运色底图"
+            )
             return None, job
         except Exception as e:
             job["duration_ms"] = int((time.monotonic() - t0) * 1000)
             job["status"] = "error"
             job["error"] = str(e)[:200]
+            logger.warning(f"[{PLUGIN_NAME}] 萌绘出图异常，已回落幸运色底图：{job['error']}")
             return None, job
 
     def _roll_daily(self, uid: str, date: str, salt: str, profile: dict,
