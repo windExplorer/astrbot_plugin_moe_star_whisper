@@ -207,6 +207,21 @@ def main() -> int:
     check(fortune.stardust_reward("小吉", 1) == 20, "小吉首签 10+10")
     check(fortune.stardust_reward("吉", 1, base=0) == 15, "自定义基础值（streak=1 无连签加成）")
 
+    # 12) v1.10.15：每日推送用的公开抽签接口（pick_two / pick_number）
+    seed_p = fortune.derive_seed("2026-09-27", "daily-push", "salt-x")
+    two = fortune.pick_two(seed_p, "push_yi", lex["yi"])
+    check(len(two) == 2 and two[0] != two[1], f"pick_two 应取两条不重复项，实际 {two}")
+    check(all(x in lex["yi"] for x in two), "pick_two 结果必须来自词库")
+    check(fortune.pick_two(seed_p, "push_yi", lex["yi"]) == two, "pick_two 必须确定性")
+    num = fortune.pick_number(seed_p, "push_number")
+    check(1 <= num <= 99, f"pick_number 应在 1~99，实际 {num}")
+    check(num == fortune.pick_number(seed_p, "push_number"), "pick_number 必须确定性")
+    try:
+        fortune.pick_two(seed_p, "push_yi", ["只有一条"])
+        check(False, "池不足两条时 pick_two 必须抛 ValueError（让调用方走降级分支）")
+    except ValueError:
+        pass
+
     if FAILED:
         print(f"\n{len(FAILED)} 项失败")
         return 1

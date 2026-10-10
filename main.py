@@ -786,11 +786,36 @@ class StarWhisperPlugin(Star):
                 logger.error(f"[{PLUGIN_NAME}] 推送循环异常\n{traceback.format_exc()}")
                 await asyncio.sleep(300)
 
+    def _push_board_line(self, gid: str, prev: str) -> str:
+        """昨日本群抽签摘要（每日推送的「本群数据」块）。
+
+        推送跑在定时循环里、没有聊天事件，拿不到群成员列表，所以只能用
+        `list_group_day` 的「本群抽签」口径（= 昨天首签就在本群的记录）——这是
+        没有事件时的最优口径，卡片上也只写「昨日本群 N 人抽签」，不含糊其辞。
+        查询失败只记日志并返回空串：推送少一行，不能整条不发。
+        """
+        if self._store is None:
+            return ""
+        try:
+            rows = self._store.list_group_day(gid, prev, limit=200)
+        except Exception:
+            logger.warning(
+                f"[{PLUGIN_NAME}] 推送取昨日榜单失败（{gid}），本群跳过数据行\n{traceback.format_exc()}"
+            )
+            return ""
+        if not rows:
+            return "昨日本群还没有人抽签，今天来当第一个吧"
+        top = rows[0]
+        nick = str(top.get("nickname") or "").strip() or "旅人"
+        return (f"昨日本群 {len(rows)} 人抽签 · 最吉：{nick}"
+                f"（{str(top.get('grade') or '？')} {int(top.get('score') or 0)}）")
+
     async def _do_daily_push(self):
         if self._store is None:
             return
         tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
         today = fortune.local_today(tz_name)
+        prev = fortune.prev_date(today)
         salt = str(self._cfg("salt", "moe-star-whisper"))
         lex = lexicon.load_lexicon()
         seed = fortune.derive_seed(today, "daily-push", salt)
@@ -799,35 +824,71 @@ class StarWhisperPlugin(Star):
         fest = (lex.get("festivals") or {}).get(today[5:])
         fest_line = fortune.pick_text(seed, "push_fest", fest) if fest else ""
         weekday_name = "星期" + "一二三四五六日"[fortune.now_in(tz_name).weekday()]
+        # v1.10.15：黄历块（宜忌 + 幸运）——全群同一份，只由日期种子抽，当天不变；
+        # 词库池异常（自定义词库缺 yi/ji/directions）时降级成只有月相的旧卡片
+        yiji = lucky = None
+        try:
+            yiji = {
+                "yi": fortune.pick_two(seed, "push_yi", lex["yi"]),
+                "ji": fortune.pick_two(seed, "push_ji", lex["ji"]),
+            }
+            lucky = {
+                "color": accent,
+                "number": fortune.pick_number(seed, "push_number"),
+                "dir": fortune.pick_text(seed, "push_dir", lex["directions"]),
+            }
+        except Exception:
+            logger.warning(
+                f"[{PLUGIN_NAME}] 推送黄历块生成失败，本次只发月相\n{traceback.format_exc()}"
+            )
+        hint = "发送 /星语 抽今日签 ｜ /星语榜 看今日排行"
 
-        data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
-        push_card_path = None
-        if render_push_card is not None:
-            try:
-                push_card_path = render_push_card(
-                    today, weekday_name, phase, fest_line,
-                    accent_hex=accent.get("hex", "#F6C6D3"),
-                    cards_root=data_dir / "push",
-                    font_path=self._card_font_path(data_dir),
-                    extra_font_dirs=self._font_dirs(data_dir),
-                    signer=str(self._cfg("fortune_signer", "星语者")),
-                )
-            except Exception:
-                logger.error(f"[{PLUGIN_NAME}] 推送卡渲染失败，回退纯文本\n{traceback.format_exc()}")
-                push_card_path = None
-
-        caption = (
+        # 文字部分只保留标题那一行（内容都在卡上，避免同一条消息里说两遍）；
+        # 卡渲染失败时才把数据行/黄历补回文字，保证信息不丢
+        base_caption = (
             "🌙 萌萌星语 · 今日星象\n"
             f"{today} {weekday_name} ｜ 月相：{phase.get('name', '？')}——{phase.get('text', '')}"
         )
         if fest_line:
-            caption += f"\n{fest_line}"
+            base_caption += f"\n{fest_line}"
 
         disabled = self._disabled_groups()
         targets = [g for g in self._store.list_active_group_ids(7) if g[0] not in disabled]
+        data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
         for gid, platform in targets:
             if not platform:
                 continue  # 没有平台信息无法定位会话
+            board_line = self._push_board_line(gid, prev)  # 本群数据：各群不同
+            caption = base_caption + f"\n{hint}"
+            push_card_path = None
+            if render_push_card is not None:
+                try:
+                    push_card_path = render_push_card(
+                        today, weekday_name, phase, fest_line,
+                        accent_hex=accent.get("hex", "#F6C6D3"),
+                        cards_root=data_dir / "push",
+                        font_path=self._card_font_path(data_dir),
+                        extra_font_dirs=self._font_dirs(data_dir),
+                        signer=str(self._cfg("fortune_signer", "星语者")),
+                        yiji=yiji, lucky=lucky, board_line=board_line, hint=hint,
+                        # 每群一张卡（本群数据不同）：文件名带群号，多群共用一个名字
+                        # 会互相覆盖——图片是异步上传的，覆盖会把 A 群的卡发给 B 群
+                        file_key=gid,
+                    )
+                except Exception:
+                    logger.error(
+                        f"[{PLUGIN_NAME}] 推送卡渲染失败（{gid}），回退纯文本\n{traceback.format_exc()}"
+                    )
+                    push_card_path = None
+            if push_card_path is None:
+                if board_line:
+                    caption += f"\n{board_line}"
+                if yiji:
+                    caption += ("\n宜：" + "、".join(yiji["yi"])
+                                + " ｜ 忌：" + "、".join(yiji["ji"]))
+                if lucky:
+                    caption += (f"\n今日幸运：{(lucky.get('color') or {}).get('name')}"
+                                f" · 数字 {lucky.get('number')} · 方位 {lucky.get('dir')}")
             session = f"{platform}:GroupMessage:{gid}"
             chain = MessageChain(chain=[Plain(caption)])
             if push_card_path:

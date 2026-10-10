@@ -249,6 +249,29 @@ def main() -> int:
     check(bool(m) and '"webui_api"' in m.group(1),
           "_reload_modules 必须包含 webui_api（否则控制台接口热更不生效）")
 
+    # v1.10.15：每日推送加内容块（黄历 / 本群数据 / 指令引导）——用户反馈「内容有点少」
+    check("def _push_board_line" in src, "推送必须有本群数据行（_push_board_line）")
+    check("list_group_day(gid, prev, limit=200)" in src,
+          "推送的本群数据必须按「本群抽签」口径取昨日榜，且显式给大 limit")
+    m_push = _re.search(r"async def _do_daily_push\(self.*?(?=\n    (?:async )?def )", src, _re.S)
+    check(bool(m_push), "找不到 _do_daily_push 方法体")
+    push_body = m_push.group(0) if m_push else ""
+    for token, why in (
+        ('fortune.pick_two(seed, "push_yi"', "宜两条必须来自词库（pick_two）"),
+        ('fortune.pick_two(seed, "push_ji"', "忌两条必须来自词库（pick_two）"),
+        ("fortune.pick_number(seed", "幸运数字必须确定性抽取（pick_number）"),
+        ('fortune.pick_text(seed, "push_dir"', "幸运方位必须来自词库"),
+        ("yiji=yiji, lucky=lucky, board_line=board_line, hint=hint",
+         "四个内容块都要交给推送卡渲染"),
+        ("file_key=gid", "推送卡必须按群分开落盘（图片异步上传，同名会被别群覆盖）"),
+        ("hint = ", "推送底部必须有指令引导文案"),
+    ):
+        check(token in push_body, f"_do_daily_push 缺少：{why}")
+    check("push_card_path is None" in push_body and "caption += " in push_body,
+          "卡渲染失败时必须把数据/黄历补回文字，信息不能丢")
+    check("yiji[" in push_body or 'yiji["yi"]' in push_body,
+          "文字回退里要带上宜忌内容")
+
     # v1.10.13：使用道具（换签卡）也要走「先绘后卡」那条流程——过程提示 + 输出方式
     check("def _announce_drawing" in src,
           "「占卜中」过程提示必须集中到 _announce_drawing（首签/换签共用同一份）")

@@ -72,13 +72,43 @@ def main() -> int:
     lo4, hi4 = img4.convert("L").getextrema()
     check(hi4 - lo4 > 30, "暗色卡应有明暗层次")
 
-    # 3.6) M5：推送卡冒烟
+    # 3.6) M5：推送卡冒烟（v1.10.15 起高度按内容算，620 只是下限）
     p5 = card.render_push_card(
         "2026-09-27", "星期日", {"name": "新月", "text": "许愿的好时机"},
         festival_line="元旦快乐！", accent_hex="#A8D8EA",
         cards_root=Path(tempfile.mkdtemp(prefix="moe_card_")),
     )
-    check(Image.open(p5).size == (1024, 620), "推送卡尺寸 1024x620")
+    s5 = Image.open(p5).size
+    check(s5[0] == 1024 and s5[1] >= 620, f"推送卡宽 1024、高≥620，实际 {s5}")
+
+    # 3.61) v1.10.15：黄历块 / 本群数据 / 指令引导——加块要变高、药丸色要真的画出来、
+    #       file_key 要进文件名（多群共用一个名字会互相覆盖：图片是异步上传的）
+    p_push = card.render_push_card(
+        "2026-09-27", "星期日", {"name": "新月", "text": "许愿的好时机"},
+        festival_line="元旦快乐！", accent_hex="#A8D8EA",
+        cards_root=Path(tempfile.mkdtemp(prefix="moe_card_")),
+        yiji={"yi": ["摸鱼", "奶茶"], "ji": ["内卷", "说大话"]},
+        lucky={"color": {"name": "奶油黄", "hex": "#FBE7A1"}, "number": 7, "dir": "东南"},
+        board_line="昨日本群 23 人抽签 · 最吉：小明（大吉 96）",
+        hint="发送 /星语 抽今日签 ｜ /星语榜 看今日排行",
+        file_key="123456",
+    )
+    s_push = Image.open(p_push).size
+    check(s_push[0] == 1024 and s_push[1] > s5[1],
+          f"加内容块后卡应变高，实际 {s5} -> {s_push}")
+    check(Path(p_push).name == "push_2026-09-27_123456.png",
+          f"file_key 必须进文件名，实际 {Path(p_push).name}")
+    img_push = Image.open(p_push).convert("RGB")
+    counts_push = img_push.getcolors(maxcolors=1024 * 1024) or []
+    for label, target in (("宜", (0x7F, 0xB9, 0x8A)), ("忌", (0xD9, 0x8A, 0x9B))):
+        check(any(abs(c[1][0] - target[0]) <= 2 and abs(c[1][1] - target[1]) <= 2
+                  and abs(c[1][2] - target[2]) <= 2 for c in counts_push),
+              f"{label} 药丸底色必须成片出现在卡上（{target}）")
+    # 幸运色色块也必须是那个颜色（奶油黄 #FBE7A1）
+    check(any(abs(c[1][0] - 0xFB) <= 2 and abs(c[1][1] - 0xE7) <= 2
+              and abs(c[1][2] - 0xA1) <= 2 for c in counts_push),
+          "幸运色色块必须与配色一致（#FBE7A1）")
+    check(s_push[1] >= 900, f"带齐四块（宜忌/幸运/数据/引导）的推送卡高应 ≥900，实际 {s_push}")
 
     # 3.7) M8：塔罗双联（有 AI 牌面 → 1400x1200 横图；无图 → 单联 700x1200 不留空白）
     fake_side = Path(tempfile.mkdtemp(prefix="moe_card_")) / "ai.png"

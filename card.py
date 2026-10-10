@@ -887,13 +887,44 @@ def render_push_card(
     width: int = 1024,
     height: int = 620,
     signer: str = "星语者",
+    yiji: dict | None = None,
+    lucky: dict | None = None,
+    board_line: str = "",
+    hint: str = "",
+    file_key: str = "",
 ) -> str:
-    """每日推送的「今日星象」卡（F17）：日期 + 月相 + 节日 + 抽签引导。"""
+    """每日推送的「今日星象」卡（F17）：日期 + 月相 + 节日 + 宜忌 + 幸运 + 本群数据 + 引导。
+
+    v1.10.15 起卡面按需加块，卡片高度跟着内容算（`height` 只当**下限**，不再是固定
+    620）：以前只有「日期 + 月相 + 节日」，用户反馈「内容有点少」，于是把当天能算出来
+    的东西都放上卡：
+
+    - `yiji`（v1.10.15）：`{"yi": [...], "ji": [...]}`，两行「宜 / 忌」彩色药丸 + 词条；
+      全群同一份（只由日期种子抽），当天不变。
+    - `lucky`（v1.10.15）：`{"color": {"name","hex"}, "number": int, "dir": str}`，
+      一行「色块 + 幸运色 · 幸运数字 · 幸运方位」，同样全群同一份。
+    - `board_line`（v1.10.15）：本群自己的数据（如「昨日本群 23 人抽签 · 最吉：小明（大吉 96）」），
+      各群不同——所以调用方**每群单独渲染**，并靠 `file_key`（一般传群号）分开落盘，
+      避免多群共用一个文件名时互相覆盖。
+    - `hint`（v1.10.15）：底部一行小字引导（如「发送 /星语 抽今日签 ｜ /星语榜 看今日排行」）。
+    """
     font_file = find_font(font_path, extra_font_dirs)
     if not font_file:
         raise RuntimeError("未找到可用中文字体")
-    W, H = int(width), int(height)
+    W = int(width)
     u = W / 1024.0
+    margin = int(48 * u)
+    sep = int(34 * u)                      # 块与块之间的呼吸
+    # 高度按实际块算：头部 200 + 分隔线 40 + 月相 124 + 节日 52? + 各扩展块 + 页脚 190
+    need = (int(200 * u) + int(40 * u) + int(124 * u)
+            + (int(52 * u) if festival_line else 0) + int(190 * u))
+    if yiji:
+        need += sep + int(112 * u)
+    if lucky:
+        need += sep + int(56 * u)
+    if board_line:
+        need += sep + int(56 * u)
+    H = max(int(height), margin * 2 + need)
     accent = _hex_rgb(accent_hex)
     ink, sub = (74, 74, 96), (150, 150, 168)
     img = _gradient(W, H, accent).convert("RGBA")
@@ -903,7 +934,6 @@ def render_push_card(
     _sparkle(dd, W * 0.86, H * 0.34, 10 * u, accent, 80)
     img = Image.alpha_composite(img, deco)
 
-    margin = int(48 * u)
     panel = _panel_base(W - 2 * margin, H - 2 * margin, accent, False, int(40 * u))
     img.paste(panel, (margin, margin), panel)
     draw = ImageDraw.Draw(img)
@@ -935,14 +965,90 @@ def render_push_card(
                   font=_font(font_file, int(34 * u)), fill=sub)
         y += int(52 * u)
 
-    draw.text((left, H - margin - int(72 * u)), "今天的专属星语签已就位",
+    # 今日宜忌（v1.10.15）：两行彩色药丸 + 词条，宽度自适应，超宽截断不压出边框
+    if yiji:
+        y += sep
+        row_h = int(52 * u)
+        pill_h = int(44 * u)
+        pad = int(20 * u)
+        tag_font = _font(_display_font_file(font_file), int(30 * u))
+        item_font = _font(font_file, int(36 * u))
+
+        def _tag_row(base_y: int, label: str, items: list, rgb: tuple) -> None:
+            text = "、".join(str(x) for x in (items or [])) or "——"
+            tw = draw_len(label, tag_font) + pad * 2
+            draw.rounded_rectangle(
+                [left, base_y + (row_h - pill_h) // 2,
+                 left + tw, base_y + (row_h + pill_h) // 2],
+                radius=pill_h // 2, fill=rgb + (255,))
+            draw.text((left + tw / 2, base_y + row_h / 2), label,
+                      font=tag_font, fill=(255, 255, 255), anchor="mm")
+            x = left + tw + int(18 * u)
+            draw.text((x, base_y + row_h / 2),
+                      _fit_text(text, item_font, right - x),
+                      font=item_font, fill=ink, anchor="lm")
+
+        _tag_row(y, "宜", (yiji or {}).get("yi"), _hex_rgb("#7FB98A"))          # 柔和绿
+        _tag_row(y + row_h, "忌", (yiji or {}).get("ji"), _hex_rgb("#D98A9B"))  # 柔和玫
+        y += int(112 * u)
+
+    # 今日幸运（v1.10.15）：小标 + 色块 + 幸运色 + 数字 + 方位，一行放不下就少放后面几段。
+    # 小标用 sub 灰而不是 accent：当天的幸运色本身可能就是浅色（暖沙色/奶油黄），
+    # 用它当文字色在浅色卡上几乎看不见（第一版就是这么糊掉的）。
+    if lucky:
+        y += sep
+        row_h = int(56 * u)
+        cy = y + row_h // 2
+        sw = int(40 * u)
+        hexv = str(((lucky or {}).get("color") or {}).get("hex") or accent_hex)
+        label_font = _font(_display_font_file(font_file), int(30 * u))
+        draw.text((left, cy), "今日幸运", font=label_font, fill=sub, anchor="lm")
+        x = left + draw_len("今日幸运", label_font) + int(20 * u)
+        draw.rounded_rectangle(
+            [x, cy - sw // 2, x + sw, cy + sw // 2], radius=int(10 * u),
+            fill=_hex_rgb(hexv) + (255,), outline=(200, 198, 210, 255), width=2)
+        x += sw + int(18 * u)
+        pieces = [
+            (str(((lucky or {}).get("color") or {}).get("name") or "幸运色"),
+             _font(font_file, int(38 * u)), ink),
+        ]
+        if (lucky or {}).get("number"):
+            pieces.append((f"幸运数字 {int(lucky['number'])}",
+                           _font(font_file, int(30 * u)), sub))
+        if (lucky or {}).get("dir"):
+            pieces.append((f"幸运方位 {lucky['dir']}",
+                           _font(font_file, int(30 * u)), sub))
+        for text, font, color in pieces:
+            if x + draw_len(text, font) > right:
+                break
+            draw.text((x, cy), text, font=font, fill=color, anchor="lm")
+            x += draw_len(text, font) + int(14 * u)
+        y += int(56 * u)
+
+    # 本群数据（v1.10.15）：各群不同，所以每群单独渲染（调用方传 file_key 分开落盘）
+    if board_line:
+        y += sep
+        row_h = int(56 * u)
+        f = _font(font_file, int(34 * u))
+        _sparkle(draw, left + int(10 * u), y + row_h // 2, 9 * u, accent, 210)
+        draw.text((left + int(32 * u), y + row_h // 2),
+                  _fit_text(board_line, f, right - left - int(32 * u)),
+                  font=f, fill=ink, anchor="lm")
+        y += int(56 * u)
+
+    draw.text((left, H - margin - int(96 * u)), "今天的专属星语签已就位",
               font=_font(font_file, int(38 * u)), fill=ink)
-    draw.text((right, H - margin - int(30 * u)), f"—— {signer}",
-              font=_font(font_file, int(30 * u)), fill=sub, anchor="rs")
+    # 引导行与落款同一行（都用中线对齐，避免一高一低看着别扭）
+    if hint:
+        draw.text((left, H - margin - int(27 * u)), hint,
+                  font=_font(font_file, int(26 * u)), fill=sub, anchor="lm")
+    draw.text((right, H - margin - int(27 * u)), f"—— {signer}",
+              font=_font(font_file, int(30 * u)), fill=sub, anchor="rm")
 
     cards_root = Path(cards_root)
     cards_root.mkdir(parents=True, exist_ok=True)
-    out = cards_root / f"push_{date_str}.png"
+    suffix = f"_{file_key}" if str(file_key or "").strip() else ""
+    out = cards_root / f"push_{date_str}{suffix}.png"
     img.convert("RGB").save(out, "PNG")
     return str(out)
 

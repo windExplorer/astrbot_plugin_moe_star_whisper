@@ -140,6 +140,22 @@ def pick_text(seed: bytes, tag: str, pool: list) -> str:
     return _pick(seed, tag, pool)
 
 
+def pick_two(seed: bytes, tag: str, pool: list) -> list:
+    """从池中确定性取两条不重复项（公开接口，v1.10.15 每日推送的宜忌用）。
+
+    池长 < 2 时抛 ValueError：调用方（每日推送）自己兜底，不要在这里静默返回
+    残缺结果——宜忌两条是这个功能的合同，少一条就该走降级分支。
+    """
+    if len(pool) < 2:
+        raise ValueError(f"词库池不足两项：{tag}（{len(pool)}）")
+    return _pick_two(seed, tag, pool)
+
+
+def pick_number(seed: bytes, tag: str = "number") -> int:
+    """1-99 的确定整数（公开接口）：与运势卡的幸运数字同区间，每日推送用。"""
+    return 1 + _sub_int(seed, tag, 99)
+
+
 # 星座区间（含跨年的摩羯）；MM-DD -> 名称
 CONSTELLATION_RANGES = (
     ("摩羯座", (12, 22), (1, 19)),
