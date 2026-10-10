@@ -55,6 +55,8 @@ ITEM_DEFS = {
     "candle": ("幸运香烛", "当日幸运指数 +8（抽签前使用）"),
 }
 DEFAULT_PRICES = {"reroll": 80, "amulet": 50, "streak_guard": 30, "candle": 20}
+# 每日推送 / /星语星象 卡底部的指令引导（v1.10.15 起；抽成常量避免两处各写一份）
+PUSH_HINT = "发送 /星语 抽今日签 ｜ /星语榜 看今日排行"
 _ITEM_ALIASES = {
     "reroll": "reroll", "换签卡": "reroll", "换签": "reroll", "改运卡": "reroll",
     "amulet": "amulet", "厄运护身符": "amulet", "护身符": "amulet", "护身": "amulet",
@@ -810,20 +812,20 @@ class StarWhisperPlugin(Star):
         return (f"昨日本群 {len(rows)} 人抽签 · 最吉：{nick}"
                 f"（{str(top.get('grade') or '？')} {int(top.get('score') or 0)}）")
 
-    async def _do_daily_push(self):
-        if self._store is None:
-            return
+    def _push_public(self) -> dict:
+        """每日推送与 `/星语星象` 共用的公共内容（全群同一天同一份）。
+
+        v1.10.16 从 `_do_daily_push` 里抽出来：指令要发的必须与推送**逐字一致**，
+        抽成一份才不会两边抄跑偏（各群只有「昨日摘要」那一行不同，由调用方补）。
+        """
         tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
         today = fortune.local_today(tz_name)
-        prev = fortune.prev_date(today)
         salt = str(self._cfg("salt", "moe-star-whisper"))
         lex = lexicon.load_lexicon()
         seed = fortune.derive_seed(today, "daily-push", salt)
+        fest = (lex.get("festivals") or {}).get(today[5:])
         phase = fortune.pick_text(seed, "push_phase", lex["phases"])
         accent = fortune.pick_text(seed, "push_color", lex["lucky_colors"])
-        fest = (lex.get("festivals") or {}).get(today[5:])
-        fest_line = fortune.pick_text(seed, "push_fest", fest) if fest else ""
-        weekday_name = "星期" + "一二三四五六日"[fortune.now_in(tz_name).weekday()]
         # v1.10.15：黄历块（宜忌 + 幸运）——全群同一份，只由日期种子抽，当天不变；
         # 词库池异常（自定义词库缺 yi/ji/directions）时降级成只有月相的旧卡片
         yiji = lucky = None
@@ -841,58 +843,97 @@ class StarWhisperPlugin(Star):
             logger.warning(
                 f"[{PLUGIN_NAME}] 推送黄历块生成失败，本次只发月相\n{traceback.format_exc()}"
             )
-        hint = "发送 /星语 抽今日签 ｜ /星语榜 看今日排行"
+        return {
+            "today": today,
+            "prev": fortune.prev_date(today),
+            "weekday_name": "星期" + "一二三四五六日"[fortune.now_in(tz_name).weekday()],
+            "phase": phase,
+            "accent": accent,
+            "fest_line": fortune.pick_text(seed, "push_fest", fest) if fest else "",
+            "yiji": yiji,
+            "lucky": lucky,
+        }
 
-        # 文字部分只保留标题那一行（内容都在卡上，避免同一条消息里说两遍）；
-        # 卡渲染失败时才把数据行/黄历补回文字，保证信息不丢
-        base_caption = (
+    @staticmethod
+    def _push_caption(public: dict) -> str:
+        """推送/星象指令的文字部分：标题两行 + 节日 + 指令引导。
+
+        内容都在卡上，文字只保留标题，避免同一条消息里说两遍（卡渲染失败时才由
+        `_push_text_fallback` 把内容补回来）。
+        """
+        text = (
             "🌙 萌萌星语 · 今日星象\n"
-            f"{today} {weekday_name} ｜ 月相：{phase.get('name', '？')}——{phase.get('text', '')}"
+            f"{public['today']} {public['weekday_name']} ｜ "
+            f"月相：{public['phase'].get('name', '？')}——{public['phase'].get('text', '')}"
         )
-        if fest_line:
-            base_caption += f"\n{fest_line}"
+        if public["fest_line"]:
+            text += f"\n{public['fest_line']}"
+        return f"{text}\n{PUSH_HINT}"
 
+    @staticmethod
+    def _push_text_fallback(board_line: str, yiji: dict | None,
+                            lucky: dict | None) -> str:
+        """卡渲染失败时补进文字的内容（信息不丢，只是不好看）。"""
+        extra = ""
+        if board_line:
+            extra += f"\n{board_line}"
+        if yiji:
+            extra += "\n宜：" + "、".join(yiji["yi"]) + " ｜ 忌：" + "、".join(yiji["ji"])
+        if lucky:
+            extra += (f"\n今日幸运：{(lucky.get('color') or {}).get('name')}"
+                      f" · 数字 {lucky.get('number')} · 方位 {lucky.get('dir')}")
+        return extra
+
+    def _push_card(self, public: dict, board_line: str, file_key: str) -> str | None:
+        """渲染「今日星象」卡（推送与指令共用）；失败返回 None，由调用方回落文字。
+
+        `file_key` 必须区分群（推送传群号）：图片是异步上传的，多群共用一个文件名
+        会互相覆盖，把 A 群的卡发给 B 群。
+        """
+        if render_push_card is None:
+            return None
+        try:
+            data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
+            return render_push_card(
+                public["today"], public["weekday_name"], public["phase"],
+                public["fest_line"],
+                accent_hex=public["accent"].get("hex", "#F6C6D3"),
+                cards_root=data_dir / "push",
+                font_path=self._card_font_path(data_dir),
+                extra_font_dirs=self._font_dirs(data_dir),
+                signer=str(self._cfg("fortune_signer", "星语者")),
+                yiji=public["yiji"], lucky=public["lucky"],
+                board_line=board_line, hint=PUSH_HINT, file_key=file_key,
+            )
+        except Exception:
+            logger.error(
+                f"[{PLUGIN_NAME}] 推送卡渲染失败（{file_key}），回退纯文本\n{traceback.format_exc()}"
+            )
+            return None
+
+    def _push_message(self, public: dict, board_line: str, file_key: str):
+        """(文字, 卡路径|None)：卡在就发卡（文字只留标题 + 引导），卡没了把内容补进文字。"""
+        card = self._push_card(public, board_line, file_key)
+        caption = self._push_caption(public)
+        if card is None:
+            caption += self._push_text_fallback(board_line, public["yiji"], public["lucky"])
+        return caption, card
+
+    async def _do_daily_push(self):
+        if self._store is None:
+            return
+        public = self._push_public()
         disabled = self._disabled_groups()
         targets = [g for g in self._store.list_active_group_ids(7) if g[0] not in disabled]
-        data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
         for gid, platform in targets:
             if not platform:
                 continue  # 没有平台信息无法定位会话
-            board_line = self._push_board_line(gid, prev)  # 本群数据：各群不同
-            caption = base_caption + f"\n{hint}"
-            push_card_path = None
-            if render_push_card is not None:
-                try:
-                    push_card_path = render_push_card(
-                        today, weekday_name, phase, fest_line,
-                        accent_hex=accent.get("hex", "#F6C6D3"),
-                        cards_root=data_dir / "push",
-                        font_path=self._card_font_path(data_dir),
-                        extra_font_dirs=self._font_dirs(data_dir),
-                        signer=str(self._cfg("fortune_signer", "星语者")),
-                        yiji=yiji, lucky=lucky, board_line=board_line, hint=hint,
-                        # 每群一张卡（本群数据不同）：文件名带群号，多群共用一个名字
-                        # 会互相覆盖——图片是异步上传的，覆盖会把 A 群的卡发给 B 群
-                        file_key=gid,
-                    )
-                except Exception:
-                    logger.error(
-                        f"[{PLUGIN_NAME}] 推送卡渲染失败（{gid}），回退纯文本\n{traceback.format_exc()}"
-                    )
-                    push_card_path = None
-            if push_card_path is None:
-                if board_line:
-                    caption += f"\n{board_line}"
-                if yiji:
-                    caption += ("\n宜：" + "、".join(yiji["yi"])
-                                + " ｜ 忌：" + "、".join(yiji["ji"]))
-                if lucky:
-                    caption += (f"\n今日幸运：{(lucky.get('color') or {}).get('name')}"
-                                f" · 数字 {lucky.get('number')} · 方位 {lucky.get('dir')}")
+            board_line = self._push_board_line(gid, public["prev"])  # 本群数据：各群不同
+            caption, card = self._push_message(public, board_line, gid)
             session = f"{platform}:GroupMessage:{gid}"
             chain = MessageChain(chain=[Plain(caption)])
-            if push_card_path:
-                chain.chain.append(Image.fromFileSystem(push_card_path))
+            if card:
+                chain.chain.append(Image.fromFileSystem(card))
             try:
                 ok = await StarTools.send_message(session, chain)
                 logger.info(f"[{PLUGIN_NAME}] 推送 {gid}: {'ok' if ok else 'no platform matched'}")
@@ -1404,6 +1445,35 @@ class StarWhisperPlugin(Star):
             lines.append(f"累计星尘 {stats['stardust']}")
         yield event.plain_result("\n".join(lines))
 
+    # ---------- 今日星象（v1.10.16：把每日推送搬到指令上） ----------
+
+    @filter.command("星语星象", alias={"今日星象", "星象", "运势星象"})
+    async def push_cmd(self, event: AstrMessageEvent):
+        """发一张今日星象卡（与每日推送同一份内容，可随时看）
+
+        两个用处：①群里想再看一眼今天的星象，不用等明天 08:00；②不用真开推送、
+        也不用等到点，就能看到推送长什么样（换词库/改盐值后尤其有用）。
+
+        与 `_do_daily_push` 共用 `_push_public` / `_push_message`，所以指令发出来的
+        东西与推送**逐字一致**，唯一的差别是「昨日摘要」那一行：群里按本群算，
+        私聊没有群可算，整行省略。停用群（`/星语开关 off`）与推送口径一致地拒发。
+        """
+        if self._store is None:
+            yield event.plain_result("星语者还没整理好星盘，稍后再试～")
+            return
+        gid = "" if event.is_private_chat() else str(event.get_group_id() or "")
+        if gid and gid in self._disabled_groups():
+            yield event.plain_result("本群已停用星语签，管理员可用 /星语开关 on 开启～")
+            return
+        public = self._push_public()
+        board_line = self._push_board_line(gid, public["prev"]) if gid else ""
+        caption, card = self._push_message(public, board_line, gid or "private")
+        comps: list = [Plain(caption)]
+        if card:
+            comps.append(Image.fromFileSystem(card))
+        # 图 + 文合并成一条链：群里只 @ 一次（与抽签一致）
+        yield event.chain_result(comps)
+
     # ---------- 道具经济指令（M7/D8） ----------
 
     @filter.command("星尘", alias={"运势背包"})
@@ -1730,6 +1800,7 @@ class StarWhisperPlugin(Star):
         groups = [
             ("占卜", [
                 ("/星语", "抽当日专属星语签（别名 /运势 /今日运势 /占卜）"),
+                ("/星语星象", "今日星象卡：月相 · 宜忌 · 幸运色 · 本群昨日摘要"),
                 ("/星语日历 [月份]", "当月运势日历：每日吉凶与分数"),
                 ("/星语帮助", "查看本帮助图"),
             ]),

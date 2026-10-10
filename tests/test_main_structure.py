@@ -73,7 +73,7 @@ def main() -> int:
     }
     required = {
         "fortune_cmd", "rank_cmd", "pk_cmd", "switch_cmd",
-        "bind_cmd", "constellation_cmd", "calendar_cmd",
+        "bind_cmd", "constellation_cmd", "calendar_cmd", "push_cmd",
         "wallet_cmd", "shop_cmd", "buy_cmd", "use_cmd", "makeup_cmd", "grant_cmd",
         "_roll_daily", "_economy_on", "_price_of",
         "_try_render_card", "_try_utility_card", "_accent_hex", "_try_llm_sign",
@@ -249,28 +249,65 @@ def main() -> int:
     check(bool(m) and '"webui_api"' in m.group(1),
           "_reload_modules 必须包含 webui_api（否则控制台接口热更不生效）")
 
-    # v1.10.15：每日推送加内容块（黄历 / 本群数据 / 指令引导）——用户反馈「内容有点少」
+    # v1.10.15 / v1.10.16：每日推送扩成「星象日报」，并把它搬到 /星语星象 指令上。
+    # 两处必须共用同一份内容——所以内容生成/渲染/文字回退都抽成了方法，这里逐个锁死。
     check("def _push_board_line" in src, "推送必须有本群数据行（_push_board_line）")
     check("list_group_day(gid, prev, limit=200)" in src,
           "推送的本群数据必须按「本群抽签」口径取昨日榜，且显式给大 limit")
-    m_push = _re.search(r"async def _do_daily_push\(self.*?(?=\n    (?:async )?def )", src, _re.S)
-    check(bool(m_push), "找不到 _do_daily_push 方法体")
-    push_body = m_push.group(0) if m_push else ""
+    for helper in ("_push_public", "_push_card", "_push_caption",
+                   "_push_text_fallback", "_push_message"):
+        check(f"def {helper}" in src,
+              f"推送/星象指令必须共用 {helper}（内容只能有一份，抄两份必然跑偏）")
+    check('PUSH_HINT = "发送 /星语' in src,
+          "指令引导文案必须抽成模块级常量 PUSH_HINT")
+    check(src.count("PUSH_HINT") >= 3,
+          "PUSH_HINT 要同时给卡渲染与文字部分用（别再手抄一份）")
+
+    m_pub = _re.search(r"def _push_public\(self.*?(?=\n    (?:@|def ))", src, _re.S)
+    check(bool(m_pub), "找不到 _push_public 方法体")
+    pub_body = m_pub.group(0) if m_pub else ""
     for token, why in (
         ('fortune.pick_two(seed, "push_yi"', "宜两条必须来自词库（pick_two）"),
         ('fortune.pick_two(seed, "push_ji"', "忌两条必须来自词库（pick_two）"),
         ("fortune.pick_number(seed", "幸运数字必须确定性抽取（pick_number）"),
         ('fortune.pick_text(seed, "push_dir"', "幸运方位必须来自词库"),
-        ("yiji=yiji, lucky=lucky, board_line=board_line, hint=hint",
-         "四个内容块都要交给推送卡渲染"),
-        ("file_key=gid", "推送卡必须按群分开落盘（图片异步上传，同名会被别群覆盖）"),
-        ("hint = ", "推送底部必须有指令引导文案"),
+        ('"yiji"', "公共内容要带宜忌块"),
+        ('"lucky"', "公共内容要带幸运块"),
+        ('"weekday_name"', "公共内容要带星期（指令与推送共用）"),
     ):
-        check(token in push_body, f"_do_daily_push 缺少：{why}")
-    check("push_card_path is None" in push_body and "caption += " in push_body,
-          "卡渲染失败时必须把数据/黄历补回文字，信息不能丢")
-    check("yiji[" in push_body or 'yiji["yi"]' in push_body,
-          "文字回退里要带上宜忌内容")
+        check(token in pub_body, f"_push_public 缺少：{why}")
+
+    m_cardfn = _re.search(r"def _push_card\(self.*?(?=\n    def )", src, _re.S)
+    check(bool(m_cardfn), "找不到 _push_card 方法体")
+    card_body = m_cardfn.group(0) if m_cardfn else ""
+    check("file_key=file_key" in card_body and "yiji=public[\"yiji\"]" in card_body,
+          "卡渲染必须把宜忌/幸运/文件名键都透传下去")
+    check("return None" in card_body, "卡渲染失败必须返回 None（由调用方回落文字）")
+
+    m_push = _re.search(r"async def _do_daily_push\(self.*?(?=\n    (?:async )?def )", src, _re.S)
+    check(bool(m_push), "找不到 _do_daily_push 方法体")
+    push_body = m_push.group(0) if m_push else ""
+    check("self._push_message(public, board_line, gid)" in push_body,
+          "推送必须按群取内容（文件名键 = 群号，否则多群同名互相覆盖）")
+    check("self._push_public()" in push_body and "_push_text_fallback" not in push_body,
+          "推送要用公共内容 + 共用组装方法（回退逻辑不该在推送里再写一遍）")
+
+    # v1.10.16：/星语星象 —— 把每日推送搬到指令上（随时看 / 不用等 08:00 / 不用真开推送）
+    check("push_cmd" in methods, "缺少 /星语星象 指令（push_cmd）")
+    check('@filter.command("星语星象"' in src, "指令名必须是 /星语星象（主指令统一「星语」前缀）")
+    m_cmd = _re.search(r"async def push_cmd\(self.*?(?=\n    @filter)", src, _re.S)
+    check(bool(m_cmd), "找不到 push_cmd 方法体")
+    cmd_body = m_cmd.group(0) if m_cmd else ""
+    for token, why in (
+        ("self._push_public()", "星象指令必须与推送共用公共内容"),
+        ('self._push_message(public, board_line, gid or "private")',
+         "星象指令必须共用同一套组装（私聊用 private 当文件名键）"),
+        ("self._push_board_line(gid, public[\"prev\"]) if gid else \"\"",
+         "群里才带昨日摘要（私聊没有群可算）"),
+        ("_disabled_groups()", "停用群要拒发（与推送口径一致）"),
+        ("yield event.chain_result(comps)", "图 + 文合并成一条链（群里只 @ 一次）"),
+    ):
+        check(token in cmd_body, f"push_cmd 缺少：{why}")
 
     # v1.10.13：使用道具（换签卡）也要走「先绘后卡」那条流程——过程提示 + 输出方式
     check("def _announce_drawing" in src,
