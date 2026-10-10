@@ -472,6 +472,61 @@ class StarWhisperPlugin(Star):
                 )
         return card
 
+    def _ai_art_of_day(self, uid: str, date: str) -> str:
+        """当日已落盘的 AI 牌面路径（最新且文件还在的那张），没有返回空串。
+
+        v1.10.25：`/星语` 当日重复触发时用它判断「今天到底画出过图没有」——
+        有过就不再重画（一日一签的幂等），一次都没成过才允许补一次。
+        """
+        if self._store is None:
+            return ""
+        try:
+            for job in reversed(self._store.get_draw_jobs(uid, date)):
+                p = str(job.get("image_path") or "")
+                if p and Path(p).exists():
+                    return p
+        except Exception:
+            pass
+        return ""
+
+    async def _try_redraw_today(self, event: AstrMessageEvent, existing: dict,
+                                payload: dict, uid: str, date: str, salt: str) -> str | None:
+        """当日**出图失败过**时，重复抽签再试一次出图（v1.10.25）。
+
+        只补「画」这一件事：运势不重掷（payload 原样复用）、星尘不重发、连签不动，
+        成功就把当日的单联卡换成双联（同一天的卡文件名相同，直接覆盖）并回写 card_path；
+        失败返回 None，调用方照旧回原卡。
+
+        与首签共用 `_announce_drawing` + `_try_draw_background`，不另写一套出图流程
+        （v1.10.13 的教训：流程抄两份，早晚漏一半）。
+        """
+        await self._announce_drawing(event)
+        bg_path, job = await self._try_draw_background(event, payload, uid, date, salt)
+        if job is None:
+            return None
+        card_path = ""
+        if bg_path:
+            avatar_bytes = await self._fetch_avatar_bytes(uid)
+            card_path = self._try_render_card(
+                payload, uid,
+                nickname=str(existing.get("nickname") or ""),
+                avatar_bytes=avatar_bytes, bg_image=bg_path,
+            )
+        job["card_path"] = card_path or ""
+        try:
+            self._store.record_draw_job(uid, date, **job)
+        except Exception:
+            logger.error(f"[{PLUGIN_NAME}] draw_jobs 落库失败\n{traceback.format_exc()}")
+        if card_path:
+            try:
+                self._store.set_card_path(uid, date, card_path)
+            except Exception:
+                logger.warning(
+                    f"[{PLUGIN_NAME}] 补出图成功但回写 card_path 失败\n{traceback.format_exc()}"
+                )
+            return card_path
+        return None
+
     # ---------- 提示卡（M9）：星尘/商店/榜单/PK/通知/日历 ----------
 
     def _utility_cards_on(self) -> bool:
@@ -1082,18 +1137,37 @@ class StarWhisperPlugin(Star):
         date = fortune.local_today(tz_name)
         salt = str(self._cfg("salt", "moe-star-whisper"))
 
-        # 一日一签（D5）：已有签直接回发（卡文件优先，其次文本），不重算不重绘
+        # 一日一签（D5）：已有签直接回发（卡文件优先，其次文本），不重算不重掷
         existing = self._store.get_fortune(uid, date)
         if existing is not None:
             payload = existing.get("payload") or {}
             # ⚠️ card_path 是 fortunes 表的独立列，payload JSON 里没有该键
             # （v1.8.7 前的 bug：只读 payload → 当日第二次抽签必然退回纯文本）
             card_path = str(existing.get("card_path") or payload.get("card_path") or "")
+            mode = str(self._cfg("output_mode", "图卡"))
             if card_path and Path(card_path).exists():
+                # v1.10.25：当日**画图失败**过的话，重复抽签允许再画一次——绘图服务器
+                # 可能是临时的（宕机/失联），恢复了就当天的卡补成双联。运势、星尘、
+                # 连签都不动；同一人同一天 60 秒内只试一次，免得服务器一直挂着时
+                # 每次抽签都干等一轮超时。
+                if (mode != "纯文本" and bool(self._cfg("draw_enabled", False))
+                        and not self._ai_art_of_day(uid, date)):
+                    gate = getattr(self, "_redraw_gate", None)
+                    if gate is None:
+                        gate = {}
+                        self._redraw_gate = gate
+                    now = time.monotonic()
+                    key = f"{uid}:{date}"
+                    if now - float(gate.get(key) or 0.0) >= 60:
+                        gate[key] = now
+                        redrawn = await self._try_redraw_today(
+                            event, existing, payload, uid, date, salt)
+                        if redrawn:
+                            card_path = redrawn
                 # 图与文合并成一条结果链：框架的自动 @ 只跟一条结果走，
                 # 分两次 yield 会在群里 @ 两次（v1.9.3 修）
                 comps: list = [Image.fromFileSystem(card_path)]
-                if str(self._cfg("output_mode", "图卡")) == "图卡+文本":
+                if mode == "图卡+文本":
                     comps.append(Plain("\n" + self._format_result(payload, repeat=True)))
                 yield event.chain_result(comps)
                 return
@@ -1101,7 +1175,7 @@ class StarWhisperPlugin(Star):
             # 运势不重算、不重调萌绘（底图复用当日 draw_jobs 里已落盘的 AI 图）；
             # 成功则回发并落列，当天再请求就直接回发同一张图，不会反复重试
             retried = None
-            if str(self._cfg("output_mode", "图卡")) != "纯文本":
+            if mode != "纯文本":
                 retried = await self._retry_render_card(existing, uid, date)
             if retried:
                 comps: list = [Image.fromFileSystem(retried)]

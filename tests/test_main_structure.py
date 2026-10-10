@@ -390,6 +390,29 @@ def main() -> int:
     check("yield event.chain_result(comps)" in use_body,
           "换签结果图+文必须合并为一条链（与首签一致，群里只 @ 一次）")
 
+    # v1.10.25：当日出图失败过 → 重复抽签要能补一次出图（绘图服务器恢复即换回双联）
+    check("def _ai_art_of_day" in src and "async def _try_redraw_today" in src,
+          "需要 _ai_art_of_day / _try_redraw_today 支撑「当日补出图」")
+    m_f = _re.search(r"async def fortune_cmd\(self.*?(?=\n    @filter)", src, _re.S)
+    check(bool(m_f), "找不到 fortune_cmd 方法体")
+    f_body = m_f.group(0) if m_f else ""
+    check("not self._ai_art_of_day(uid, date)" in f_body,
+          "重复抽签时必须先判断当天有没有画出过图（画过就不许重画，保持一日一签幂等）")
+    check("await self._try_redraw_today(" in f_body,
+          "当日画图失败过时，重复抽签要调用补出图")
+    check("_redraw_gate" in f_body,
+          "补出图必须节流（否则服务器一直挂着时每次抽签都干等一轮超时）")
+    m_r = _re.search(r"async def _try_redraw_today\(self.*?(?=\n    # ---------- )", src, _re.S)
+    check(bool(m_r), "找不到 _try_redraw_today 方法体")
+    r_body = m_r.group(0) if m_r else ""
+    check("await self._announce_drawing(event)" in r_body
+          and "await self._try_draw_background(" in r_body,
+          "补出图必须复用 _announce_drawing + _try_draw_background（不许再写一套出图流程）")
+    check("set_card_path(uid, date, card_path)" in r_body,
+          "补出图成功后要把新卡路径写回 fortunes.card_path")
+    check("update_fortune_payload(" not in r_body,
+          "补出图不得重写 payload（运势是当日既定的，只换卡）")
+
     # v1.9.0：控制台页面产物必须与源码一起进仓库（zip 打包依赖 pages/console）
     check((root / "webui-src" / "package.json").is_file(), "缺少 webui-src/package.json（控制台源码）")
     check((root / "pages" / "console" / "index.html").is_file(),
