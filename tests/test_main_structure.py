@@ -78,7 +78,7 @@ def main() -> int:
         "_roll_daily", "_economy_on", "_price_of",
         "_try_render_card", "_try_utility_card", "_accent_hex", "_try_llm_sign",
         "_try_draw_background", "_try_build_image_prompt",
-        "_group_name_of", "_send_plain", "_group_member_ids",
+        "_group_name_of", "_send_plain", "_announce_drawing", "_group_member_ids",
         "_push_loop", "_do_daily_push", "_next_push_delay",
         "initialize", "terminate",
     }
@@ -236,6 +236,23 @@ def main() -> int:
     check(bool(m), "找不到 _reload_modules 方法体")
     check(bool(m) and '"webui_api"' in m.group(1),
           "_reload_modules 必须包含 webui_api（否则控制台接口热更不生效）")
+
+    # v1.10.13：使用道具（换签卡）也要走「先绘后卡」那条流程——过程提示 + 输出方式
+    check("def _announce_drawing" in src,
+          "「占卜中」过程提示必须集中到 _announce_drawing（首签/换签共用同一份）")
+    check(src.count("await self._announce_drawing(event)") >= 2,
+          "首签与换签都要给「占卜中」提示（换签卡此前直接调 _try_draw_background，用户干等无提示）")
+    m_use = _re.search(r"async def use_cmd\(self.*?(?=\n    @filter)", src, _re.S)
+    check(bool(m_use), "找不到 use_cmd 方法体")
+    use_body = m_use.group(0) if m_use else ""
+    check("_announce_drawing" in use_body,
+          "换签卡触发萌绘出图前必须提示「占卜中」")
+    check('mode != "纯文本"' in use_body,
+          "换签也必须看输出方式（纯文本模式下不得生成底图、不得回图）")
+    check('self._cfg("draw_fail_hint", "")' in use_body,
+          "换签的萌绘失败提示（draw_fail_hint）也要跟着发，不能丢")
+    check("yield event.chain_result(comps)" in use_body,
+          "换签结果图+文必须合并为一条链（与首签一致，群里只 @ 一次）")
 
     # v1.9.0：控制台页面产物必须与源码一起进仓库（zip 打包依赖 pages/console）
     check((root / "webui-src" / "package.json").is_file(), "缺少 webui-src/package.json（控制台源码）")

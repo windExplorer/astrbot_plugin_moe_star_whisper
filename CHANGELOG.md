@@ -2,6 +2,37 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v1.10.13 (2026-10-10)
+
+使用道具（换签卡）缺少过程提示，且换签没走「先绘后卡」那条流程（版本 v1.10.12 -> v1.10.13）。
+
+- **现象**：用户反馈「使用道具之后缺少提示」。典型是换签卡：`/星语使用 换签卡` 之后要等萌绘出底图
+  20-25s 才回卡，中间一句提示都没有（首签 `/星语` 是会先发「🔮 占卜中，星盘铺开……请稍候」的），
+  用户以为卡住/掉线了。
+- **根因**：首签（`fortune_cmd`）与换签（`use_cmd` 的 `reroll` 分支）是**两份手写的出图流程**，
+  换签那份是后来补的、只抄了「调 `_try_draw_background` → 合卡」，没抄过程提示，也没抄外围那圈判断。
+  具体丢了三样：
+  1. **过程提示**：提示只写在 `fortune_cmd` 里（`if draw_enabled: await self._send_plain(...)`），
+     换签分支完全没有——`draw_enabled` 打开时换签必等出图，却没有那句提示。
+  2. **输出方式**：首签把「出图 + 合卡」整段包在 `if mode != "纯文本"` 里；换签无条件执行，
+     于是「纯文本」模式下换签照样生成底图并回图，与输出方式自相矛盾（也白烧一次 ComfyUI）。
+  3. **`draw_fail_hint`**：萌绘超时/报错时首签会附一句失败提示，换签静默——失败对用户完全不可见。
+- **改动**：
+  - 过程提示抽成 `_announce_drawing(event)`（`draw_enabled` 才发，`_send_plain` 直发不进结果链），
+    首签与换签共用同一份——**以后加新出图入口也只调这一个方法**，不会再各写一份而漏提示。
+  - 换签分支补齐输出方式判断（`纯文本` 不出图不回图，只回新签文本，卡路径置空避免留下旧签的图）、
+    `draw_fail_hint` 跟随发送，并把结果合并成一条 `chain_result`（图 + `图卡+文本` 模式的正文 +
+    失败提示，与首签一致，群里只 @ 一次）。换签保存的仍是新签 `payload` 覆盖旧签（D8 覆盖式）。
+- **不改的**：`/星语补签` 本来就不出 AI 底图（PRD §F22：按昨日种子重算落库），所以那边没有、
+  也不该有「占卜中」提示；它的「补签成功（日期）✨」提示照旧。
+- **守卫**：`tests/test_main_structure.py` 新增五条——`_announce_drawing` 必须存在且被两处调用（`>= 2`）、
+  `use_cmd` 方法体里必须出现 `_announce_drawing` / `mode != "纯文本"` / `draw_fail_hint` / `chain_result`，
+  防止下次再抄漏一份流程。
+- 验证：`uv run --no-project python tests/test_main_structure.py`（除 structure 外另跑
+  `test_fortune` / `test_store` / `test_config_schema` / `test_lexicon` / `test_webui`，
+  `--with pillow` 跑 `test_card`）全过 + `compileall main.py` 通过。
+- 版本 v1.10.12 -> v1.10.13。
+
 ## v1.10.12 (2026-10-10)
 
 绘图联动改用「自己的标识 + `external=True`」，不再借伙伴插件的口令（版本 v1.10.11 -> v1.10.12）。

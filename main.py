@@ -263,6 +263,16 @@ class StarWhisperPlugin(Star):
                 f"[{PLUGIN_NAME}] 过程提示直发失败（忽略）\n{traceback.format_exc()}"
             )
 
+    async def _announce_drawing(self, event: AstrMessageEvent) -> None:
+        """「先绘后卡」的过程提示（v1.10.13）。
+
+        只在**要真去出底图**时提示：萌绘单张实测 20-25s，不给提示用户会以为卡住。
+        与出图同一个开关（`draw_enabled`），关掉绘图就没有这句——纯本地渲染是瞬间的。
+        直发（`_send_plain`），不进结果链，避免被框架自动 @。
+        """
+        if bool(self._cfg("draw_enabled", False)):
+            await self._send_plain(event, "🔮 占卜中，星盘铺开……请稍候")
+
     async def _fetch_avatar_bytes(self, uid: str) -> bytes | None:
         """服务端下载头像 bytes（aiohttp，box 同款接口）；失败返回 None。
 
@@ -936,9 +946,7 @@ class StarWhisperPlugin(Star):
         bg_fail_hint = ""
         if mode != "纯文本":
             # D11 先绘后卡：萌绘底图（可选）→ 合卡 → 发送；失败静默回退幸运色渐变
-            if bool(self._cfg("draw_enabled", False)):
-                # 过程提示直发：不在群里 @ 用户（结果那条才 @，见 _send_plain 说明）
-                await self._send_plain(event, "🔮 占卜中，星盘铺开……请稍候")
+            await self._announce_drawing(event)
             bg_path, job = await self._try_draw_background(event, result, uid, date, salt)
             card_path = self._try_render_card(result, uid, nickname, avatar_bytes, bg_image=bg_path)
             if job is not None:
@@ -1487,24 +1495,42 @@ class StarWhisperPlugin(Star):
                 uid, date, salt, self._store.get_profile(uid) or {},
                 streak=int(payload.get("streak") or 1),
             )
-            bg_path, job = await self._try_draw_background(event, new_result, uid, date, salt)
-            avatar_bytes = await self._fetch_avatar_bytes(uid)
-            card_path = self._try_render_card(
-                new_result, uid,
-                nickname=existing.get("nickname") or "", avatar_bytes=avatar_bytes,
-                bg_image=bg_path,
-            )
-            if job is not None:
-                job["card_path"] = card_path or ""
-                try:
-                    self._store.record_draw_job(uid, date, **job)
-                except Exception:
-                    logger.error(f"[{PLUGIN_NAME}] draw_jobs 落库失败\n{traceback.format_exc()}")
+            # v1.10.13：换签与首签走**同一条「先绘后卡」流程**，包括那句过程提示。
+            # 以前这里直接调 _try_draw_background，既不提示「占卜中」（用户对着
+            # 萌绘的 20-25s 干等，还以为卡住了），也不看输出方式——「纯文本」模式
+            # 下照样生成底图并回图；萌绘失败时的 draw_fail_hint 同样被丢掉。
+            mode = str(self._cfg("output_mode", "图卡"))
+            card_path = None
+            bg_fail_hint = ""
+            if mode != "纯文本":
+                await self._announce_drawing(event)
+                bg_path, job = await self._try_draw_background(event, new_result, uid, date, salt)
+                avatar_bytes = await self._fetch_avatar_bytes(uid)
+                card_path = self._try_render_card(
+                    new_result, uid,
+                    nickname=existing.get("nickname") or "", avatar_bytes=avatar_bytes,
+                    bg_image=bg_path,
+                )
+                if job is not None:
+                    job["card_path"] = card_path or ""
+                    try:
+                        self._store.record_draw_job(uid, date, **job)
+                    except Exception:
+                        logger.error(f"[{PLUGIN_NAME}] draw_jobs 落库失败\n{traceback.format_exc()}")
+                    if job.get("status") in ("timeout", "error", "skipped_no_anima"):
+                        bg_fail_hint = str(self._cfg("draw_fail_hint", "") or "")
             self._store.update_fortune_payload(uid, date, new_result, card_path or "")
+            # 图 + 文合并成一条链（与首签一致）：群里只 @ 一次
+            comps: list = []
             if card_path:
-                yield event.image_result(card_path)
+                comps.append(Image.fromFileSystem(card_path))
+                if mode == "图卡+文本":
+                    comps.append(Plain("\n" + self._format_result(new_result)))
             else:
-                yield event.plain_result(self._format_result(new_result))
+                comps.append(Plain(self._format_result(new_result)))
+            if bg_fail_hint:
+                comps.append(Plain("\n" + bg_fail_hint))
+            yield event.chain_result(comps)
             return
 
         if item_id in ("amulet", "candle"):
