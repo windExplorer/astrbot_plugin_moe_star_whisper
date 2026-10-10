@@ -942,9 +942,14 @@ class StarWhisperPlugin(Star):
             )
             return None
 
-    def _push_message(self, public: dict, board_line: str, file_key: str):
-        """(文字, 卡路径|None)：卡在就发卡（文字只留标题 + 引导），卡没了把内容补进文字。"""
-        card = self._push_card(public, board_line, file_key)
+    def _push_message(self, public: dict, board_line: str, file_key: str,
+                      with_card: bool = True):
+        """(文字, 卡路径|None)：卡在就发卡（文字只留标题 + 引导），卡没了把内容补进文字。
+
+        `with_card=False`（v1.10.19，「出签方式 = 仅文字」）连渲染都跳过，直接走文字，
+        省一次绘图；此时文字会自动带上本群数据/宜忌/幸运/农历/节气（内容不丢）。
+        """
+        card = self._push_card(public, board_line, file_key) if with_card else None
         caption = self._push_caption(public)
         if card is None:
             caption += self._push_text_fallback(public, board_line)
@@ -954,15 +959,21 @@ class StarWhisperPlugin(Star):
         if self._store is None:
             return
         public = self._push_public()
+        # v1.10.19：推送也跟随「出签方式」——「仅文字」不发卡、「萌系图卡」只发卡（不带那段标题文字）
+        mode = str(self._cfg("output_mode", "图卡"))
+        want_card = mode != "纯文本"
         disabled = self._disabled_groups()
         targets = [g for g in self._store.list_active_group_ids(7) if g[0] not in disabled]
         for gid, platform in targets:
             if not platform:
                 continue  # 没有平台信息无法定位会话
             board_line = self._push_board_line(gid, public["prev"])  # 本群数据：各群不同
-            caption, card = self._push_message(public, board_line, gid)
+            caption, card = self._push_message(public, board_line, gid, with_card=want_card)
             session = f"{platform}:GroupMessage:{gid}"
-            chain = MessageChain(chain=[Plain(caption)])
+            chain = MessageChain(chain=[])
+            if mode != "图卡" or card is None:
+                # 卡发不出去（或用户选了要文字）时才带那段标题文字，否则「只发图」更干净
+                chain.chain.append(Plain(caption))
             if card:
                 chain.chain.append(Image.fromFileSystem(card))
             try:
@@ -1488,6 +1499,10 @@ class StarWhisperPlugin(Star):
         与 `_do_daily_push` 共用 `_push_public` / `_push_message`，所以指令发出来的
         东西与推送**逐字一致**，唯一的差别是「昨日摘要」那一行：群里按本群算，
         私聊没有群可算，整行省略。停用群（`/星语开关 off`）与推送口径一致地拒发。
+
+        输出跟随配置「出签方式」（v1.10.19）：默认「萌系图卡」**只发卡**（不附带那段
+        标题文字，「指令引导」本来就画在卡上）；「图卡加文字」图 + 文；「仅文字」不发卡，
+        本群数据/宜忌/幸运/农历/节气全部回落到文字里。
         """
         if self._store is None:
             yield event.plain_result("星语者还没整理好星盘，稍后再试～")
@@ -1498,10 +1513,18 @@ class StarWhisperPlugin(Star):
             return
         public = self._push_public()
         board_line = self._push_board_line(gid, public["prev"]) if gid else ""
-        caption, card = self._push_message(public, board_line, gid or "private")
-        comps: list = [Plain(caption)]
+        # v1.10.19：跟随「出签方式」——默认「萌系图卡」只发卡（不再把标题那段文字一起发），
+        # 「图卡加文字」才图 + 文，「仅文字」连卡都不渲染、全走文字。
+        mode = str(self._cfg("output_mode", "图卡"))
+        caption, card = self._push_message(
+            public, board_line, gid or "private", with_card=mode != "纯文本")
+        comps: list = []
         if card:
             comps.append(Image.fromFileSystem(card))
+            if mode == "图卡+文本":
+                comps.append(Plain("\n" + caption))
+        else:
+            comps.append(Plain(caption))
         # 图 + 文合并成一条链：群里只 @ 一次（与抽签一致）
         yield event.chain_result(comps)
 

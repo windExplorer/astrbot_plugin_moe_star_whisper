@@ -304,10 +304,16 @@ def main() -> int:
     m_push = _re.search(r"async def _do_daily_push\(self.*?(?=\n    (?:async )?def )", src, _re.S)
     check(bool(m_push), "找不到 _do_daily_push 方法体")
     push_body = m_push.group(0) if m_push else ""
-    check("self._push_message(public, board_line, gid)" in push_body,
+    check('self._push_message(public, board_line, gid, with_card=want_card)' in push_body,
           "推送必须按群取内容（文件名键 = 群号，否则多群同名互相覆盖）")
     check("self._push_public()" in push_body and "_push_text_fallback" not in push_body,
           "推送要用公共内容 + 共用组装方法（回退逻辑不该在推送里再写一遍）")
+    # v1.10.19：推送跟随「出签方式」——仅文字时不发卡，图卡模式只发卡（不带标题文字）
+    check('mode = str(self._cfg("output_mode", "图卡"))' in push_body
+          and 'want_card = mode != "纯文本"' in push_body,
+          "推送必须读 output_mode 决定要不要卡")
+    check('if mode != "图卡" or card is None:' in push_body,
+          "图卡模式下推送只发卡；卡渲染失败才回落到那段文字（消息不能是空的）")
 
     # v1.10.16：/星语星象 —— 把每日推送搬到指令上（随时看 / 不用等 08:00 / 不用真开推送）
     check("push_cmd" in methods, "缺少 /星语星象 指令（push_cmd）")
@@ -317,12 +323,15 @@ def main() -> int:
     cmd_body = m_cmd.group(0) if m_cmd else ""
     for token, why in (
         ("self._push_public()", "星象指令必须与推送共用公共内容"),
-        ('self._push_message(public, board_line, gid or "private")',
-         "星象指令必须共用同一套组装（私聊用 private 当文件名键）"),
+        ('self._push_message(', "星象指令必须共用同一套组装（私聊用 private 当文件名键）"),
+        ('gid or "private"', "私聊用 private 当文件名键"),
+        ('with_card=mode != "纯文本"', "仅文字模式不渲染卡（省一次绘图）"),
         ("self._push_board_line(gid, public[\"prev\"]) if gid else \"\"",
          "群里才带昨日摘要（私聊没有群可算）"),
         ("_disabled_groups()", "停用群要拒发（与推送口径一致）"),
+        ('mode = str(self._cfg("output_mode", "图卡"))', "星象指令必须读 output_mode"),
         ("yield event.chain_result(comps)", "图 + 文合并成一条链（群里只 @ 一次）"),
+        ('if mode == "图卡+文本":', "「图卡加文字」才追加正文；默认图卡模式只发图"),
     ):
         check(token in cmd_body, f"push_cmd 缺少：{why}")
 
