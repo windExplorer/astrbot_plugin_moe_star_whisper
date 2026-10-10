@@ -354,8 +354,9 @@ def local_draw_prompt(result: dict, lang: str, fmt: str) -> str:
 def parse_draw_response(raw) -> list:
     """解析萌绘 comfyui_draw 的返回文本 → 本地图片路径列表。
 
-    source 命中约定值时萌绘返回 JSON 文本：{"image_paths": [...], ...}
-    （兼容旧的单数 image_path 字段）；容错：截取花括号段再解析，失败返回空表。
+    external=True（或萌绘历史 source 约定值）时萌绘返回 JSON 文本：
+    {"image_paths": [...], "status": "ok"}（兼容旧的单数 image_path 字段，
+    也兼容截图里只取 image_path 的写法）；容错：截取花括号段再解析，失败返回空表。
     """
     text = str(raw or "")
     data = {}

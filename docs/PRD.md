@@ -317,10 +317,13 @@ build_zip.ps1      # 打包（显式 $includeList + 顶层 .py 守卫，沿 box/
 manager = self.context.get_llm_tool_manager()      # astrbot/core/star/context.py:381（已核实）
 tool = manager.get_func("comfyui_draw")            # astrbot/core/agent/tool.py:194（已核实）
 handler = getattr(tool, "handler", None) or tool
-result = await handler(event, prompt=<LLM 生成的提示词>, source="我会永远陪着你", workflow=<配置>, seed=<运势子种子>)
+result = await handler(event, prompt=<LLM 生成的提示词>, source="萌萌星语", external=True,
+                       workflow=<配置>, seed=<运势子种子>)
 ```
 
-1. **source 必传约定值**：萌绘以 `source == SOURCE_COMPANION_PLUGIN`（main.py:620，值为 `"我会永远陪着你"`）**精确比对**判定「调用方自管发图」——命中才返回 JSON `{"image_paths": [...], "note": ...}`（main.py:14811 附近），由我方取路径落库并发图；不命中时 萌绘自己把图发进聊天、我方拿不到路径。对接文档第 3/5 节明确任何宿主插件均可传此值取路径。
+1. **取图靠 `external=True`（萌绘 v7.7.58+）**：`external=True` 即声明「路径给我、图我自己发」——萌绘返回 JSON `{"image_paths": [...], "note": ...}`，由我方取路径落库并发图（同时默认静默、跳过单轮闸门 / 白名单 / 已读回执）；不传则萌绘自己把图发进聊天、我方拿不到路径。`source` 只填本插件标识（`"萌萌星语"`，写进萌绘日志 `来源=` 与图库审计），**不再兼任行为开关**。
+   - 历史（≤ v1.10.11）：借的是伙伴插件的口令 `source="我会永远陪着你"`（萌绘侧 `SOURCE_COMPANION_PLUGIN` 兼容层，精确匹配才返回路径）。该写法在萌绘侧**继续有效**，但本插件已不再依赖——借别人的名字会让萌绘日志里的来源张冠李戴。
+   - 为什么不建议用「任何非空 `source` 都返回路径」：`source` 是身份字段、谁都会传，一旦兼任行为开关，一次误传就是「图生成了却没人发给用户」的静默失败；行为开关必须是显式参数（萌绘侧的取舍理由同理，见其对接文档 §3.1）。
 2. **工作流可配**：`draw_workflow` 填 萌绘里的真实工作流名（管理员先用 萌绘的 `/绘图工作流` 指令查名，再填入本插件配置）；留空走 萌绘默认工作流。禁止传 `text2img` 之类语义值（对接文档「禁止事项」）。
 3. **提示词约束（D6）**：按萌绘 `prompt-language-guide.md`——动漫工作流（`is_anima=true`）**必须英文 Danbooru 标签**、真人工作流**首选中文自然语言**。本插件配置 `draw_prompt_lang`（en/zh）+ `draw_prompt_format`（tags/natural），默认 `en + tags`（萌系运势图走动漫工作流）；约束写进 LLM 生成模板，并要求「只输出提示词本身、单行」。
 4. **LLM 生成提示词**：`draw_llm_prompt` 模板可配（内置默认模板注入吉凶/六维/幸运色/宜忌/签文等当日事实 + 语言与格式约束）；用 `context.get_using_provider().text_chat()` 调用，失败/超时/空输出 → 跳过绘图，绝不阻塞运势卡。

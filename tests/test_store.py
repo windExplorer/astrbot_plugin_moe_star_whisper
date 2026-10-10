@@ -106,7 +106,15 @@ def main() -> int:
     w1 = next(r for r in allw if r["user_id"] == "w1")
     check(w1["last_grade"] == "凶", f"list_range_avg_all 也要带 last_grade，实际 {w1}")
 
-    # 活跃群列表（M5 推送目标集）：近 7 天有抽签的群
+    # 活跃群列表（M5 推送目标集）：近 7 天有抽签的群。
+    # ⚠️ 该窗口是**相对当下**计算的（store.list_active_group_ids 用 datetime.now()），
+    # 所以这里必须用当天日期播种——此前沿用固定的 2026-09-27，测试在写下那天之后
+    # 必然失败（日期腐坏，与代码无关；2026-10-10 实测复现）。
+    from datetime import date as _date
+
+    _today = _date.today().isoformat()
+    st.save_fortune("w9", _today, fake(50), nickname="今甲", group_id="wg1")
+    st.save_fortune("w8", _today, fake(51), nickname="今乙", group_id="wg2")
     ids = [g for g, _ in st.list_active_group_ids(7)]
     check("wg1" in ids and "wg2" in ids, f"活跃群应含 wg1/wg2，实际 {ids}")
 

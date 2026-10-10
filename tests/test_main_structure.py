@@ -190,6 +190,15 @@ def main() -> int:
     check("sdraw.rectangle" not in card_src and "_sparkle(sdraw" not in card_src,
           "双联左联不得再画塔罗框/星饰（会与 AI 自带边框叠成双边）")
 
+    # v1.10.12：跨界绘图契约改为「自己的标识 + external=True」（萌绘 v7.7.58+）。
+    # 不许再借伙伴插件的口令——那是萌绘侧的兼容层，新插件不该继续依赖它。
+    check('source="萌萌星语"' in src,
+          "调用 comfyui_draw 必须用本插件自己的标识作 source（便于萌绘日志/审计区分来源）")
+    check("external=True" in src,
+          "调用 comfyui_draw 必须显式 external=True，否则拿不到图片路径")
+    check('source="我会永远陪着你"' not in src,
+          "不得再把伴侣插件的口令当契约传出去（兼容层只在萌绘侧保留）")
+
     # v1.10.7：负向提示词必须有开关（关闭后完全不传，含内置兜底）
     check('self._cfg("draw_negative_enabled", True)' in src,
           "负向提示词必须受 draw_negative_enabled 开关控制")

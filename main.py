@@ -525,11 +525,17 @@ class StarWhisperPlugin(Star):
                                    uid: str, date: str, salt: str):
         """萌绘 comfyui_draw 出底图。返回 (bg_path|None, job|None)。
 
-        契约（萌绘 docs/cross-plugin-draw-guide.md，源码已核实）：
+        契约（萌绘 docs/cross-plugin-draw-guide.md §3，萌绘 v7.7.58+）：
         get_llm_tool_manager().get_func("comfyui_draw") → handler(event, ...)；
-        source 必传萌绘约定值「我会永远陪着你」才返回 JSON 路径由我方发图；
+        external=True 请萌绘「返回图片路径、由我方发图」（同时默认静默）；
+        source 只填本插件标识（萌绘写日志 / 审计用，不再兼任行为开关）；
         seed/width/height 透传（D11：底图一人一天一张、尺寸与卡布一致）；
         超时/异常静默降级到幸运色默认底图，绝不阻塞出卡。
+
+        历史：v1.10.11 及以前借的是伙伴插件的口令（萌绘侧常量
+        SOURCE_COMPANION_PLUGIN，只在精确匹配时才返回路径）。本插件不属于那个
+        插件，借名字会让萌绘日志里的「来源」张冠李戴；萌绘 v7.7.58 起新增
+        external 显式开关，这里改为「自己的标识 + external=True」。
         """
         if not bool(self._cfg("draw_enabled", False)):
             return None, None
@@ -564,7 +570,9 @@ class StarWhisperPlugin(Star):
         ) % (2 ** 31)
         kwargs = dict(
             prompt=image_prompt,
-            source="我会永远陪着你",
+            # 自己的标识（萌绘日志/审计用）+ 显式声明「路径给我、图我发」
+            source="萌萌星语",
+            external=True,
             seed=seed_int,
             width=int(self._cfg("card_width", 700)),
             height=int(self._cfg("card_height", 1200)),
