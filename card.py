@@ -876,16 +876,26 @@ def render_tarot_card(
 
 
 def push_date_text(date_str: str) -> str:
-    """推送卡上的大字日期（带年份）：`2026-10-08` → 「2026 年 10 月 8 日」。
+    """推送卡上的大字日期（**不带年份**）：`2026-10-08` → 「10 月 8 日」。
 
-    v1.10.20：默认「萌系图卡」只发卡、不再附带那段标题文字，卡上不写年份就完全看不出
-    是哪一年（用户反馈「缺少年份」）。解析失败时原样返回——绝不为了排版把日期弄丢。
+    年份不进大字行：v1.10.20 曾写成「2026 年 10 月 8 日」，为了不挤掉右侧「星期六」
+    字号被自适应压小，整行观感变差（用户明确否掉「效果不太好」）。年份改由
+    `push_year_text` 放到右上角当小字（v1.10.21）。解析失败时原样返回，不丢日期。
     """
     try:
         d = datetime.strptime(str(date_str), "%Y-%m-%d")
     except (TypeError, ValueError):
         return str(date_str)
-    return f"{d.year} 年 {d.month} 月 {d.day} 日"
+    return f"{d.month} 月 {d.day} 日"
+
+
+def push_year_text(date_str: str) -> str:
+    """推送卡右上角的年份小字：`2026-10-08` → 「2026 年」；解析失败返回空串（不画）。"""
+    try:
+        d = datetime.strptime(str(date_str), "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return ""
+    return f"{d.year} 年"
 
 
 def render_push_card(
@@ -964,12 +974,18 @@ def render_push_card(
 
     draw.text((left, y), "萌萌星语 · 今日星象",
               font=_font(font_file, int(34 * u)), fill=sub)
-    # 日期带年份（v1.10.20）：默认「萌系图卡」只发卡、不再附带那段标题文字，
-    # 卡上不写年份就完全看不出是哪一年（用户反馈「缺少年份」）。
-    # 加了年份会变长，所以按「给右侧星期留出位置后的剩余宽度」逐档缩字号，
-    # 仍然放不下才截断；字号下限 56u（再小就不是卡片主视觉了）。
+    # 年份放右上角小字（v1.10.21）：默认「萌系图卡」只发卡、不再附带那段标题文字，
+    # 卡上不写年份就看不出是哪一年。但**不塞进大字日期行**——那会把字号挤小、
+    # 观感变差（v1.10.20 试过，用户否掉）；右上角本来就有「星期六」，年份压在它上面
+    # 正好凑成一个右对齐的小角落，字号比星期一档（30u vs 44u）。
     big = push_date_text(date_str)
+    year_text = push_year_text(date_str)
     weekday_font = _font(font_file, int(44 * u))
+    if year_text:
+        draw.text((right, y + int(44 * u)), year_text,
+                  font=_font(font_file, int(30 * u)), fill=sub, anchor="ra")
+    # 大字日期回到 96u 主视觉；万一 date_str 异常（解析失败会原样回显）太长，
+    # 仍按「扣除右上角星期占位后的宽度」逐档缩字号兜底，放不下才截断
     avail_date = max(int(200 * u),
                      right - left - int(draw_len(str(weekday_name), weekday_font) + int(24 * u)))
     date_size = int(96 * u)
