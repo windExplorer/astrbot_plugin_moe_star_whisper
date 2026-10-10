@@ -72,6 +72,13 @@ def main() -> int:
     lo4, hi4 = img4.convert("L").getextrema()
     check(hi4 - lo4 > 30, "暗色卡应有明暗层次")
 
+    # 3.55) v1.10.20：推送卡大字日期必须带年份（「只发卡」模式下没有别的地方能看出年份）
+    check(card.push_date_text("2026-10-08") == "2026 年 10 月 8 日",
+          f"日期文案应带年份，实际 {card.push_date_text('2026-10-08')}")
+    check(card.push_date_text("2026-01-01") == "2026 年 1 月 1 日", "个位数月/日不补零")
+    check(card.push_date_text("坏日期") == "坏日期", "解析失败要原样返回，不能把日期弄丢")
+    check(card.push_date_text(None) == "None", "None 也不能抛错")
+
     # 3.6) M5：推送卡冒烟（v1.10.15 起高度按内容算，620 只是下限）
     p5 = card.render_push_card(
         "2026-09-27", "星期日", {"name": "新月", "text": "许愿的好时机"},

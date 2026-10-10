@@ -875,6 +875,19 @@ def render_tarot_card(
     return str(out)
 
 
+def push_date_text(date_str: str) -> str:
+    """推送卡上的大字日期（带年份）：`2026-10-08` → 「2026 年 10 月 8 日」。
+
+    v1.10.20：默认「萌系图卡」只发卡、不再附带那段标题文字，卡上不写年份就完全看不出
+    是哪一年（用户反馈「缺少年份」）。解析失败时原样返回——绝不为了排版把日期弄丢。
+    """
+    try:
+        d = datetime.strptime(str(date_str), "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return str(date_str)
+    return f"{d.year} 年 {d.month} 月 {d.day} 日"
+
+
 def render_push_card(
     date_str: str,
     weekday_name: str,
@@ -899,7 +912,7 @@ def render_push_card(
 
     v1.10.15 起卡面按需加块，卡片高度跟着内容算（`height` 只当**下限**，不再是固定
     620）：以前只有「日期 + 月相 + 节日」，用户反馈「内容有点少」，于是把当天能算出来
-    的东西都放上卡：
+    的东西都放上卡（大字日期自带年份，见 `push_date_text`）：
 
     - `lunar_line`（v1.10.17）：「农历 九月初一 · 丙午马年」这类农历行（由 `lunar.py` 算，
       超出 1900-2100 时为空串，整行不画）。
@@ -951,15 +964,23 @@ def render_push_card(
 
     draw.text((left, y), "萌萌星语 · 今日星象",
               font=_font(font_file, int(34 * u)), fill=sub)
-    try:
-        d = datetime.strptime(date_str, "%Y-%m-%d")
-        big = f"{d.month} 月 {d.day} 日"
-    except Exception:
-        big = date_str
-    draw.text((left, y + int(56 * u)), big,
-              font=_font(_display_font_file(font_file), int(96 * u)), fill=ink)
+    # 日期带年份（v1.10.20）：默认「萌系图卡」只发卡、不再附带那段标题文字，
+    # 卡上不写年份就完全看不出是哪一年（用户反馈「缺少年份」）。
+    # 加了年份会变长，所以按「给右侧星期留出位置后的剩余宽度」逐档缩字号，
+    # 仍然放不下才截断；字号下限 56u（再小就不是卡片主视觉了）。
+    big = push_date_text(date_str)
+    weekday_font = _font(font_file, int(44 * u))
+    avail_date = max(int(200 * u),
+                     right - left - int(draw_len(str(weekday_name), weekday_font) + int(24 * u)))
+    date_size = int(96 * u)
+    date_font = _font(_display_font_file(font_file), date_size)
+    while date_size > int(56 * u) and draw_len(big, date_font) > avail_date:
+        date_size -= int(4 * u)
+        date_font = _font(_display_font_file(font_file), date_size)
+    draw.text((left, y + int(56 * u)), _fit_text(big, date_font, avail_date),
+              font=date_font, fill=ink)
     draw.text((right, y + int(96 * u)), weekday_name,
-              font=_font(font_file, int(44 * u)), fill=sub, anchor="ra")
+              font=weekday_font, fill=sub, anchor="ra")
     y += int(200 * u)
     draw.line([(left, y), (right, y)], fill=(238, 236, 242, 255), width=max(1, int(2 * u)))
     y += int(40 * u)
