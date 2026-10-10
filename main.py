@@ -275,6 +275,24 @@ class StarWhisperPlugin(Star):
         if bool(self._cfg("draw_enabled", False)):
             await self._send_plain(event, "🔮 占卜中，星盘铺开……请稍候")
 
+    @staticmethod
+    async def _send_chain(event: AstrMessageEvent, comps: list) -> None:
+        """直发一条结果链，**绕开结果链装饰**——不会被自动 @。
+
+        与 `_send_plain` 同一道理（AstrBot 4.28.1 `core/pipeline/result_decorate/stage.py`）：
+        `reply_with_mention` 打开时，框架会给「只含 Plain/Image 的结果链」在最前面插一个
+        `At(发送者)`——判断是 `can_decorate = all(isinstance(item, (Plain, Image)))`，
+        所以纯图片回复也会被 @。而 `event.send()` 走平台直发、不写回 `event._result`，
+        装饰阶段（和 RespondStage）都拿不到链，因此完全不 @。
+        `/星语星象` 发的是「群公告」性质的内容，@ 发送者没有意义，所以走这条路（v1.10.22）。
+        """
+        try:
+            await event.send(MessageChain(list(comps)))
+        except Exception:
+            logger.warning(
+                f"[{PLUGIN_NAME}] 结果直发失败（忽略）\n{traceback.format_exc()}"
+            )
+
     async def _fetch_avatar_bytes(self, uid: str) -> bytes | None:
         """服务端下载头像 bytes（aiohttp，box 同款接口）；失败返回 None。
 
@@ -812,22 +830,31 @@ class StarWhisperPlugin(Star):
         return (f"昨日本群 {len(rows)} 人抽签 · 最吉：{nick}"
                 f"（{str(top.get('grade') or '？')} {int(top.get('score') or 0)}）")
 
-    def _push_public(self) -> dict:
-        """每日推送与 `/星语星象` 共用的公共内容（全群同一天同一份）。
+    def _push_public(self, gid: str = "") -> dict:
+        """每日推送与 `/星语星象` 共用的内容（v1.10.16 抽出，v1.10.22 起按群分两份种子）。
 
-        v1.10.16 从 `_do_daily_push` 里抽出来：指令要发的必须与推送**逐字一致**，
-        抽成一份才不会两边抄跑偏（各群只有「昨日摘要」那一行不同，由调用方补）。
+        两组内容的性质不一样，所以**用两个种子**：
+
+        - **客观历法**（日期/星期/月相/农历/节气/节日）——同一天人人都一样，不看群：
+          由 `seed_day` 派生。月相尤其不能按群变：两个群看到不同「月相」就露馅了
+          （天上就一个月亮）；
+        - **本群的运势黄历**（今日宜忌、幸运色/数字/方位，以及卡片主色）——本来就是这个
+          「群」当天的一份，由 `seed_gid`（`daily-push:<群号>`）派生：**每个群各不相同**，
+          卡面配色也跟着不同，一眼能看出不是同一张图糊过来的。
+
+        不传 `gid`（私聊预览、或调用方没有群）时两组都用 `seed_day`，与旧版逐字一致。
+        词库池异常（自定义词库缺 yi/ji/directions）时降级成只有月相的旧卡片。
         """
         tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
         today = fortune.local_today(tz_name)
         salt = str(self._cfg("salt", "moe-star-whisper"))
         lex = lexicon.load_lexicon()
-        seed = fortune.derive_seed(today, "daily-push", salt)
+        seed_day = fortune.derive_seed(today, "daily-push", salt)
+        seed = (fortune.derive_seed(today, f"daily-push:{gid}", salt)
+                if str(gid or "").strip() else seed_day)
         fest = (lex.get("festivals") or {}).get(today[5:])
-        phase = fortune.pick_text(seed, "push_phase", lex["phases"])
+        phase = fortune.pick_text(seed_day, "push_phase", lex["phases"])
         accent = fortune.pick_text(seed, "push_color", lex["lucky_colors"])
-        # v1.10.15：黄历块（宜忌 + 幸运）——全群同一份，只由日期种子抽，当天不变；
-        # 词库池异常（自定义词库缺 yi/ji/directions）时降级成只有月相的旧卡片
         yiji = lucky = None
         try:
             yiji = {
@@ -851,17 +878,18 @@ class StarWhisperPlugin(Star):
             _lunar_line = f"{almanac['lunar_text']} · {almanac.get('ganzhi_text', '')}".strip(" ·")
         fest_lines = []
         if fest:
-            fest_lines.append(fortune.pick_text(seed, "push_fest", fest))
+            # 节日/节气是客观历法 → 走 seed_day：同一天各群文案一致
+            fest_lines.append(fortune.pick_text(seed_day, "push_fest", fest))
         lunar_fest = (lex.get("lunar_festivals") or {}).get(almanac.get("lunar_key") or "")
         if lunar_fest:
-            fest_lines.append(fortune.pick_text(seed, "push_lunar_fest", lunar_fest))
+            fest_lines.append(fortune.pick_text(seed_day, "push_lunar_fest", lunar_fest))
         # 公历与农历节日可能撞同一天（国庆撞中秋），两个都发，用全角空格隔开
         _fest_line = "　".join(t for t in fest_lines if t)
         jieqi = str(almanac.get("jieqi") or "")
         _jieqi_line = ""
         if jieqi:
             copy = (lex.get("jieqi") or {}).get(jieqi) or []
-            note = fortune.pick_text(seed, f"push_jieqi:{jieqi}", copy) if copy else ""
+            note = fortune.pick_text(seed_day, f"push_jieqi:{jieqi}", copy) if copy else ""
             _jieqi_line = f"{jieqi}——{note}" if note else jieqi
         return {
             "today": today,
@@ -958,7 +986,6 @@ class StarWhisperPlugin(Star):
     async def _do_daily_push(self):
         if self._store is None:
             return
-        public = self._push_public()
         # v1.10.19：推送也跟随「出签方式」——「仅文字」不发卡、「萌系图卡」只发卡（不带那段标题文字）
         mode = str(self._cfg("output_mode", "图卡"))
         want_card = mode != "纯文本"
@@ -967,6 +994,8 @@ class StarWhisperPlugin(Star):
         for gid, platform in targets:
             if not platform:
                 continue  # 没有平台信息无法定位会话
+            # v1.10.22：内容按群生成（宜忌/幸运/主色每群不同），所以放在循环里
+            public = self._push_public(gid)
             board_line = self._push_board_line(gid, public["prev"])  # 本群数据：各群不同
             caption, card = self._push_message(public, board_line, gid, with_card=want_card)
             session = f"{platform}:GroupMessage:{gid}"
@@ -1497,12 +1526,17 @@ class StarWhisperPlugin(Star):
         也不用等到点，就能看到推送长什么样（换词库/改盐值后尤其有用）。
 
         与 `_do_daily_push` 共用 `_push_public` / `_push_message`，所以指令发出来的
-        东西与推送**逐字一致**，唯一的差别是「昨日摘要」那一行：群里按本群算，
-        私聊没有群可算，整行省略。停用群（`/星语开关 off`）与推送口径一致地拒发。
+        东西与推送那一群**逐字一致**（`_push_public(gid)` 按群派生，见其说明：历法部分
+        各群一致，宜忌/幸运/主色是「本群」那一份）。停用群（`/星语开关 off`）与推送
+        口径一致地拒发。
 
         输出跟随配置「出签方式」（v1.10.19）：默认「萌系图卡」**只发卡**（不附带那段
         标题文字，「指令引导」本来就画在卡上）；「图卡加文字」图 + 文；「仅文字」不发卡，
         本群数据/宜忌/幸运/农历/节气全部回落到文字里。
+
+        **不走 yield、用 `_send_chain` 直发**（v1.10.22）：这是群公告性质的内容，@ 发送者
+        没有意义；而框架在 `reply_with_mention` 打开时会自动给「只含 Plain/Image 的结果链」
+        加一个 `At(发送者)`（纯图片也算），直发才能绕开。
         """
         if self._store is None:
             yield event.plain_result("星语者还没整理好星盘，稍后再试～")
@@ -1511,7 +1545,7 @@ class StarWhisperPlugin(Star):
         if gid and gid in self._disabled_groups():
             yield event.plain_result("本群已停用星语签，管理员可用 /星语开关 on 开启～")
             return
-        public = self._push_public()
+        public = self._push_public(gid)
         board_line = self._push_board_line(gid, public["prev"]) if gid else ""
         # v1.10.19：跟随「出签方式」——默认「萌系图卡」只发卡（不再把标题那段文字一起发），
         # 「图卡加文字」才图 + 文，「仅文字」连卡都不渲染、全走文字。
@@ -1525,8 +1559,8 @@ class StarWhisperPlugin(Star):
                 comps.append(Plain("\n" + caption))
         else:
             comps.append(Plain(caption))
-        # 图 + 文合并成一条链：群里只 @ 一次（与抽签一致）
-        yield event.chain_result(comps)
+        # 直发（不进结果链）→ 群里不会 @ 发送者；也避免了两条消息分两次 @ 的老问题
+        await self._send_chain(event, comps)
 
     # ---------- 道具经济指令（M7/D8） ----------
 
@@ -1854,8 +1888,8 @@ class StarWhisperPlugin(Star):
         groups = [
             ("占卜", [
                 ("/星语", "抽当日专属星语签（别名 /运势 /今日运势 /占卜）"),
-                ("/星语星象", "今日星象卡：农历/节气/节日 · 月相 · 宜忌 · 今日幸运 · 本群昨日摘要"
-                              "（与每日推送同一份）"),
+                ("/星语星象", "今日星象卡：农历/节气/节日 · 月相 · 本群宜忌/幸运/昨日摘要"
+                              "（与每日推送同一份，不发 @）"),
                 ("/星语日历 [月份]", "当月运势日历：每日吉凶与分数"),
                 ("/星语帮助", "查看本帮助图"),
             ]),

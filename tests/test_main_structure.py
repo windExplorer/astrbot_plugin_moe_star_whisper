@@ -78,7 +78,7 @@ def main() -> int:
         "_roll_daily", "_economy_on", "_price_of",
         "_try_render_card", "_try_utility_card", "_accent_hex", "_try_llm_sign",
         "_try_draw_background", "_try_build_image_prompt",
-        "_group_name_of", "_send_plain", "_announce_drawing", "_group_member_ids",
+        "_group_name_of", "_send_plain", "_send_chain", "_announce_drawing", "_group_member_ids",
         "_push_loop", "_do_daily_push", "_next_push_delay",
         "initialize", "terminate",
     }
@@ -276,6 +276,21 @@ def main() -> int:
         ('"weekday_name"', "公共内容要带星期（指令与推送共用）"),
     ):
         check(token in pub_body, f"_push_public 缺少：{why}")
+    # v1.10.22：两份种子——客观历法（月相/农历/节气/节日）各群一致，
+    # 本群宜忌/幸运/主色按群派生（否则「每个群的卡都一样」）
+    check('def _push_public(self, gid: str = "") -> dict:' in src,
+          "_push_public 必须接受群号（私聊/预览传空）")
+    check('seed_day = fortune.derive_seed(today, "daily-push", salt)' in pub_body,
+          "客观历法要用日期种子 seed_day")
+    check('fortune.derive_seed(today, f"daily-push:{gid}", salt)' in pub_body,
+          "本群宜忌/幸运要用「日期 + 群号」种子 seed_gid")
+    check('fortune.pick_text(seed_day, "push_phase"' in pub_body,
+          "月相必须走 seed_day（天上只有一个月亮，不同群不该不一样）")
+    check('fortune.pick_text(seed_day, "push_fest"' in pub_body
+          and 'fortune.pick_text(seed_day, f"push_jieqi:' in pub_body,
+          "节日/节气文案也必须走 seed_day（同一天各群一致）")
+    check('accent = fortune.pick_text(seed, "push_color"' in pub_body,
+          "卡片主色要跟本群种子走（每群配色不同，一眼看出不是同一张图）")
 
     # v1.10.17：历法块（农历 / 节气 / 节日）——数据来自自带 lunar.py，节日走词库两条路
     check("from . import fortune, lexicon, lunar, store" in src,
@@ -306,8 +321,9 @@ def main() -> int:
     push_body = m_push.group(0) if m_push else ""
     check('self._push_message(public, board_line, gid, with_card=want_card)' in push_body,
           "推送必须按群取内容（文件名键 = 群号，否则多群同名互相覆盖）")
-    check("self._push_public()" in push_body and "_push_text_fallback" not in push_body,
-          "推送要用公共内容 + 共用组装方法（回退逻辑不该在推送里再写一遍）")
+    check("public = self._push_public(gid)" in push_body
+          and "_push_text_fallback" not in push_body,
+          "推送要在群循环里按群取内容 + 共用组装方法（回退逻辑不该在推送里再写一遍）")
     # v1.10.19：推送跟随「出签方式」——仅文字时不发卡，图卡模式只发卡（不带标题文字）
     check('mode = str(self._cfg("output_mode", "图卡"))' in push_body
           and 'want_card = mode != "纯文本"' in push_body,
@@ -322,7 +338,7 @@ def main() -> int:
     check(bool(m_cmd), "找不到 push_cmd 方法体")
     cmd_body = m_cmd.group(0) if m_cmd else ""
     for token, why in (
-        ("self._push_public()", "星象指令必须与推送共用公共内容"),
+        ("self._push_public(gid)", "星象指令必须与推送共用按群内容（同一个群两边逐字一致）"),
         ('self._push_message(', "星象指令必须共用同一套组装（私聊用 private 当文件名键）"),
         ('gid or "private"', "私聊用 private 当文件名键"),
         ('with_card=mode != "纯文本"', "仅文字模式不渲染卡（省一次绘图）"),
@@ -330,10 +346,12 @@ def main() -> int:
          "群里才带昨日摘要（私聊没有群可算）"),
         ("_disabled_groups()", "停用群要拒发（与推送口径一致）"),
         ('mode = str(self._cfg("output_mode", "图卡"))', "星象指令必须读 output_mode"),
-        ("yield event.chain_result(comps)", "图 + 文合并成一条链（群里只 @ 一次）"),
         ('if mode == "图卡+文本":', "「图卡加文字」才追加正文；默认图卡模式只发图"),
+        ("await self._send_chain(event, comps)", "必须直发（绕开结果装饰）才能不 @ 发送者"),
     ):
         check(token in cmd_body, f"push_cmd 缺少：{why}")
+    check("yield event.chain_result" not in cmd_body and "yield event.image_result" not in cmd_body,
+          "星象指令不能再 yield 结果链——那会被框架自动 @ 发送者（群公告性质，不需要 @）")
 
     # v1.10.18：帮助图必须与指令表严格一一对应——加了指令忘了写帮助图，
     # 用户永远不知道有这个功能（v1.10.16 加 /星语星象 时就差了半截描述）
