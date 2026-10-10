@@ -452,214 +452,32 @@ def render_card(
         panel_fill = _mix(lucky_rgb, (255, 255, 255), 0.88) + (233,)
         divider_rgb = (238, 236, 242, 255)
 
-    # 内容感知画布（M9 布局修复）：塔罗行/四件套/星尘行叠加后块高常超出配置高度，
-    # 先按各区块标称高度实测，画布不够就自动加高（配置值仍是最小高度），不再截断。
-    margin = int(56 * u)
-    pad = int(48 * u)
-    inner_w = W - 2 * margin - 2 * pad
-    _tarot_row = result.get("tarot")
-    _sign_n = min(5, len(_wrap(str(result.get("sign_text", "")),
-                               _font(font_file, int(40 * u)), inner_w)))
-    _dims = result.get("dims") or {}
-    _dims_rows = (len(_dims) + 1) // 2
-    _est = u * (28 + 162 + 20 + (78 if _tarot_row else 0) + 168 + _sign_n * 58 + 20
-                + _dims_rows * 58 + 18 + 140 + 126 + 180 + (44 if stardust_total is not None else 0)
-                + 132)  # 132 = 脚注区（96 单行基准 + 36 预留第二行）
-    H = max(H_cfg, 2 * margin + int(_est) + int(96 * u) + int(14 * u))
-
-    base = _gradient(W, H, lucky_rgb, dark=dark).convert("RGBA")
-    deco = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    dd = ImageDraw.Draw(deco)
-    _sparkle(dd, W * 0.14, H * 0.08, 16 * u, lucky_rgb, 90)
-    _sparkle(dd, W * 0.86, H * 0.16, 12 * u, lucky_rgb, 80)
-    _sparkle(dd, W * 0.10, H * 0.30, 9 * u, lucky_rgb, 70)
-    img = Image.alpha_composite(base, deco)
-
-    panel = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    ImageDraw.Draw(panel).rounded_rectangle(
-        [margin, margin, W - margin, H - margin],
-        radius=int(44 * u), fill=panel_fill,
+    # 单联（没有 AI 牌面）：与双联右联**共用同一套面板版式**（v1.10.24）。
+    # 以前这里是一份手写布局——左右内边距 104u（双联 22u）、字号大一圈、没有塔罗双线
+    # 金框、高度还会按内容自动加高到 1800+。于是萌绘一把图出失败，同一张签就突然换了
+    # 个样子（用户反馈：边距很宽、高度不对、塔罗边框也没了）。现在单联只保留「深色底 +
+    # 内缩 10u 的面板」，其余全部交给 _draw_fortune_panel：两种形态长得一样、切换不换脸。
+    bw = int(10 * u)
+    H = H_cfg
+    panel_box = (bw, bw, W - bw, H - bw)
+    canvas = Image.new("RGBA", (W, H), (8, 8, 12, 255))
+    overflow = _draw_fortune_panel(
+        canvas, panel_box, result, font_file, u=u,
+        lucky_rgb=lucky_rgb, grade_rgb=grade_rgb, dark=dark, ink=ink, sub=sub,
+        line_rgb=divider_rgb, nickname=nickname, uid=uid, avatar_data=avatar_data,
+        signer=signer, stardust_today=stardust_today, stardust_total=stardust_total,
     )
-    img = Image.alpha_composite(img, panel)
-    draw = ImageDraw.Draw(img)
-
-    left = margin + pad
-    right = W - margin - pad
-    inner_w = right - left
-    y = margin + int(28 * u)
-
-    # ① 身份头：头像 + 昵称 + QQ号 + 日期（头像 bytes 由调用方异步下载）
-    av_d = int(128 * u)
-    av = None
-    if avatar_data:
-        try:
-            av = Image.open(io.BytesIO(avatar_data)).convert("RGBA")
-        except Exception:
-            av = None
-    if av is not None:
-        avatar_img = _circle_img(av, av_d)
-    else:
-        placeholder = Image.new("RGBA", (av_d * 2, av_d * 2),
-                                _mix(lucky_rgb, (255, 255, 255), 0.35) + (255,))
-        pdr = ImageDraw.Draw(placeholder)
-        pdr.text((av_d, av_d), (nickname or "星")[0],
-                 font=_font(font_file, int(88 * u)), fill=(255, 255, 255, 255), anchor="mm")
-        avatar_img = _circle_img(placeholder, av_d)
-    img.paste(avatar_img, (left, y), avatar_img)
-    tx = left + av_d + int(36 * u)
-    # v1.10.23：昵称必须给右侧日期让位。700 宽单面（塔罗版式的默认单面宽）下，
-    # 昵称稍长就会和右边的日期**叠字**（「测试旅人」+「2026-10-11」糊成一团）——
-    # 以前是按固定 x 直接画的，宽度一窄就撞。这里按「剩余可用宽度」截断兜底。
-    date_text = str(result.get("date", ""))
-    date_font = _font(font_file, int(34 * u))
-    qq_font = _font(font_file, int(34 * u))
-    full_name = nickname or "旅行者"
-    # 先试「昵称 + 右侧日期」同排；放不下就把日期挪到第二行右侧（QQ 行右边通常空着），
-    # 让昵称用满整行——比把四个字的昵称砍成「测…」好看（v1.10.23）
-    name_font, name_text = _shrink_to_fit(
-        full_name, font_file, int(50 * u),
-        right - draw_len(date_text, date_font) - int(24 * u) - tx, floor=int(40 * u))
-    date_on_line1 = name_text == full_name
-    if not date_on_line1:
-        name_font, name_text = _shrink_to_fit(
-            full_name, font_file, int(50 * u), right - tx, floor=int(40 * u))
-    draw.text((tx, y + int(8 * u)), name_text, font=name_font, fill=ink)
-    qq_line = f"QQ {uid}" if uid else ""
-    if result.get("constellation"):
-        qq_line += f" · {result['constellation']}"
-    if date_on_line1:
-        draw.text((tx, y + int(74 * u)), qq_line, font=qq_font, fill=sub)
-        draw.text((right, y + int(8 * u)), date_text, font=date_font, fill=sub, anchor="ra")
-    else:
-        # 日期挪到第二行右侧时，QQ 行也要让位（否则「QQ 10086 · 天秤座」会和日期叠字）；
-        # 先缩字号再截断，尽量保住「· 天秤座」这类信息
-        qq_font2, qq_text = _shrink_to_fit(
-            qq_line, font_file, int(34 * u),
-            right - draw_len(date_text, date_font) - int(16 * u) - tx, floor=int(24 * u))
-        draw.text((tx, y + int(74 * u)), qq_text, font=qq_font2, fill=sub)
-        draw.text((right, y + int(74 * u)), date_text,
-                  font=date_font, fill=sub, anchor="ra")
-    y += av_d + int(34 * u)
-
-    # 分隔线
-    draw.line([(left, y), (right, y)], fill=divider_rgb, width=max(1, int(2 * u)))
-    y += int(20 * u)
-
-    # ② 塔罗行（M8：单联也展示今日大阿卡纳）
-    tarot = result.get("tarot")
-    if tarot:
-        draw.text((left, y), f"{tarot.get('name_cn', '？')} · {tarot.get('label', '')}",
-                  font=_font(_display_font_file(font_file), int(36 * u)), fill=(212, 175, 55))
-        draw.text((right, y + int(4 * u)), tarot.get("name_en", ""),
-                  font=_font(font_file, int(22 * u)), fill=sub, anchor="ra")
-        y += int(44 * u)
-        draw.text((left, y), tarot.get("keywords", ""),
-                  font=_font(font_file, int(22 * u)), fill=sub)
-        y += int(34 * u)
-
-    # ③ 吉凶大字（楷体系展示字体；愚人节等显示态用 grade_display）
-    grade = str(result.get("grade_display") or result.get("grade", "？"))
-    draw.text((W // 2, y + int(72 * u)), grade,
-              font=_font(_display_font_file(font_file), int(140 * u)), fill=grade_rgb, anchor="mm")
-    y += int(168 * u)
-
-    # ④ 签文话语区（主体文字，居中，最多 5 行）
-    sign_lines = _wrap(str(result.get("sign_text", "")), _font(font_file, int(40 * u)), inner_w)[:5]
-    line_h = int(58 * u)
-    for line in sign_lines:
-        draw.text((W // 2, y), line, font=_font(font_file, int(40 * u)), fill=ink, anchor="ma")
-        y += line_h
-    y += int(20 * u)
-
-    # ⑤ 六维星数（2 列 × 3 行）
-    dims = result.get("dims") or {}
-    cell_w = inner_w / 2
-    label_font = _font(font_file, int(32 * u))
-    for i, (k, v) in enumerate(dims.items()):
-        cell_x = left + cell_w * (i % 2)
-        cx = cell_x + int(16 * u)
-        cy = y + (i // 2) * int(58 * u)
-        draw.text((cx, cy), k, font=label_font, fill=sub)
-        stars = "★" * v + "☆" * (5 - v)
-        # v1.10.23：星数**右对齐到本列右缘**并按剩余宽度缩字号。
-        # 以前是「左列标签 + 固定 140u 偏移」画星，窄单面（700）下左列星星会压到
-        # 右列标签上（「恋爱运 ★★★★☆健康运」糊成一行）。
-        star_px = cell_w - int(32 * u) - draw_len(k, label_font) - int(12 * u)
-        star_size = int(34 * u)
-        star_font = _font(font_file, star_size)
-        while star_size > int(18 * u) and draw_len(stars, star_font) > star_px:
-            star_size -= 1
-            star_font = _font(font_file, star_size)
-        draw.text((cell_x + cell_w - int(16 * u), cy), stars,
-                  font=star_font, fill=grade_rgb, anchor="ra")
-    rows = (len(dims) + 1) // 2
-    y += int(58 * u) * rows + int(18 * u)
-
-    # ⑥ 幸运指数（大数字，档位色）
-    draw.text((W // 2, y + int(6 * u)), "幸运指数",
-              font=_font(font_file, int(30 * u)), fill=sub, anchor="ma")
-    draw.text((W // 2, y + int(44 * u)), str(result.get("score", "？")),
-              font=_font(_bold_variant(font_file), int(92 * u)), fill=grade_rgb, anchor="ma")
-    y += int(140 * u)
-
-    # ⑦ 宜忌（彩色圆角章 + 内容）
-    for label, items, rgb in (("宜", result.get("yi") or [], (122, 178, 138)),
-                              ("忌", result.get("ji") or [], (216, 128, 128))):
-        chip_w, chip_h = int(76 * u), int(48 * u)
-        draw.rounded_rectangle([left, y, left + chip_w, y + chip_h],
-                               radius=int(14 * u), fill=_mix(rgb, (255, 255, 255), 0.35) + (255,))
-        draw.text((left + chip_w / 2, y + chip_h / 2), label,
-                  font=_font(font_file, int(34 * u)), fill=(255, 255, 255, 255), anchor="mm")
-        draw.text((left + chip_w + int(28 * u), y + chip_h / 2), "、".join(items),
-                  font=_font(font_file, int(36 * u)), fill=ink, anchor="lm")
-        y += chip_h + int(12 * u)
-    y += int(6 * u)
-
-    # ⑧ 幸运物 / 色 / 数字 / 方位（2×2 网格）
-    grid = [
-        ("幸运物", str(result.get("lucky_item", "？"))),
-        ("幸运色", str((result.get("lucky_color") or {}).get("name", "？"))),
-        ("幸运数字", str(result.get("lucky_number", "？"))),
-        ("幸运方位", str(result.get("lucky_dir", "？"))),
-    ]
-    for i, (label, value) in enumerate(grid):
-        cx = left + cell_w * (i % 2) + int(16 * u)
-        cy = y + (i // 2) * int(88 * u)
-        draw.text((cx, cy), label, font=_font(font_file, int(28 * u)), fill=sub)
-        draw.text((cx, cy + int(34 * u)), value,
-                  font=_font(font_file, int(38 * u)), fill=ink)
-    y += int(88 * u) * 2 + int(4 * u)
-
-    # ⑧.5 星尘行（M9：今日获得 + 累计；经济关闭或调用方未传时不画）
-    gold_soft = (176, 142, 48) if not dark else (222, 186, 84)
-    if stardust_total is not None:
-        y = min(y, H - margin - int(134 * u))
-        sd_line = (
-            f"★ 今日星尘 +{stardust_today} ｜ 累计 {stardust_total}"
-            if (stardust_today or 0) > 0 else f"★ 累计星尘 {stardust_total}"
+    if overflow > 0:
+        # 配置高度实在放不下（连最小间隙都挤不下）时才加高画布重铺一次，绝不截断
+        H += overflow
+        canvas = Image.new("RGBA", (W, H), (8, 8, 12, 255))
+        _draw_fortune_panel(
+            canvas, (bw, bw, W - bw, H - bw), result, font_file, u=u,
+            lucky_rgb=lucky_rgb, grade_rgb=grade_rgb, dark=dark, ink=ink, sub=sub,
+            line_rgb=divider_rgb, nickname=nickname, uid=uid, avatar_data=avatar_data,
+            signer=signer, stardust_today=stardust_today, stardust_total=stardust_total,
         )
-        draw.text((W // 2, y), sd_line,
-                  font=_font(font_file, int(30 * u)), fill=gold_soft, anchor="ma")
-        y += int(44 * u)
-
-    # ⑨ 脚注（超宽自动换行，最多两行）+ 落款
-    phase = result.get("phase") or {}
-    foot = f"月相：{phase.get('name', '？')}——{phase.get('text', '')}"
-    streak = result.get("streak") or 0
-    if streak >= 2:
-        foot += f" ｜ 连签 {streak} 天"
-    foot_lines = _wrap(foot, _font(font_file, int(26 * u)), inner_w)[:2]
-    y = min(y, H - margin - int(96 * u) - int(34 * u) * (len(foot_lines) - 1))
-    for i, line in enumerate(foot_lines):
-        draw.text((W // 2, y + i * int(34 * u)), line,
-                  font=_font(font_file, int(26 * u)), fill=sub, anchor="ma")
-    draw.text((right, H - margin - int(30 * u)), f"—— {signer}",
-              font=_font(font_file, int(34 * u)), fill=sub, anchor="rs")
-    mr = int(16 * u)
-    mcx, mcy = left + mr, H - margin - int(36 * u)
-    draw.ellipse([mcx - mr, mcy - mr, mcx + mr, mcy + mr], fill=_mix(lucky_rgb, (255, 255, 255), 0.15) + (255,))
-    draw.ellipse([mcx - mr * 0.1, mcy - mr * 1.15, mcx + mr * 1.5, mcy + mr * 1.15],
-                 fill=(255, 255, 255, 255))
+    img = canvas
 
     cards_root = Path(cards_root)
     cards_root.mkdir(parents=True, exist_ok=True)
@@ -668,86 +486,46 @@ def render_card(
     return str(out)
 
 
-def render_tarot_card(
-    result: dict,
-    bg_image: str,
-    cards_root,
-    font_file: str,
-    width: int,
-    height: int,
-    signer: str = "星语者",
-    nickname: str = "",
-    avatar_data: bytes | None = None,
-    uid: str = "",
-    theme: str = "light",
-    tarot_label_on_image: bool = False,
-    stardust_today: int | None = None,
-    stardust_total: int | None = None,
-) -> str:
-    """塔罗双联版式（M8/M8.5）：左联 AI 牌面 + 右联运势面板。
+def _draw_fortune_panel(canvas, box, result, font_file, *,
+                        u=None,
+                        lucky_rgb, grade_rgb, dark, ink, sub, line_rgb,
+                        nickname: str = "", uid: str = "", avatar_data=None,
+                        signer: str = "星语者",
+                        stardust_today: int | None = None,
+                        stardust_total: int | None = None) -> int:
+    """在 canvas 的 box=(x0, y0, x1, y1) 内画「运势面板」，返回溢出高度（>0 = 装不下）。
 
-    左联只放 AI 生成的牌面图，不叠加任何装饰（v1.10.5：AI 图自带边框，
-    之前叠的渲染层塔罗框会双边、且两层框对不齐，观感就是左边框不完整）；
-    右联为幸运色渐变圆角面板（顶浓底淡），布局按「固定块高 + 弹性间隙」
-    等分剩余空间——不留大片空白也不挤压；吉凶/牌名用楷体系展示字体。
+    v1.10.24：这套版式原本只属于**塔罗双联的右联**，而「没有 AI 牌面」的单联走的是
+    另一份手写布局（内边距 104u 对 22u、字号大一圈、没有塔罗双线金框、高度还会自动
+    加高）。于是萌绘一出图失败，同一张签突然换了个样子——用户反馈「很宽的边距、高度
+    不对、塔罗边框也没了」就是这个。现在两处**共用这一个函数**：同一套边距、字号、
+    金框与「固定块高 + 弹性间隙等分」，形态切换不再换脸。
+
+    返回溢出高度：连最小间隙都放不下时调用方可据此加高画布（单联用）。
     """
-    nickname = sanitize_name(nickname)  # render_card 已清洗，此处兜底直接调用
-    SW, H = int(width), int(height)
-    u = SW / 700.0
-    W = SW * 2
-    lucky = result.get("lucky_color") or {}
-    lucky_rgb = _hex_rgb(lucky.get("hex", "#F6C6D3"))
-    grade_rgb = _hex_rgb(result.get("grade_color", "#E86A8A"))
+    x0, y0, x1, y1 = (int(v) for v in box)
+    pw, ph = x1 - x0, y1 - y0
+    # 缩放基准取「单面宽 / 700」由调用方传入（面板比单面窄 10u×2，若按面板自身宽度
+    # 反推会整体缩水 3%，双联就会与旧版不一致）；独立调用时按面板宽兜底。
+    u = float(u) if u else pw / 700.0
     gold = (212, 175, 55)
-    dark = str(theme or "light").lower() == "dark"
-    if dark:
-        ink, sub = (232, 230, 240), (158, 160, 178)
-        line_rgb = (70, 71, 88, 255)
-    else:
-        ink, sub = (74, 74, 96), (150, 150, 168)
-        line_rgb = (238, 236, 242, 255)
     disp = _display_font_file(font_file)
-
-    canvas = Image.new("RGBA", (W, H), (8, 8, 12, 255))
-
-    # ---- 左联：AI 牌面**原样呈现**（v1.10.5 起不再叠加塔罗框/星饰）----
-    # AI 生成的牌面自带装饰边框，再叠一层渲染框会双边、且两层框难以对齐
-    # （观感就是「左边框不完整/不对称」）；左联只放图。
-    side = _contain(Image.open(bg_image).convert("RGB"), SW, H, (8, 8, 12)).convert("RGBA")
-    canvas.paste(side, (0, 0))
-    sdraw = ImageDraw.Draw(canvas)
     tarot = result.get("tarot") or {}
-    if tarot_label_on_image:
-        band_h = int(96 * u)
-        band = Image.new("RGBA", (SW, band_h), (0, 0, 0, 0))
-        bdraw = ImageDraw.Draw(band)
-        for yy in range(band_h):
-            bdraw.line([(0, yy), (SW, yy)], fill=(10, 10, 18, int(150 * yy / max(1, band_h))))
-        canvas.paste(band, (0, H - band_h), band)
-        sdraw.text((int(24 * u), H - band_h + int(14 * u)),
-                   f"{tarot.get('name_cn', '？')} · {tarot.get('label', '')}",
-                   font=_font(_display_font_file(font_file), int(38 * u)), fill=(255, 255, 255, 255))
-        sdraw.text((int(24 * u), H - band_h + int(58 * u)),
-                   f"{tarot.get('name_en', '')} ｜ {tarot.get('keywords', '')}",
-                   font=_font(font_file, int(22 * u)), fill=(228, 226, 236, 255))
 
-    # ---- 右联：幸运色渐变面板（顶浓底淡） ----
-    bw = int(10 * u)
-    pw, ph = SW - bw * 2, H - bw * 2
     panel = _panel_base(pw, ph, lucky_rgb, dark, 0)
-    canvas.paste(panel, (SW + bw, bw))
+    canvas.paste(panel, (x0, y0))
     draw = ImageDraw.Draw(canvas)
-    # 塔罗式双线金框：画在内嵌面板边缘，金边之外露黑
-    draw.rectangle([SW + bw, bw, W - bw, H - bw], outline=gold + (235,), width=max(2, int(3 * u)))
-    draw.rectangle([SW + bw + int(6 * u), bw + int(6 * u), W - bw - int(6 * u), H - bw - int(6 * u)],
+    # 塔罗式双线金框：画在内嵌面板边缘，金边之外露底色
+    draw.rectangle([x0, y0, x1, y1], outline=gold + (235,), width=max(2, int(3 * u)))
+    draw.rectangle([x0 + int(6 * u), y0 + int(6 * u), x1 - int(6 * u), y1 - int(6 * u)],
                    outline=gold + (150,), width=1)
-    _sparkle(draw, SW + (W - SW) * 0.5, int(18 * u), int(9 * u), gold, 220)
+    _sparkle(draw, (x0 + x1) * 0.5, y0 + int(8 * u), int(9 * u), gold, 220)
 
-    left = SW + int(32 * u)
-    right = W - int(32 * u)
+    left = x0 + int(22 * u)
+    right = x1 - int(22 * u)
     mid = (left + right) // 2
-    top = int(28 * u)
-    content_h = H - top - int(52 * u)
+    top = y0 + int(18 * u)
+    content_h = (y1 - int(42 * u)) - top
 
     blocks = []
 
@@ -919,8 +697,84 @@ def render_tarot_card(
         if i < gaps:
             y += gap
 
-    draw.text((right, H - int(34 * u)), f"—— {signer}",
+    draw.text((right, y1 - int(24 * u)), f"—— {signer}",
               font=_font(font_file, int(24 * u)), fill=sub, anchor="rs")
+
+    # 连最小间隙都放不下时的差额（单联据此加高画布，绝不截断内容）
+    return int(max(0, total + int(6 * u) * gaps - content_h))
+
+
+def render_tarot_card(
+    result: dict,
+    bg_image: str,
+    cards_root,
+    font_file: str,
+    width: int,
+    height: int,
+    signer: str = "星语者",
+    nickname: str = "",
+    avatar_data: bytes | None = None,
+    uid: str = "",
+    theme: str = "light",
+    tarot_label_on_image: bool = False,
+    stardust_today: int | None = None,
+    stardust_total: int | None = None,
+) -> str:
+    """塔罗双联版式（M8/M8.5）：左联 AI 牌面 + 右联运势面板。
+
+    左联只放 AI 生成的牌面图，不叠加任何装饰（v1.10.5：AI 图自带边框，
+    之前叠的渲染层塔罗框会双边、且两层框对不齐，观感就是左边框不完整）；
+    右联为幸运色渐变圆角面板（顶浓底淡），布局按「固定块高 + 弹性间隙」
+    等分剩余空间——不留大片空白也不挤压；吉凶/牌名用楷体系展示字体。
+    """
+    nickname = sanitize_name(nickname)  # render_card 已清洗，此处兜底直接调用
+    SW, H = int(width), int(height)
+    u = SW / 700.0
+    W = SW * 2
+    lucky = result.get("lucky_color") or {}
+    lucky_rgb = _hex_rgb(lucky.get("hex", "#F6C6D3"))
+    grade_rgb = _hex_rgb(result.get("grade_color", "#E86A8A"))
+    gold = (212, 175, 55)
+    dark = str(theme or "light").lower() == "dark"
+    if dark:
+        ink, sub = (232, 230, 240), (158, 160, 178)
+        line_rgb = (70, 71, 88, 255)
+    else:
+        ink, sub = (74, 74, 96), (150, 150, 168)
+        line_rgb = (238, 236, 242, 255)
+    disp = _display_font_file(font_file)
+
+    canvas = Image.new("RGBA", (W, H), (8, 8, 12, 255))
+
+    # ---- 左联：AI 牌面**原样呈现**（v1.10.5 起不再叠加塔罗框/星饰）----
+    # AI 生成的牌面自带装饰边框，再叠一层渲染框会双边、且两层框难以对齐
+    # （观感就是「左边框不完整/不对称」）；左联只放图。
+    side = _contain(Image.open(bg_image).convert("RGB"), SW, H, (8, 8, 12)).convert("RGBA")
+    canvas.paste(side, (0, 0))
+    sdraw = ImageDraw.Draw(canvas)
+    tarot = result.get("tarot") or {}
+    if tarot_label_on_image:
+        band_h = int(96 * u)
+        band = Image.new("RGBA", (SW, band_h), (0, 0, 0, 0))
+        bdraw = ImageDraw.Draw(band)
+        for yy in range(band_h):
+            bdraw.line([(0, yy), (SW, yy)], fill=(10, 10, 18, int(150 * yy / max(1, band_h))))
+        canvas.paste(band, (0, H - band_h), band)
+        sdraw.text((int(24 * u), H - band_h + int(14 * u)),
+                   f"{tarot.get('name_cn', '？')} · {tarot.get('label', '')}",
+                   font=_font(_display_font_file(font_file), int(38 * u)), fill=(255, 255, 255, 255))
+        sdraw.text((int(24 * u), H - band_h + int(58 * u)),
+                   f"{tarot.get('name_en', '')} ｜ {tarot.get('keywords', '')}",
+                   font=_font(font_file, int(22 * u)), fill=(228, 226, 236, 255))
+
+    # ---- 右联：运势面板（与单联**同一套版式**，v1.10.24 起两处共用同一个函数）----
+    bw = int(10 * u)
+    _draw_fortune_panel(
+        canvas, (SW + bw, bw, W - bw, H - bw), result, font_file, u=u,
+        lucky_rgb=lucky_rgb, grade_rgb=grade_rgb, dark=dark, ink=ink, sub=sub,
+        line_rgb=line_rgb, nickname=nickname, uid=uid, avatar_data=avatar_data,
+        signer=signer, stardust_today=stardust_today, stardust_total=stardust_total,
+    )
 
     cards_root = Path(cards_root)
     cards_root.mkdir(parents=True, exist_ok=True)

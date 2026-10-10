@@ -70,6 +70,29 @@ def main() -> int:
     # 窄卡整体仍然可渲染（无异常、宽度按配置）
     check(Image.open(p3).size[0] == 512, "小尺寸渲染不应因表头自适应而失败")
 
+    # 3.2) v1.10.24：单联（没有 AI 牌面）与双联右联必须**同一套版式**——裁出双联右半
+    #      与单联面板逐像素比对。以前两者是两份手写布局（边距 104u 对 22u、字号不同、
+    #      单联没有塔罗金框、高度还会自动加高）→ 萌绘一出图失败就像换了个插件。
+    rt = dict(r, tarot={"name_cn": "皇后", "label": "正位", "name_en": "The Empress",
+                        "keywords": "丰饶·温柔·滋养", "interp": "好好犒劳自己。"},
+              constellation="天秤座")
+    bgp = tmp / "fake_bg.png"
+    Image.new("RGB", (700, 1200), (30, 30, 50)).save(bgp)
+    p_single = card.render_card(dict(rt), Path(tempfile.mkdtemp(prefix="moe_card_")),
+                                width=700, height=1200, nickname="测试旅人", uid="10086")
+    p_double = card.render_card(dict(rt), Path(tempfile.mkdtemp(prefix="moe_card_")),
+                                width=700, height=1200, nickname="测试旅人", uid="10086",
+                                bg_image=str(bgp))
+    s_img = Image.open(p_single).convert("RGB")
+    d_img = Image.open(p_double).convert("RGB")
+    check(s_img.size == (700, 1200),
+          f"单联高度应等于配置高度（1200）不再乱长，实际 {s_img.size}")
+    _bw = 10  # u = 700/700 = 1 → 面板内缩 10u
+    _ps = s_img.crop((_bw, _bw, 700 - _bw, 1200 - _bw))
+    _pd = d_img.crop((700 + _bw, _bw, 1400 - _bw, 1200 - _bw))
+    check(_ps.tobytes() == _pd.tobytes(),
+          "单联与双联右联必须逐像素一致（都得走 _draw_fortune_panel）")
+
     # 3.5) M4：暗色主题 / 生日描边 / 星座角标 / grade_display 渲染冒烟
     r4 = dict(r)
     r4["birthday_today"] = True
