@@ -13,6 +13,12 @@ REQUIRED_KEYS = (
     "festivals", "friday",
 )
 
+# 可选词库（v1.10.17 起）：老词库没有这两个键也必须能加载（缺了就是卡上少一行），
+# 但**有**就必须是 {键: [文案]} 的形状——错形状在加载期就报错，别等到出卡才炸。
+#   lunar_festivals：农历节日，键为农历「月-日」（如 "8-15" 中秋），另有 "chuxi"（除夕）
+#   jieqi：24 节气当天的文案，键为节气名（如 "寒露"）
+OPTIONAL_DICT_KEYS = ("lunar_festivals", "jieqi")
+
 _cache: dict | None = None
 
 
@@ -59,6 +65,15 @@ def validate_lexicon(data: dict) -> None:
             raise ValueError(f"词库 festivals.{k} 必须是非空数组")
     if not isinstance(data.get("friday"), list) or not data["friday"]:
         raise ValueError("词库 friday 必须是非空数组")
+    for key in OPTIONAL_DICT_KEYS:
+        section = data.get(key)
+        if section is None:
+            continue
+        if not isinstance(section, dict):
+            raise ValueError(f"词库 {key} 必须是对象（键 -> 文案数组）")
+        for k, v in section.items():
+            if not isinstance(v, list) or not v:
+                raise ValueError(f"词库 {key}.{k} 必须是非空数组")
 
 
 def load_lexicon(force_reload: bool = False) -> dict:

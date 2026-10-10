@@ -892,13 +892,20 @@ def render_push_card(
     board_line: str = "",
     hint: str = "",
     file_key: str = "",
+    lunar_line: str = "",
+    jieqi_line: str = "",
 ) -> str:
-    """每日推送的「今日星象」卡（F17）：日期 + 月相 + 节日 + 宜忌 + 幸运 + 本群数据 + 引导。
+    """每日推送的「今日星象」卡（F17）：日期 + 月相 + 历法 + 宜忌 + 幸运 + 本群数据 + 引导。
 
     v1.10.15 起卡面按需加块，卡片高度跟着内容算（`height` 只当**下限**，不再是固定
     620）：以前只有「日期 + 月相 + 节日」，用户反馈「内容有点少」，于是把当天能算出来
     的东西都放上卡：
 
+    - `lunar_line`（v1.10.17）：「农历 九月初一 · 丙午马年」这类农历行（由 `lunar.py` 算，
+      超出 1900-2100 时为空串，整行不画）。
+    - `jieqi_line`（v1.10.17）：当天是 24 节气才有的一行，如「寒露——露水转寒，宜热茶配旧书」。
+    - `festival_line`：节日文案（公历 + 农历节日都由调用方合并好后传进来）。
+      这三行统一按「农历 / 节日 / 节气」的小标签 + 内容排版（标签列固定宽度，左对齐）。
     - `yiji`（v1.10.15）：`{"yi": [...], "ji": [...]}`，两行「宜 / 忌」彩色药丸 + 词条；
       全群同一份（只由日期种子抽），当天不变。
     - `lucky`（v1.10.15）：`{"color": {"name","hex"}, "number": int, "dir": str}`，
@@ -915,9 +922,11 @@ def render_push_card(
     u = W / 1024.0
     margin = int(48 * u)
     sep = int(34 * u)                      # 块与块之间的呼吸
-    # 高度按实际块算：头部 200 + 分隔线 40 + 月相 124 + 节日 52? + 各扩展块 + 页脚 190
+    # 高度按实际块算：头部 200 + 分隔线 40 + 月相 124 + 历法行（农历/节日/节气各 52）
+    # + 各扩展块 + 页脚 190
+    calendar_lines = [t for t in (lunar_line, festival_line, jieqi_line) if t]
     need = (int(200 * u) + int(40 * u) + int(124 * u)
-            + (int(52 * u) if festival_line else 0) + int(190 * u))
+            + int(52 * u) * len(calendar_lines) + int(190 * u))
     if yiji:
         need += sep + int(112 * u)
     if lucky:
@@ -960,10 +969,23 @@ def render_push_card(
     draw.text((left, y + int(64 * u)), (phase or {}).get("text", ""),
               font=_font(font_file, int(34 * u)), fill=sub)
     y += int(124 * u)
-    if festival_line:
-        draw.text((left, y), festival_line,
-                  font=_font(font_file, int(34 * u)), fill=sub)
-        y += int(52 * u)
+    # 历法块（v1.10.17）：农历 / 节日 / 节气 三行，统一「小标签 + 内容」排版，
+    # 标签列固定宽度，三行左对齐；内容超宽由 _fit_text 截断，不会压出面板。
+    if calendar_lines:
+        row_h = int(52 * u)
+        label_font = _font(_display_font_file(font_file), int(28 * u))
+        val_font = _font(font_file, int(32 * u))
+        val_x = left + int(80 * u)
+        for label, text in (("农历", lunar_line), ("节日", festival_line),
+                            ("节气", jieqi_line)):
+            if not text:
+                continue
+            draw.text((left, y + row_h / 2), label,
+                      font=label_font, fill=sub, anchor="lm")
+            draw.text((val_x, y + row_h / 2),
+                      _fit_text(str(text), val_font, right - val_x),
+                      font=val_font, fill=ink, anchor="lm")
+            y += row_h
 
     # 今日宜忌（v1.10.15）：两行彩色药丸 + 词条，宽度自适应，超宽截断不压出边框
     if yiji:

@@ -63,6 +63,7 @@ $includeList = @(
     "main.py",
     "fortune.py",
     "lexicon.py",
+    "lunar.py",
     "store.py",
     "webui_api.py",
     "pages",

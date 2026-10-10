@@ -91,11 +91,33 @@ def main() -> int:
         lucky={"color": {"name": "奶油黄", "hex": "#FBE7A1"}, "number": 7, "dir": "东南"},
         board_line="昨日本群 23 人抽签 · 最吉：小明（大吉 96）",
         hint="发送 /星语 抽今日签 ｜ /星语榜 看今日排行",
+        # v1.10.17：农历 / 节气两行（超过面板宽度的内容由 _fit_text 截断）
+        lunar_line="八月初七 · 丙午马年",
+        jieqi_line="秋分——昼夜均分，收支也要平衡。这一句故意写得很长很长很长很长很长很长很长",
         file_key="123456",
     )
     s_push = Image.open(p_push).size
     check(s_push[0] == 1024 and s_push[1] > s5[1],
           f"加内容块后卡应变高，实际 {s5} -> {s_push}")
+    check(s_push[1] >= 1100, f"带齐农历+节日+节气+宜忌+幸运+本群数据应 ≥1100，实际 {s_push}")
+    # 历法块按「农历/节日/节气」逐行加高：每多一行正好 52 像素
+    # （两次渲染必须用不同目录：同名文件会互相覆盖，读出来的高度就是后一张的）
+    _cal_args = ("2026-09-27", "星期日", {"name": "新月", "text": "许愿的好时机"}, "元旦快乐！")
+    _cal_extra = dict(yiji={"yi": ["摸鱼"], "ji": ["内卷"]}, lunar_line="八月初七 · 丙午马年")
+    h_cal2 = Image.open(card.render_push_card(
+        *_cal_args, cards_root=Path(tempfile.mkdtemp(prefix="moe_card_")), **_cal_extra)).size[1]
+    h_cal3 = Image.open(card.render_push_card(
+        *_cal_args, cards_root=Path(tempfile.mkdtemp(prefix="moe_card_")),
+        jieqi_line="秋分——昼夜均分", **_cal_extra)).size[1]
+    check(h_cal2 + 52 == h_cal3,
+          f"多一行历法行应正好高 52 像素，实际 {h_cal2} -> {h_cal3}")
+    # 历法行的文案长度上限：卡片一行放不下就会被截断（写成 30+ 字等于白写）
+    longest = max(
+        [(len(t), t) for t in lex["festivals"].values() for t in t]
+        + [(len(t), t) for t in (lex.get("lunar_festivals") or {}).values() for t in t]
+        + [(len(t), t) for t in (lex.get("jieqi") or {}).values() for t in t]
+    )
+    check(longest[0] <= 23, f"节日/节气文案最长 {longest[0]} 字（{longest[1]}），卡上会被截断")
     check(Path(p_push).name == "push_2026-09-27_123456.png",
           f"file_key 必须进文件名，实际 {Path(p_push).name}")
     img_push = Image.open(p_push).convert("RGB")

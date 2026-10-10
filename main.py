@@ -17,7 +17,7 @@ from astrbot.core.config.astrbot_config import AstrBotConfig
 from astrbot.core.message.message_event_result import MessageChain
 import aiohttp
 
-from . import fortune, lexicon, store
+from . import fortune, lexicon, lunar, store
 
 PLUGIN_NAME = "astrbot_plugin_moe_star_whisper"
 
@@ -92,7 +92,7 @@ class StarWhisperPlugin(Star):
         不重载的话热更上来的实例会一直跑旧接口（新增路由静默 404）。
         """
         pkg = __package__
-        for name in ("lexicon", "fortune", "store", "webui_api"):
+        for name in ("lexicon", "lunar", "fortune", "store", "webui_api"):
             mod = sys.modules.get(f"{pkg}.{name}")
             if mod is not None:
                 try:
@@ -843,13 +843,35 @@ class StarWhisperPlugin(Star):
             logger.warning(
                 f"[{PLUGIN_NAME}] 推送黄历块生成失败，本次只发月相\n{traceback.format_exc()}"
             )
+        # v1.10.17：历法块——农历（含干支生肖）、节气、节日（公历 + 农历都要查）。
+        # lunar.describe 超范围/解析失败返回 {}，整块降级成「不画这几行」，不影响出卡。
+        almanac = lunar.describe(today)
+        _lunar_line = ""
+        if almanac.get("lunar_text"):
+            _lunar_line = f"{almanac['lunar_text']} · {almanac.get('ganzhi_text', '')}".strip(" ·")
+        fest_lines = []
+        if fest:
+            fest_lines.append(fortune.pick_text(seed, "push_fest", fest))
+        lunar_fest = (lex.get("lunar_festivals") or {}).get(almanac.get("lunar_key") or "")
+        if lunar_fest:
+            fest_lines.append(fortune.pick_text(seed, "push_lunar_fest", lunar_fest))
+        # 公历与农历节日可能撞同一天（国庆撞中秋），两个都发，用全角空格隔开
+        _fest_line = "　".join(t for t in fest_lines if t)
+        jieqi = str(almanac.get("jieqi") or "")
+        _jieqi_line = ""
+        if jieqi:
+            copy = (lex.get("jieqi") or {}).get(jieqi) or []
+            note = fortune.pick_text(seed, f"push_jieqi:{jieqi}", copy) if copy else ""
+            _jieqi_line = f"{jieqi}——{note}" if note else jieqi
         return {
             "today": today,
             "prev": fortune.prev_date(today),
             "weekday_name": "星期" + "一二三四五六日"[fortune.now_in(tz_name).weekday()],
             "phase": phase,
             "accent": accent,
-            "fest_line": fortune.pick_text(seed, "push_fest", fest) if fest else "",
+            "fest_line": _fest_line,
+            "lunar_line": _lunar_line,
+            "jieqi_line": _jieqi_line,
             "yiji": yiji,
             "lucky": lucky,
         }
@@ -871,10 +893,17 @@ class StarWhisperPlugin(Star):
         return f"{text}\n{PUSH_HINT}"
 
     @staticmethod
-    def _push_text_fallback(board_line: str, yiji: dict | None,
-                            lucky: dict | None) -> str:
-        """卡渲染失败时补进文字的内容（信息不丢，只是不好看）。"""
+    def _push_text_fallback(public: dict, board_line: str) -> str:
+        """卡渲染失败时补进文字的内容（信息不丢，只是不好看）。
+
+        节日已在 `_push_caption` 的文字里，这里只补卡上独有的那几行。
+        """
         extra = ""
+        for label, text in (("农历", public.get("lunar_line")),
+                            ("节气", public.get("jieqi_line"))):
+            if text:
+                extra += f"\n{label}：{text}"
+        yiji, lucky = public.get("yiji"), public.get("lucky")
         if board_line:
             extra += f"\n{board_line}"
         if yiji:
@@ -904,6 +933,8 @@ class StarWhisperPlugin(Star):
                 signer=str(self._cfg("fortune_signer", "星语者")),
                 yiji=public["yiji"], lucky=public["lucky"],
                 board_line=board_line, hint=PUSH_HINT, file_key=file_key,
+                lunar_line=public.get("lunar_line", ""),
+                jieqi_line=public.get("jieqi_line", ""),
             )
         except Exception:
             logger.error(
@@ -916,7 +947,7 @@ class StarWhisperPlugin(Star):
         card = self._push_card(public, board_line, file_key)
         caption = self._push_caption(public)
         if card is None:
-            caption += self._push_text_fallback(board_line, public["yiji"], public["lucky"])
+            caption += self._push_text_fallback(public, board_line)
         return caption, card
 
     async def _do_daily_push(self):

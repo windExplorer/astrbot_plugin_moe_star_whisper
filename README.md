@@ -49,7 +49,9 @@ AstrBot 今日运势插件：每个用户每天一支专属「星语签」——
 
 榜单人数（`rank_size`，默认 10）：`/星语榜` 日榜与周榜最多显示多少人（3-50）。榜单每行都会带一枚吉凶徽章——日榜是当天那一签、周榜是本周最近一签，两榜口径统一为「他最近一签的吉凶」。
 
-每日推送（`daily_push_enabled` 默认关 + `daily_push_time` 默认 `08:00`）：到点给「近 7 天有抽签、且未停用」的群发一条「今日星象」卡——日期/星期、月相与文案、节日（有则显示）、**今日宜忌**（宜 2 忌 2）、**今日幸运**（幸运色色块 + 幸运数字 + 幸运方位）、**本群昨日抽签摘要**（如「昨日本群 23 人抽签 · 最吉：小明（大吉 96）」）、底部指令引导。宜忌/幸运全群同一份（按日期种子抽，当天不变），昨日摘要各群不同；卡高度随内容自动加高，渲染失败时这些内容会回落到文字里，不会丢。
+每日推送（`daily_push_enabled` 默认关 + `daily_push_time` 默认 `08:00`）：到点给「近 7 天有抽签、且未停用」的群发一条「今日星象」卡——日期/星期、月相与文案、**农历**（含干支生肖，如「八月十五 · 丙午马年」）、**节日**（公历 + 农历节日，有则显示，可撞同天一起发）、**节气**（24 节气当天才有，带词库文案）、**今日宜忌**（宜 2 忌 2）、**今日幸运**（幸运色色块 + 幸运数字 + 幸运方位）、**本群昨日抽签摘要**（如「昨日本群 23 人抽签 · 最吉：小明（大吉 96）」）、底部指令引导。宜忌/幸运/农历/节气全群同一份（按日期与词库算，当天不变），昨日摘要各群不同；卡高度随内容自动加高，渲染失败时这些内容会回落到文字里，不会丢。
+
+农历与节气**不依赖任何第三方库**：插件的 `lunar.py` 自带 1900-2100 年的农历压缩表与「寿星公式 + 36 条例外」的节气算法，两份数据都用 `lunar_python` 在 1900-2100 逐日交叉验证过（73,384 天全一致）。原因很实际：AstrBot 装插件时会执行 `requirements.txt`，装失败会让插件直接装不上——卡上两行小字不值得冒这个风险。节日文案与节气文案都放在词库（`festivals` / `lunar_festivals` / `jieqi`）里，可自行改。
 
 不想等定时、也不想真开推送时，随时发 `/星语星象` 就能让同一张卡立刻出现（内容与推送**逐字一致**；群里带本群昨日摘要，私聊省略这一行）。
 
@@ -93,9 +95,13 @@ AstrBot 今日运势插件：每个用户每天一支专属「星语签」——
 # 运行测试（核心模块无 astrbot 运行时依赖，直接跑；退出码即结论）
 uv run --no-project python tests/test_lexicon.py
 uv run --no-project python tests/test_fortune.py
+uv run --no-project python tests/test_lunar.py
 uv run --no-project python tests/test_store.py
 uv run --no-project --with pillow python tests/test_card.py
 uv run --no-project python tests/test_main_structure.py
+
+# 农历/节气数据的来源与交叉校验（可选依赖 lunar_python，不在日常测试里）
+uv run --no-project --python 3.12 --with lunar_python python tests/_tools/lunar_oracle.py
 
 # 构建 WebUI 控制台（Vue3 + Naive UI + ECharts，产物 pages/console/；需 Node.js）
 # build_zip.ps1 打包前会自动调用它，只有单独调前端时才需要手动跑

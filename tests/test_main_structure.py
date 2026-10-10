@@ -277,11 +277,28 @@ def main() -> int:
     ):
         check(token in pub_body, f"_push_public 缺少：{why}")
 
+    # v1.10.17：历法块（农历 / 节气 / 节日）——数据来自自带 lunar.py，节日走词库两条路
+    check("from . import fortune, lexicon, lunar, store" in src,
+          "main.py 必须以相对导入引入 lunar（包内模块）")
+    check(bool(m) and '"lunar"' in m.group(1),
+          "_reload_modules 必须带上 lunar（否则热更上来的实例用的是旧模块）")
+    check("lunar.describe(today)" in pub_body,
+          "公共内容必须用 lunar.describe 取农历/节气（超范围时它返回空 dict）")
+    check('lex.get("lunar_festivals")' in pub_body and 'lex.get("jieqi")' in pub_body,
+          "农历节日与节气文案必须走词库（可自定义），缺键就降级不打崩")
+    check('"lunar_line"' in pub_body and '"jieqi_line"' in pub_body,
+          "公共内容要带 lunar_line / jieqi_line 两个键")
+    check('"　".join' in pub_body,
+          "公历与农历节日撞同一天时两个都要发（拼在一行）")
+
     m_cardfn = _re.search(r"def _push_card\(self.*?(?=\n    def )", src, _re.S)
     check(bool(m_cardfn), "找不到 _push_card 方法体")
     card_body = m_cardfn.group(0) if m_cardfn else ""
     check("file_key=file_key" in card_body and "yiji=public[\"yiji\"]" in card_body,
           "卡渲染必须把宜忌/幸运/文件名键都透传下去")
+    for token in ("lunar_line=public.get(\"lunar_line\", \"\")",
+                  "jieqi_line=public.get(\"jieqi_line\", \"\")"):
+        check(token in card_body, f"卡渲染必须透传历法行：{token}")
     check("return None" in card_body, "卡渲染失败必须返回 None（由调用方回落文字）")
 
     m_push = _re.search(r"async def _do_daily_push\(self.*?(?=\n    (?:async )?def )", src, _re.S)
