@@ -359,6 +359,26 @@ def main() -> int:
     check(len(evs2) == 500, f"push_log 环形保留 500 条，实际 {len(evs2)}")
     check(evs2[0]["message"] == "evt-509", f"保留的是最新一批，实际 {evs2[0]['message']}")
 
+    # 推送留档（v1.11.2）：一群一天一条、同天重推覆盖、永不清理
+    st.record_push_history("g1", "2026-10-10", "2026-10-10 08:00:00",
+                           caption="🌙 萌萌星语 · 今日星象", card_path="push_2026-10-10_g1.png")
+    st.record_push_history("g2", "2026-10-10", "2026-10-10 08:00:01", caption="g2 的卡")
+    st.record_push_history("g1", "2026-10-11", "2026-10-11 08:00:00", caption="10-11 的卡")
+    again = st.record_push_history("g1", "2026-10-11", "2026-10-11 08:30:00",
+                                   caption="重推覆盖", card_path="")
+    check(again is True, "同群同天重推应覆盖成功（INSERT OR REPLACE）")
+    rows_h = st.list_push_history()
+    check(rows_h["total"] == 3, f"留档共 3 条（一群一天一条），实际 {rows_h['total']}")
+    check(rows_h["rows"][0]["date"] == "2026-10-11" and rows_h["rows"][0]["caption"] == "重推覆盖",
+          f"留档新→旧且取重推那份，实际 {rows_h['rows'][0]}")
+    only_g1 = st.list_push_history(group_id="g1")
+    check(only_g1["total"] == 2
+          and all(r["group_id"] == "g1" for r in only_g1["rows"]), "留档按群过滤")
+    ranged = st.list_push_history(date_from="2026-10-11")
+    check(ranged["total"] == 1, f"留档按起始日过滤（10-11 仅 g1 一条），实际 {ranged['total']}")
+    paged_h = st.list_push_history(page=2, size=2)
+    check(paged_h["total"] == 3 and len(paged_h["rows"]) == 1, "留档分页")
+
     st.close()
     if FAILED:
         print(f"\n{len(FAILED)} 项失败")

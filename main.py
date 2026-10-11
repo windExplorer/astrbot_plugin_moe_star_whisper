@@ -1134,6 +1134,22 @@ class StarWhisperPlugin(Star):
                     gid=gid, platform=platform, with_card=bool(card),
                 )
                 logger.info(f"[{PLUGIN_NAME}] 推送 {gid}: {'ok' if ok else 'no platform matched'}")
+                if ok:
+                    # v1.11.2：推送成功即按（群, 日期）**永久留档**——WebUI「推送记录」可查。
+                    # 只记每日推送，/星语星象（手动指令）不留档；卡文件 push_<日期>_<群号>.png
+                    # 天然按群按日不覆盖，card_path 长期有效。
+                    try:
+                        self._store.record_push_history(
+                            gid, public["today"],
+                            fortune.now_in(
+                                str(self._cfg("timezone", "Asia/Shanghai"))
+                            ).strftime("%Y-%m-%d %H:%M:%S"),
+                            caption=caption, card_path=card or "",
+                        )
+                    except Exception:
+                        logger.warning(
+                            f"[{PLUGIN_NAME}] 推送留档失败（{gid}）\n{traceback.format_exc()}"
+                        )
             except Exception:
                 self._log_push(
                     "error", f"群 {gid}：发送异常", gid=gid,

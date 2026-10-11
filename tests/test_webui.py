@@ -311,6 +311,30 @@ async def main_async() -> int:
     pl3 = webui_api._push_log_core(push_stub3)
     check(pl3["status"] == "ok" and pl3["data"]["events"] == [], "pushlog core：缺事件缓冲属性不炸")
 
+    # ---- v1.11.2 推送记录页（真库）：留档行带群名回填与卡文件状态 ----
+    tmp3 = Path(tempfile.mkdtemp(prefix="moe_pushhist_"))
+    st3 = _Store(tmp3 / "ph.db")
+    st3.record_push_history("pg1", today_str, f"{today_str} 08:00:00",
+                            caption="🌙 萌萌星语 · 今日星象\n2026-10-11 星期日",
+                            card_path="push_x.png")
+    st3.record_push_history("pg2", today_str, f"{today_str} 08:00:01", caption="pg2")
+    st3.save_fortune("pu1", today_str, {"grade": "吉", "score": 70, "streak": 1},
+                     nickname="留档甲", group_id="pg1", group_name="留档群")
+    ph = webui_api._push_history_core(st3, "Asia/Shanghai", page=1, size=10, days=7)
+    check(ph["status"] == "ok" and ph["data"]["history"]["total"] == 2,
+          f"pushhistory core：留档 2 条，实际 {ph['data']['history']}")
+    ph_row = {r["group_id"]: r for r in ph["data"]["rows"]}["pg1"]
+    check(ph_row["group_name"] == "留档群", "pushhistory core：群名按 group_names 回填")
+    check(ph_row["has_card"] is False, "pushhistory core：卡文件不在盘时 has_card=False（path 不存在）")
+    check(ph_row["caption"].startswith("🌙"), "pushhistory core：文案原样带出")
+    check(ph["data"]["groups"] and any(g["group_id"] == "pg1" for g in ph["data"]["groups"]),
+          "pushhistory core：筛选下拉带群列表")
+    ph_g = webui_api._push_history_core(st3, "Asia/Shanghai", page=1, size=10,
+                                        group_id="pg1", days=0)
+    check(ph_g["data"]["history"]["total"] == 1
+          and ph_g["data"]["rows"][0]["group_id"] == "pg1", "pushhistory core：群过滤")
+    st3.close()
+
     if FAILED:
         print(f"\n{len(FAILED)} 项失败")
         return 1

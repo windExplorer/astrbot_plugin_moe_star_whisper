@@ -81,6 +81,14 @@ CREATE TABLE IF NOT EXISTS push_log (
   message TEXT NOT NULL,
   detail  TEXT                    -- JSON：gid/targets/platform/error 等附加字段
 );
+CREATE TABLE IF NOT EXISTS push_history (
+  group_id  TEXT NOT NULL,
+  date      TEXT NOT NULL,        -- 推送内容对应的「今天」（按插件时区）
+  ts        TEXT NOT NULL,        -- 实际推送时刻
+  caption   TEXT,
+  card_path TEXT,                 -- push_<date>_<群号>.png，按群按日不覆盖
+  PRIMARY KEY (group_id, date)    -- 一群一天一条；同天重推覆盖，**永不清理**
+);
 CREATE INDEX IF NOT EXISTS idx_fortunes_date ON fortunes(date);
 """
 
@@ -228,6 +236,58 @@ class Store:
             (max(1, int(limit)),),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # ---------- push_history（每日推送留档，v1.11.2：一群一天一条，永不清理） ----------
+
+    def record_push_history(self, group_id: str, date: str, ts: str,
+                            caption: str = "", card_path: str = "") -> bool:
+        """推送成功后按（群, 日期）留档；同群同天重推覆盖（保持一天一条）。
+
+        与 push_log 的区别：那是「过程日志」（会清理）；这是「内容档案」——
+        每天每个群推了什么文案/哪张卡，永久可查。
+        """
+        cur = self._db.execute(
+            "INSERT OR REPLACE INTO push_history (group_id, date, ts, caption, card_path)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (str(group_id), str(date), str(ts or ""),
+             str(caption or ""), str(card_path or "")),
+        )
+        self._db.commit()
+        return cur.rowcount > 0
+
+    def list_push_history(self, page: int = 1, size: int = 20,
+                          group_id: str = "", date_from: str = "",
+                          date_to: str = "") -> dict:
+        """推送留档分页（日期新→旧，群内按群号）；群/区间过滤可选。"""
+        try:
+            page = max(1, int(page))
+        except (TypeError, ValueError):
+            page = 1
+        try:
+            size = max(1, min(int(size), 100))
+        except (TypeError, ValueError):
+            size = 20
+        where, args = [], []
+        if str(group_id or "").strip():
+            where.append("group_id=?")
+            args.append(str(group_id).strip())
+        if str(date_from or "").strip():
+            where.append("date>=?")
+            args.append(str(date_from).strip())
+        if str(date_to or "").strip():
+            where.append("date<=?")
+            args.append(str(date_to).strip())
+        cond = (" WHERE " + " AND ".join(where)) if where else ""
+        total = int(self._db.execute(
+            f"SELECT COUNT(*) FROM push_history{cond}", args,
+        ).fetchone()[0])
+        rows = self._db.execute(
+            f"SELECT * FROM push_history{cond}"
+            " ORDER BY date DESC, group_id LIMIT ? OFFSET ?",
+            (*args, size, (page - 1) * size),
+        ).fetchall()
+        return {"total": total, "page": page, "size": size,
+                "rows": [dict(r) for r in rows]}
 
     def record_draw_job(
         self,

@@ -6,6 +6,7 @@ import App from "./App.vue";
 // 视图同步 import（构建产物单文件，无需懒加载）。
 import OverviewView from "./views/OverviewView.vue";
 import RecordsView from "./views/RecordsView.vue";
+import PushesView from "./views/PushesView.vue";
 import StatsView from "./views/StatsView.vue";
 import UserView from "./views/UserView.vue";
 import ConfigView from "./views/ConfigView.vue";
@@ -17,6 +18,7 @@ const router = createRouter({
     { path: "/", redirect: "/overview" },
     { path: "/overview", name: "overview", component: OverviewView },
     { path: "/records", name: "records", component: RecordsView },
+    { path: "/pushes", name: "pushes", component: PushesView },
     { path: "/stats", name: "stats", component: StatsView },
     { path: "/user", name: "user", component: UserView },
     { path: "/config", name: "config", component: ConfigView },

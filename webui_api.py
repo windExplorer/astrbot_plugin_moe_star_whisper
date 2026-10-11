@@ -451,6 +451,56 @@ async def h_push_log(plugin) -> dict:
     return _push_log_core(plugin)
 
 
+def _push_history_core(store, tz_name: str, page=1, size=20, group_id="", days=0) -> dict:
+    """推送留档核心（参数齐备后的纯逻辑，便于脱离 quart 直测）。"""
+    try:
+        page = max(1, int(page))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        size = max(1, min(int(size), 100))
+    except (TypeError, ValueError):
+        size = 20
+    try:
+        days_int = int(days or 0)
+    except (TypeError, ValueError):
+        days_int = 0
+    date_from = _days_from(tz_name, days_int) if days_int else ""
+    data = store.list_push_history(
+        page=page, size=size, group_id=str(group_id or ""), date_from=date_from,
+    )
+    try:
+        names = store.group_names() or {}
+    except Exception:
+        names = {}
+    rows = []
+    for r in data["rows"]:
+        r = dict(r)
+        gid = str(r.get("group_id") or "")
+        r["group_name"] = names.get(gid, "")
+        card = str(r.get("card_path") or "")
+        r["has_card"] = bool(card) and Path(card).exists()
+        rows.append(r)
+    return ok({
+        "history": data,
+        "rows": rows,
+        "groups": store.list_groups(200),
+        "filters": {"days": days_int, "date_from": date_from, "group_id": str(group_id or "")},
+        "today": fortune.local_today(tz_name),
+    })
+
+
+async def h_push_history(plugin) -> dict:
+    """推送记录：每日推送的永久留档（一群一天一条，卡文件长期在盘）。"""
+    if plugin._store is None:
+        return err("插件未初始化完成")
+    return _push_history_core(
+        plugin._store, _tz_of(plugin),
+        page=_q("page", 1), size=_q("size", 20),
+        group_id=_q("group_id", ""), days=_q("days", 0),
+    )
+
+
 # ---------- 抽签记录 ----------
 
 def _records_core(store, tz_name: str, page=1, size=20, days=0, date_from="",
@@ -810,6 +860,7 @@ def register(plugin) -> None:
         # 控制台（v1.9.0）
         ("/overview", h_overview, ["GET"]),
         ("/pushlog", h_push_log, ["GET"]),
+        ("/pushhistory", h_push_history, ["GET"]),
         ("/records", h_records, ["GET"]),
         ("/users", h_users, ["GET"]),
         ("/stats", h_stats, ["GET"]),

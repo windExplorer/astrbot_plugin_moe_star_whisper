@@ -316,3 +316,23 @@ export interface PushLogPayload {
   group_names: Record<string, string>;
   events: PushEvent[];
 }
+
+/** 推送留档行（push_history 表，一群一天一条，永不清理）。 */
+export interface PushHistoryRow {
+  group_id: string;
+  group_name: string;
+  date: string;
+  ts: string;
+  caption: string;
+  card_path: string;
+  has_card: boolean;
+}
+
+/** 推送记录页（/pushhistory）：每日推送永久留档。 */
+export interface PushHistoryPayload {
+  history: { total: number; page: number; size: number };
+  rows: PushHistoryRow[];
+  groups: { group_id: string; group_name: string; draws: number }[];
+  filters: { days: number; date_from: string; group_id: string };
+  today: string;
+}

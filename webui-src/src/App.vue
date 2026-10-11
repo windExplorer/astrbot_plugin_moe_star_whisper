@@ -92,6 +92,7 @@ const isMobile = ref(false);
 const MENU = [
   { key: "/overview", label: "📊 总览" },
   { key: "/records", label: "🗂 抽签记录" },
+  { key: "/pushes", label: "📨 推送记录" },
   { key: "/stats", label: "📈 数据统计" },
   { key: "/user", label: "🙋 用户查询" },
   { key: "/config", label: "⚙️ 参数配置" },
