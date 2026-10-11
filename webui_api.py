@@ -368,11 +368,12 @@ async def h_overview(plugin) -> dict:
 # ---------- 每日推送面板（v1.10.26） ----------
 
 def _push_log_core(plugin) -> dict:
-    """「每日推送」面板核心：实时状态 + 目标群 + 推送事件环形缓冲。
+    """「每日推送」面板核心：实时状态 + 目标群 + 推送事件（push_log 表，持久化）。
 
     状态是**现场重算**的（开关/时刻/下次推送/目标群直接读当前值，与推送循环同一口径：
     `_next_push_delay` 算下次时刻、`list_active_group_ids(7)` - 停用群算目标）；
-    事件是 main.py 推送循环随手追加的内存缓冲（重启清空，属预期——长期证据看 AstrBot 日志）。
+    事件读自库表 push_log（环形保留最近 500 条，重启不丢，v1.11.1）。
+    Store 事件方法缺失（热更过渡期的旧实例）时回落内存兜底缓冲。
     """
     tz_name = str(plugin._cfg("timezone", "Asia/Shanghai"))
     enabled = bool(plugin._cfg("daily_push_enabled", False))
@@ -410,8 +411,26 @@ def _push_log_core(plugin) -> dict:
             })
     except Exception:
         pass
-    events = list(getattr(plugin, "_push_log", None) or [])[-120:]
-    events.reverse()  # 最新在上
+    # 事件读库（最新在前）；detail JSON 解回事件字段（gid/targets/error 等）
+    events: list[dict] = []
+    try:
+        for row in plugin._store.list_push_events(120):
+            ev = {
+                "ts": row.get("ts") or "",
+                "kind": row.get("kind") or "",
+                "message": row.get("message") or "",
+            }
+            try:
+                extra = json.loads(row.get("detail") or "")
+                if isinstance(extra, dict):
+                    ev.update(extra)
+            except Exception:
+                pass
+            events.append(ev)
+    except Exception:
+        # 热更过渡期旧 Store 实例没有 list_push_events：回落内存兜底缓冲
+        events = list(getattr(plugin, "_push_log", None) or [])[-120:]
+        events.reverse()
     return ok({
         "enabled": enabled,
         "push_time": push_time,

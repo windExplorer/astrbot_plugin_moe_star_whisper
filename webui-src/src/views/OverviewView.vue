@@ -44,7 +44,7 @@
     <section class="panel">
       <div class="head">
         <b>每日推送</b>
-        <span class="sub">事件只存内存，重启后清空；长期记录请看 AstrBot 日志（搜 star_whisper）</span>
+        <span class="sub">事件持久化在插件数据库（保留最近 500 条）；长期记录另见 AstrBot 日志（搜 star_whisper）</span>
         <a class="refresh" @click="loadPush">{{ pushLoading ? "刷新中…" : "刷新" }}</a>
       </div>
       <ul class="kv">

@@ -74,6 +74,13 @@ CREATE TABLE IF NOT EXISTS debug_history (
   uid     TEXT PRIMARY KEY,
   used_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS push_log (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts      TEXT NOT NULL,
+  kind    TEXT NOT NULL,          -- init/cycle/empty/ok/no_platform/skip/error/loop_error
+  message TEXT NOT NULL,
+  detail  TEXT                    -- JSON：gid/targets/platform/error 等附加字段
+);
 CREATE INDEX IF NOT EXISTS idx_fortunes_date ON fortunes(date);
 """
 
@@ -195,6 +202,32 @@ class Store:
             (since,),
         ).fetchall()
         return [(r["group_id"], r["platform"] or "") for r in rows]
+
+    # ---------- push_log（每日推送事件，v1.11.1 起持久化，重启不再丢） ----------
+
+    _PUSH_LOG_KEEP = 500
+
+    def record_push_event(self, kind: str, message: str, detail: str = "",
+                          ts: str = "") -> None:
+        """推送事件落库；插入时顺手清理，只保留最近 500 条（环形保留）。"""
+        self._db.execute(
+            "INSERT INTO push_log (ts, kind, message, detail) VALUES (?, ?, ?, ?)",
+            (str(ts or ""), str(kind), str(message or ""), str(detail or "")),
+        )
+        self._db.execute(
+            "DELETE FROM push_log WHERE id NOT IN"
+            " (SELECT id FROM push_log ORDER BY id DESC LIMIT ?)",
+            (self._PUSH_LOG_KEEP,),
+        )
+        self._db.commit()
+
+    def list_push_events(self, limit: int = 120) -> list:
+        """最近推送事件（最新在前），detail 为 JSON 字符串（可能为空）。"""
+        rows = self._db.execute(
+            "SELECT ts, kind, message, detail FROM push_log ORDER BY id DESC LIMIT ?",
+            (max(1, int(limit)),),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def record_draw_job(
         self,

@@ -227,6 +227,9 @@ async def main_async() -> int:
     from collections import deque
 
     class PushStore:
+        def __init__(self):
+            self._events = []
+
         def list_active_group_ids(self, days=7):
             return [("g1", "aiocqhttp"), ("g2", ""), ("g3", "aiocqhttp")]
 
@@ -236,15 +239,26 @@ async def main_async() -> int:
                 {"group_id": "g2", "group_name": "", "draws": 3},
             ]
 
+        def record_push_event(self, kind, message, detail="", ts=""):
+            self._events.append({"ts": ts, "kind": kind, "message": message, "detail": detail})
+
+        def list_push_events(self, limit=120):
+            return list(reversed(self._events[-max(1, int(limit)):]))
+
+    push_store = PushStore()
     push_stub = types.SimpleNamespace(
-        _store=PushStore(),
+        _store=push_store,
         _cfg=lambda k, d=None: {"daily_push_enabled": True, "daily_push_time": "08:00",
                                 "timezone": "Asia/Shanghai"}.get(k, d),
         _disabled_groups=lambda: {"g3"},
         _next_push_delay=lambda: 3600.0,
-        _push_log=deque([{"ts": "10-11 08:00:00", "kind": "ok", "message": "群 g1：已发送",
-                          "gid": "g1"}]),
+        _push_log=deque(),
     )
+    # 事件写入走库（v1.11.1）：_log_push 的落库路径在 main 里，这里验证读取端能
+    # 从 push_log 行还原事件字段（detail JSON 解开、坏 detail 不炸）
+    push_store.record_push_event("ok", "群 g1：已发送",
+                                 '{"gid": "g1", "platform": "aiocqhttp"}', "10-11 08:00:00")
+    push_store.record_push_event("error", "群 g2：发送异常", "{broken json", "10-11 08:01:00")
     pl = webui_api._push_log_core(push_stub)
     check(pl["status"] == "ok" and pl["data"]["enabled"] is True, "pushlog core：开关快照")
     check(pl["data"]["push_time"] == "08:00" and pl["data"]["next_at"]
@@ -258,7 +272,13 @@ async def main_async() -> int:
     check(pl["data"]["group_names"] == {"g1": "测试群一号", "g2": ""},
           "pushlog core：群号->群名映射随事件一起下发")
     check(pl["data"]["disabled_active"] == 1, "pushlog core：停用但活跃的群单独计数")
-    check(pl["data"]["events"][0]["kind"] == "ok", "pushlog core：事件最新在上")
+    ev0 = pl["data"]["events"][0]
+    check(ev0["kind"] == "error" and ev0["ts"] == "10-11 08:01:00",
+          "pushlog core：库表事件最新在上且 ts 带出")
+    check(ev0.get("gid") is None, "pushlog core：坏 detail JSON 不炸、不解出字段")
+    ok_ev = next(e for e in pl["data"]["events"] if e["kind"] == "ok")
+    check(ok_ev.get("gid") == "g1" and ok_ev.get("platform") == "aiocqhttp",
+          "pushlog core：detail JSON 解回事件字段（前端免二次解析）")
     # 未开启推送时面板也必须可用——它要回答的正是「为什么没推」
     push_stub2 = types.SimpleNamespace(
         _store=PushStore(), _cfg=lambda k, d=None: d, _disabled_groups=lambda: set(),
@@ -268,9 +288,24 @@ async def main_async() -> int:
     check(pl2["status"] == "ok" and pl2["data"]["enabled"] is False
           and len(pl2["data"]["targets"]) == 3 and pl2["data"]["events"] == [],
           "pushlog core：未开启也返回现场状态（默认时刻/全量目标/空事件）")
-    # 没有 _push_log 属性的旧实例不炸（热更过渡期）
+    # 旧 Store 实例（无 list_push_events）+ 有内存兜底：热更过渡期事件不丢
+    class OldStore(PushStore):
+        def __init__(self):
+            PushStore.__init__(self)
+            self.list_push_events = None  # type: ignore[assignment] 模拟方法缺失
+
+    push_stub4 = types.SimpleNamespace(
+        _store=OldStore(), _cfg=lambda k, d=None: d, _disabled_groups=lambda: set(),
+        _next_push_delay=lambda: 0.0,
+        _push_log=deque([{"ts": "10-11 07:00:00", "kind": "init", "message": "兜底事件"}]),
+    )
+    pl4 = webui_api._push_log_core(push_stub4)
+    check(pl4["status"] == "ok" and pl4["data"]["events"][0]["kind"] == "init",
+          "pushlog core：库方法缺失时回落内存兜底缓冲")
+
+    # 两者都缺（更老的实例）也不炸
     push_stub3 = types.SimpleNamespace(
-        _store=PushStore(), _cfg=lambda k, d=None: d, _disabled_groups=lambda: set(),
+        _store=OldStore(), _cfg=lambda k, d=None: d, _disabled_groups=lambda: set(),
         _next_push_delay=lambda: 0.0,
     )
     pl3 = webui_api._push_log_core(push_stub3)

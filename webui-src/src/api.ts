@@ -291,7 +291,7 @@ export interface ConfigPayload {
   meta: { plugin: string; version: string; writable: boolean; field_count: number };
 }
 
-/** 推送事件（main.py 推送循环追加的内存环形缓冲，重启清空）。 */
+/** 推送事件（push_log 表，持久化保留最近 500 条，重启不丢）。 */
 export interface PushEvent {
   ts: string;
   kind: string;

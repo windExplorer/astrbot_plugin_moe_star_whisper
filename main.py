@@ -2,6 +2,7 @@
 """萌萌星语：每日运势签插件入口。"""
 import asyncio
 import importlib
+import json
 import re
 import sys
 import time
@@ -80,7 +81,7 @@ class StarWhisperPlugin(Star):
         self.config = config
         self._store = None
         self._push_task = None
-        # 推送事件环形缓冲（v1.10.26）：WebUI「每日推送」面板的数据源，只存内存、重启清空
+        # 推送事件内存兜底（v1.11.1 起主路径落库 push_log 表，此处仅库不可用时暂存）
         self._push_log: deque = deque(maxlen=300)
         self._member_cache: dict = {}  # group_id -> (monotonic_ts, {成员 id})，榜单用（v1.9.4）
         self._avatar_cache: dict = {}  # uid -> (monotonic_ts, bytes|None)，榜单头像用（v1.10.3）
@@ -839,20 +840,31 @@ class StarWhisperPlugin(Star):
     # ---------- 每日群推送（F17，插件自管定时循环，PRD §7.5） ----------
 
     def _log_push(self, kind: str, message: str = "", **fields) -> None:
-        """记录一条推送事件（v1.10.26）：进内存环形缓冲，WebUI「每日推送」面板展示。
+        """记录一条推送事件：**落库持久化**（v1.11.1），WebUI「每日推送」面板读取。
 
-        只进内存不落盘是刻意的：推送链路的问题要当场看才有意义，跨重启的长期证据
-        交给 AstrBot 日志（logger 打的行一个不少，两路互相补充、不互为替代）。
-        任何失败都静默——留痕逻辑绝不能反过来弄挂推送本身。
+        事件存进插件库的 push_log 表（环形保留最近 500 条，重启不丢——v1.10.26 的
+        纯内存方案被用户否了，重启后查不到"昨天到底推没推"）。附加字段序列化成
+        detail JSON（gid/targets/platform/error 等），读取方再解回来。
+        库不可用（初始化前/写入失败/热更过渡期旧 Store 实例没有该方法）时回落
+        内存缓冲兜底，宁可少留也不丢事件。任何失败都静默——留痕绝不弄挂推送本身。
         """
         try:
-            entry = {
-                "ts": fortune.now_in(
-                    str(self._cfg("timezone", "Asia/Shanghai"))
-                ).strftime("%m-%d %H:%M:%S"),
-                "kind": str(kind),
-                "message": str(message or ""),
-            }
+            ts = fortune.now_in(
+                str(self._cfg("timezone", "Asia/Shanghai"))
+            ).strftime("%m-%d %H:%M:%S")
+        except Exception:
+            ts = datetime.now().strftime("%m-%d %H:%M:%S")
+        if self._store is not None:
+            try:
+                self._store.record_push_event(
+                    str(kind), str(message or ""),
+                    json.dumps(fields, ensure_ascii=False) if fields else "", ts=ts,
+                )
+                return
+            except Exception:
+                pass
+        try:  # 内存兜底（仅库不可用时；正常路径事件全在 push_log 表）
+            entry = {"ts": ts, "kind": str(kind), "message": str(message or "")}
             entry.update({k: v for k, v in fields.items() if v is not None})
             self._push_log.append(entry)
         except Exception:

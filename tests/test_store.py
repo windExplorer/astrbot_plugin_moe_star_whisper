@@ -342,6 +342,23 @@ def main() -> int:
           "带最近所在群（供榜单标注来源）")
     check(st.list_range_avg_all("2027-01-01", 50) == [], "区间外返回空表")
 
+    # 推送事件持久化（v1.11.1）：落库读回 + 环形保留
+    st.record_push_event("init", "推送循环已启动", "", ts="10-11 07:59:00")
+    st.record_push_event("cycle", "开始推送（目标 1 个群）", '{"targets": ["g1"]}',
+                         ts="10-11 08:00:00")
+    st.record_push_event("ok", "群 g1：已发送", '{"gid": "g1", "platform": "aiocqhttp"}',
+                         ts="10-11 08:00:01")
+    evs = st.list_push_events(10)
+    check([e["kind"] for e in evs] == ["ok", "cycle", "init"],
+          f"推送事件最新在前，实际 {[e['kind'] for e in evs]}")
+    check(evs[0]["ts"] == "10-11 08:00:01" and '"g1"' in (evs[0]["detail"] or ""),
+          f"事件 ts/detail 原样读回，实际 {evs[0]}")
+    for i in range(510):  # 灌满触发环形清理
+        st.record_push_event("ok", f"evt-{i}", "", ts=f"10-12 00:{i % 60:02d}:00")
+    evs2 = st.list_push_events(1000)
+    check(len(evs2) == 500, f"push_log 环形保留 500 条，实际 {len(evs2)}")
+    check(evs2[0]["message"] == "evt-509", f"保留的是最新一批，实际 {evs2[0]['message']}")
+
     st.close()
     if FAILED:
         print(f"\n{len(FAILED)} 项失败")
