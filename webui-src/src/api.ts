@@ -290,3 +290,27 @@ export interface ConfigPayload {
   values: Record<string, any>;
   meta: { plugin: string; version: string; writable: boolean; field_count: number };
 }
+
+/** 推送事件（main.py 推送循环追加的内存环形缓冲，重启清空）。 */
+export interface PushEvent {
+  ts: string;
+  kind: string;
+  message: string;
+  gid?: string;
+  targets?: string[];
+  platform?: string;
+  with_card?: boolean;
+  error?: string;
+}
+
+/** 「每日推送」面板（/pushlog）：实时状态 + 目标群 + 最近事件。 */
+export interface PushLogPayload {
+  enabled: boolean;
+  push_time: string;
+  timezone: string;
+  next_at: string;
+  wait_seconds: number;
+  targets: { group_id: string; platform: string; sendable: boolean }[];
+  disabled_active: number;
+  events: PushEvent[];
+}

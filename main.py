@@ -6,6 +6,7 @@ import re
 import sys
 import time
 import traceback
+from collections import deque
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -79,6 +80,8 @@ class StarWhisperPlugin(Star):
         self.config = config
         self._store = None
         self._push_task = None
+        # 推送事件环形缓冲（v1.10.26）：WebUI「每日推送」面板的数据源，只存内存、重启清空
+        self._push_log: deque = deque(maxlen=300)
         self._member_cache: dict = {}  # group_id -> (monotonic_ts, {成员 id})，榜单用（v1.9.4）
         self._avatar_cache: dict = {}  # uid -> (monotonic_ts, bytes|None)，榜单头像用（v1.10.3）
         self._reload_modules()
@@ -835,7 +838,28 @@ class StarWhisperPlugin(Star):
 
     # ---------- 每日群推送（F17，插件自管定时循环，PRD §7.5） ----------
 
+    def _log_push(self, kind: str, message: str = "", **fields) -> None:
+        """记录一条推送事件（v1.10.26）：进内存环形缓冲，WebUI「每日推送」面板展示。
+
+        只进内存不落盘是刻意的：推送链路的问题要当场看才有意义，跨重启的长期证据
+        交给 AstrBot 日志（logger 打的行一个不少，两路互相补充、不互为替代）。
+        任何失败都静默——留痕逻辑绝不能反过来弄挂推送本身。
+        """
+        try:
+            entry = {
+                "ts": fortune.now_in(
+                    str(self._cfg("timezone", "Asia/Shanghai"))
+                ).strftime("%m-%d %H:%M:%S"),
+                "kind": str(kind),
+                "message": str(message or ""),
+            }
+            entry.update({k: v for k, v in fields.items() if v is not None})
+            self._push_log.append(entry)
+        except Exception:
+            pass
+
     def _start_push_loop(self):
+        self._log_push("init", "推送循环已启动（开关/时刻/目标群见下方实时状态）")
         self._push_task = asyncio.create_task(self._push_loop())
 
     def _next_push_delay(self) -> float:
@@ -868,6 +892,10 @@ class StarWhisperPlugin(Star):
             except asyncio.CancelledError:
                 raise
             except Exception:
+                self._log_push(
+                    "loop_error", "推送循环异常（300 秒后自动重试）",
+                    error=traceback.format_exc()[-400:],
+                )
                 logger.error(f"[{PLUGIN_NAME}] 推送循环异常\n{traceback.format_exc()}")
                 await asyncio.sleep(300)
 
@@ -1056,8 +1084,24 @@ class StarWhisperPlugin(Star):
         want_card = mode != "纯文本"
         disabled = self._disabled_groups()
         targets = [g for g in self._store.list_active_group_ids(7) if g[0] not in disabled]
+        if not targets:
+            # v1.10.26：目标为空从「静默跳过」改为留痕——推送没发生也要能看到为什么
+            self._log_push(
+                "empty",
+                "近 7 天有抽签记录且未停用的群为 0，本次无推送目标"
+                "（推送只发给近 7 天有人抽过签的群）",
+            )
+            return
+        self._log_push(
+            "cycle", f"开始推送（目标 {len(targets)} 个群）",
+            targets=[g for g, _p in targets],
+        )
         for gid, platform in targets:
             if not platform:
+                # v1.10.26：缺平台信息从静默 continue 改为留痕
+                self._log_push(
+                    "skip", f"群 {gid} 的记录里没有平台信息，无法定位会话，已跳过", gid=gid,
+                )
                 continue  # 没有平台信息无法定位会话
             # v1.10.22：内容按群生成（宜忌/幸运/主色每群不同），所以放在循环里
             public = self._push_public(gid)
@@ -1072,8 +1116,17 @@ class StarWhisperPlugin(Star):
                 chain.chain.append(Image.fromFileSystem(card))
             try:
                 ok = await StarTools.send_message(session, chain)
+                self._log_push(
+                    "ok" if ok else "no_platform",
+                    f"群 {gid}：{'已发送' if ok else '发送失败：未匹配到平台适配器'}",
+                    gid=gid, platform=platform, with_card=bool(card),
+                )
                 logger.info(f"[{PLUGIN_NAME}] 推送 {gid}: {'ok' if ok else 'no platform matched'}")
             except Exception:
+                self._log_push(
+                    "error", f"群 {gid}：发送异常", gid=gid,
+                    error=traceback.format_exc()[-400:],
+                )
                 logger.error(f"[{PLUGIN_NAME}] 推送 {gid} 失败\n{traceback.format_exc()}")
 
     def _format_result(self, payload: dict, repeat: bool = False) -> str:

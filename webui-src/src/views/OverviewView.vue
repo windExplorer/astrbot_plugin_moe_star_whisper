@@ -42,6 +42,41 @@
     </div>
 
     <section class="panel">
+      <div class="head">
+        <b>每日推送</b>
+        <span class="sub">事件只存内存，重启后清空；长期记录请看 AstrBot 日志（搜 star_whisper）</span>
+        <a class="refresh" @click="loadPush">{{ pushLoading ? "刷新中…" : "刷新" }}</a>
+      </div>
+      <ul class="kv">
+        <li><span>开关</span><b :class="{ off: !pushData?.enabled }">{{ pushData?.enabled ? "已开启" : "未开启" }}</b></li>
+        <li><span>推送时刻</span><b>{{ pushData?.push_time || "-" }}（{{ pushData?.timezone }}）</b></li>
+        <li>
+          <span>下次推送</span>
+          <b>{{ nextPushText }}</b>
+        </li>
+        <li>
+          <span>目标群</span>
+          <b>{{ targetText }}</b>
+        </li>
+      </ul>
+      <div class="chips" v-if="pushData?.targets?.length">
+        <span class="chip" :class="{ bad: !t.sendable }" v-for="t in pushData.targets" :key="t.group_id">
+          {{ t.group_id }}{{ t.sendable ? "" : "（缺平台，会被跳过）" }}
+        </span>
+      </div>
+      <div class="events">
+        <div class="ev" v-for="(ev, i) in pushData?.events || []" :key="i">
+          <span class="badge" :class="String(ev.kind)">{{ kindLabel(ev.kind) }}</span>
+          <span class="ev-ts">{{ ev.ts }}</span>
+          <span class="ev-msg">{{ ev.message }}</span>
+        </div>
+        <div v-if="!(pushData?.events || []).length" class="sub ev-empty">
+          暂无推送事件——开启推送并等到推送时刻后，这里会出现每次推送的记录（含没推成的原因）
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
       <div class="head"><b>最近抽签</b><span class="sub">最新 10 条</span></div>
       <div class="table-wrap">
         <table>
@@ -101,7 +136,7 @@ import { useMessage } from "naive-ui";
 import { useRouter } from "vue-router";
 import EChart from "../EChart.vue";
 import UserAvatar from "../components/UserAvatar.vue";
-import { apiGet, type Overview } from "../api";
+import { apiGet, type Overview, type PushLogPayload } from "../api";
 import { GRADE_COLORS, GRADE_ORDER, chartPalette, gradeColor } from "../theme";
 import { isDark } from "../store";
 
@@ -111,6 +146,8 @@ const message = useMessage();
 const loading = ref(true);
 const errorMsg = ref("");
 const data = ref<Overview | null>(null);
+const pushData = ref<PushLogPayload | null>(null);
+const pushLoading = ref(false);
 
 const SWITCH_LABELS: Record<string, string> = {
   timezone: "时区",
@@ -237,6 +274,52 @@ function openUser(uid: string) {
   router.push({ path: "/user", query: { uid } });
 }
 
+// ---------- 每日推送面板 ----------
+
+const KIND_LABELS: Record<string, string> = {
+  init: "启动",
+  cycle: "推送",
+  empty: "空跑",
+  ok: "成功",
+  no_platform: "未匹配",
+  skip: "跳过",
+  error: "失败",
+  loop_error: "异常",
+};
+function kindLabel(kind: string) {
+  return KIND_LABELS[kind] || kind;
+}
+
+const nextPushText = computed(() => {
+  const p = pushData.value;
+  if (!p) return "-";
+  if (!p.enabled) return "推送未开启，不排程";
+  if (!p.next_at) return "-";
+  const mins = Math.round((p.wait_seconds || 0) / 60);
+  return `${p.next_at}（约 ${mins} 分钟后）`;
+});
+
+const targetText = computed(() => {
+  const p = pushData.value;
+  if (!p) return "-";
+  const n = (p.targets || []).length;
+  if (!n) return "0 个（近 7 天有抽签记录且未停用的群）";
+  const bad = (p.targets || []).filter((t) => !t.sendable).length;
+  const tail = p.disabled_active ? `，另有 ${p.disabled_active} 个活跃群已停用` : "";
+  return `${n} 个${bad ? `（${bad} 个缺平台）` : ""}${tail}`;
+});
+
+async function loadPush() {
+  pushLoading.value = true;
+  try {
+    pushData.value = await apiGet<PushLogPayload>("pushlog");
+  } catch {
+    pushData.value = null; // 面板加载失败不打扰总览，状态行显示 -
+  } finally {
+    pushLoading.value = false;
+  }
+}
+
 async function load() {
   loading.value = true;
   errorMsg.value = "";
@@ -248,6 +331,7 @@ async function load() {
   } finally {
     loading.value = false;
   }
+  await loadPush();
 }
 
 onMounted(load);
@@ -431,5 +515,68 @@ a {
 }
 .empty.err {
   color: #c05656;
+}
+.refresh {
+  margin-left: auto;
+  color: var(--msw-accent);
+  cursor: pointer;
+  font-size: 12px;
+}
+.off {
+  color: var(--msw-sub);
+  font-weight: 500;
+}
+.chip.bad {
+  background: rgba(192, 86, 86, 0.12);
+  color: #c05656;
+}
+.events {
+  margin-top: 6px;
+}
+.ev {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--msw-line);
+  font-size: 12.5px;
+}
+.ev:last-child {
+  border-bottom: none;
+}
+.ev-ts {
+  color: var(--msw-sub);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ev-msg {
+  min-width: 0;
+  word-break: break-all;
+}
+.badge {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  color: #fff;
+  background: var(--msw-sub);
+}
+.badge.ok {
+  background: #3d9a6c;
+}
+.badge.cycle,
+.badge.init {
+  background: #5b8fd6;
+}
+.badge.no_platform,
+.badge.skip {
+  background: #d08b3c;
+}
+.badge.error,
+.badge.loop_error {
+  background: #c05656;
+}
+.ev-empty {
+  padding: 8px 0;
 }
 </style>

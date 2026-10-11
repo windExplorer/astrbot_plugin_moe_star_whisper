@@ -365,6 +365,59 @@ async def h_overview(plugin) -> dict:
     return _overview_core(plugin._store, plugin._cfg, _tz_of(plugin), max(3, min(days, 180)))
 
 
+# ---------- 每日推送面板（v1.10.26） ----------
+
+def _push_log_core(plugin) -> dict:
+    """「每日推送」面板核心：实时状态 + 目标群 + 推送事件环形缓冲。
+
+    状态是**现场重算**的（开关/时刻/下次推送/目标群直接读当前值，与推送循环同一口径：
+    `_next_push_delay` 算下次时刻、`list_active_group_ids(7)` - 停用群算目标）；
+    事件是 main.py 推送循环随手追加的内存缓冲（重启清空，属预期——长期证据看 AstrBot 日志）。
+    """
+    tz_name = str(plugin._cfg("timezone", "Asia/Shanghai"))
+    enabled = bool(plugin._cfg("daily_push_enabled", False))
+    push_time = str(plugin._cfg("daily_push_time", "08:00") or "08:00")
+    next_at = ""
+    wait_seconds = -1
+    try:
+        wait_seconds = float(plugin._next_push_delay())
+        next_at = (fortune.now_in(tz_name) + timedelta(seconds=wait_seconds)).strftime(
+            "%m-%d %H:%M"
+        )
+    except Exception:
+        pass
+    targets: list[dict] = []
+    disabled_active = 0
+    try:
+        disabled = plugin._disabled_groups()
+        for g, p in plugin._store.list_active_group_ids(7):
+            if g in disabled:
+                disabled_active += 1
+                continue
+            targets.append({"group_id": g, "platform": p or "", "sendable": bool(p)})
+    except Exception:
+        pass
+    events = list(getattr(plugin, "_push_log", None) or [])[-120:]
+    events.reverse()  # 最新在上
+    return ok({
+        "enabled": enabled,
+        "push_time": push_time,
+        "timezone": tz_name,
+        "next_at": next_at,
+        "wait_seconds": int(wait_seconds) if wait_seconds >= 0 else -1,
+        "targets": targets,
+        "disabled_active": disabled_active,
+        "events": events,
+    })
+
+
+async def h_push_log(plugin) -> dict:
+    """「每日推送」面板：开关/推送时刻/下次推送/目标群与最近推送事件。"""
+    if plugin._store is None:
+        return err("插件未初始化完成")
+    return _push_log_core(plugin)
+
+
 # ---------- 抽签记录 ----------
 
 def _records_core(store, tz_name: str, page=1, size=20, days=0, date_from="",
@@ -723,6 +776,7 @@ def register(plugin) -> None:
     routes = [
         # 控制台（v1.9.0）
         ("/overview", h_overview, ["GET"]),
+        ("/pushlog", h_push_log, ["GET"]),
         ("/records", h_records, ["GET"]),
         ("/users", h_users, ["GET"]),
         ("/stats", h_stats, ["GET"]),

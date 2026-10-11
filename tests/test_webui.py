@@ -223,6 +223,49 @@ async def main_async() -> int:
           "config get 返回 schema 与字段数")
     check(set(cfg_view["data"]["values"]) == set(schema), "config get 的 values 覆盖全部 schema 键")
 
+    # ---- v1.10.26 每日推送面板：实时状态 + 目标群 + 事件缓冲 ----
+    from collections import deque
+
+    class PushStore:
+        def list_active_group_ids(self, days=7):
+            return [("g1", "aiocqhttp"), ("g2", ""), ("g3", "aiocqhttp")]
+
+    push_stub = types.SimpleNamespace(
+        _store=PushStore(),
+        _cfg=lambda k, d=None: {"daily_push_enabled": True, "daily_push_time": "08:00",
+                                "timezone": "Asia/Shanghai"}.get(k, d),
+        _disabled_groups=lambda: {"g3"},
+        _next_push_delay=lambda: 3600.0,
+        _push_log=deque([{"ts": "10-11 08:00:00", "kind": "ok", "message": "群 g1：已发送",
+                          "gid": "g1"}]),
+    )
+    pl = webui_api._push_log_core(push_stub)
+    check(pl["status"] == "ok" and pl["data"]["enabled"] is True, "pushlog core：开关快照")
+    check(pl["data"]["push_time"] == "08:00" and pl["data"]["next_at"]
+          and pl["data"]["wait_seconds"] == 3600, "pushlog core：下次推送时刻已算出")
+    tg = {t["group_id"]: t for t in pl["data"]["targets"]}
+    check(set(tg) == {"g1", "g2"} and tg["g1"]["sendable"] is True
+          and tg["g2"]["sendable"] is False,
+          "pushlog core：停用群被滤掉，缺平台群 sendable=False（前端标灰）")
+    check(pl["data"]["disabled_active"] == 1, "pushlog core：停用但活跃的群单独计数")
+    check(pl["data"]["events"][0]["kind"] == "ok", "pushlog core：事件最新在上")
+    # 未开启推送时面板也必须可用——它要回答的正是「为什么没推」
+    push_stub2 = types.SimpleNamespace(
+        _store=PushStore(), _cfg=lambda k, d=None: d, _disabled_groups=lambda: set(),
+        _next_push_delay=lambda: 0.0, _push_log=deque(),
+    )
+    pl2 = webui_api._push_log_core(push_stub2)
+    check(pl2["status"] == "ok" and pl2["data"]["enabled"] is False
+          and len(pl2["data"]["targets"]) == 3 and pl2["data"]["events"] == [],
+          "pushlog core：未开启也返回现场状态（默认时刻/全量目标/空事件）")
+    # 没有 _push_log 属性的旧实例不炸（热更过渡期）
+    push_stub3 = types.SimpleNamespace(
+        _store=PushStore(), _cfg=lambda k, d=None: d, _disabled_groups=lambda: set(),
+        _next_push_delay=lambda: 0.0,
+    )
+    pl3 = webui_api._push_log_core(push_stub3)
+    check(pl3["status"] == "ok" and pl3["data"]["events"] == [], "pushlog core：缺事件缓冲属性不炸")
+
     if FAILED:
         print(f"\n{len(FAILED)} 项失败")
         return 1
