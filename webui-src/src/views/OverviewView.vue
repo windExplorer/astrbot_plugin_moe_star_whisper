@@ -61,14 +61,14 @@
       </ul>
       <div class="chips" v-if="pushData?.targets?.length">
         <span class="chip" :class="{ bad: !t.sendable }" v-for="t in pushData.targets" :key="t.group_id">
-          {{ t.group_id }}{{ t.sendable ? "" : "（缺平台，会被跳过）" }}
+          {{ targetLabel(t) }}{{ t.sendable ? "" : "（缺平台，会被跳过）" }}
         </span>
       </div>
       <div class="events">
         <div class="ev" v-for="(ev, i) in pushData?.events || []" :key="i">
           <span class="badge" :class="String(ev.kind)">{{ kindLabel(ev.kind) }}</span>
           <span class="ev-ts">{{ ev.ts }}</span>
-          <span class="ev-msg">{{ ev.message }}</span>
+          <span class="ev-msg">{{ evText(ev) }}</span>
         </div>
         <div v-if="!(pushData?.events || []).length" class="sub ev-empty">
           暂无推送事件——开启推送并等到推送时刻后，这里会出现每次推送的记录（含没推成的原因）
@@ -288,6 +288,18 @@ const KIND_LABELS: Record<string, string> = {
 };
 function kindLabel(kind: string) {
   return KIND_LABELS[kind] || kind;
+}
+
+// 群名优先展示，群号永远保留（群名可能被改或缺失，号是唯一锚）
+function targetLabel(t: { group_id: string; group_name: string }): string {
+  return t.group_name ? `${t.group_name}（${t.group_id}）` : t.group_id;
+}
+
+// 事件文案里出现的「群 <号>」翻译成「群 <名>（<号>）」；映射缺失时原样显示
+function evText(ev: { message: string; gid?: string }): string {
+  const name = (pushData.value?.group_names || {})[String(ev.gid || "")] || "";
+  if (!name) return ev.message;
+  return ev.message.replace(`群 ${ev.gid}`, `群 ${name}（${ev.gid}）`);
 }
 
 const nextPushText = computed(() => {

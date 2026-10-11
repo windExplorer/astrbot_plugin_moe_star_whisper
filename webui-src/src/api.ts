@@ -310,7 +310,9 @@ export interface PushLogPayload {
   timezone: string;
   next_at: string;
   wait_seconds: number;
-  targets: { group_id: string; platform: string; sendable: boolean }[];
+  targets: { group_id: string; group_name: string; platform: string; sendable: boolean }[];
   disabled_active: number;
+  /** 群号 -> 群名（fortunes 的群名快照，事件文案用它把群号翻译成群名）。 */
+  group_names: Record<string, string>;
   events: PushEvent[];
 }

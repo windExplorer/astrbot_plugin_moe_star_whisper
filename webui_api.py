@@ -388,13 +388,26 @@ def _push_log_core(plugin) -> dict:
         pass
     targets: list[dict] = []
     disabled_active = 0
+    # 群号 -> 群名（来自 fortunes 的群名快照，与记录页下拉同一来源）；取不到群名不碍事
+    group_names: dict = {}
     try:
+        try:
+            group_names = {
+                str(g.get("group_id") or ""): str(g.get("group_name") or "")
+                for g in plugin._store.list_groups(500)
+                if g.get("group_id")
+            }
+        except Exception:
+            group_names = {}
         disabled = plugin._disabled_groups()
         for g, p in plugin._store.list_active_group_ids(7):
             if g in disabled:
                 disabled_active += 1
                 continue
-            targets.append({"group_id": g, "platform": p or "", "sendable": bool(p)})
+            targets.append({
+                "group_id": g, "platform": p or "", "sendable": bool(p),
+                "group_name": group_names.get(str(g), ""),
+            })
     except Exception:
         pass
     events = list(getattr(plugin, "_push_log", None) or [])[-120:]
@@ -407,6 +420,7 @@ def _push_log_core(plugin) -> dict:
         "wait_seconds": int(wait_seconds) if wait_seconds >= 0 else -1,
         "targets": targets,
         "disabled_active": disabled_active,
+        "group_names": group_names,
         "events": events,
     })
 

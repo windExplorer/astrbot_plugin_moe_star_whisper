@@ -230,6 +230,12 @@ async def main_async() -> int:
         def list_active_group_ids(self, days=7):
             return [("g1", "aiocqhttp"), ("g2", ""), ("g3", "aiocqhttp")]
 
+        def list_groups(self, limit=100):
+            return [
+                {"group_id": "g1", "group_name": "测试群一号", "draws": 9},
+                {"group_id": "g2", "group_name": "", "draws": 3},
+            ]
+
     push_stub = types.SimpleNamespace(
         _store=PushStore(),
         _cfg=lambda k, d=None: {"daily_push_enabled": True, "daily_push_time": "08:00",
@@ -247,6 +253,10 @@ async def main_async() -> int:
     check(set(tg) == {"g1", "g2"} and tg["g1"]["sendable"] is True
           and tg["g2"]["sendable"] is False,
           "pushlog core：停用群被滤掉，缺平台群 sendable=False（前端标灰）")
+    check(tg["g1"]["group_name"] == "测试群一号" and tg["g2"]["group_name"] == "",
+          "pushlog core：目标群带群名快照（无群名回落空串）")
+    check(pl["data"]["group_names"] == {"g1": "测试群一号", "g2": ""},
+          "pushlog core：群号->群名映射随事件一起下发")
     check(pl["data"]["disabled_active"] == 1, "pushlog core：停用但活跃的群单独计数")
     check(pl["data"]["events"][0]["kind"] == "ok", "pushlog core：事件最新在上")
     # 未开启推送时面板也必须可用——它要回答的正是「为什么没推」
