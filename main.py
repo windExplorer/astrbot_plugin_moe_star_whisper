@@ -182,10 +182,57 @@ class StarWhisperPlugin(Star):
 
     @staticmethod
     def _sender_platform(event: AstrMessageEvent) -> str:
+        """平台**实例 id**（v1.11.4 改）——`StarTools.send_message` 的匹配键。
+
+        以前存的是事件自带的适配器**类型**名（如 aiocqhttp），而发送时
+        `send_message` 用会话串首段匹配 `platform.meta().id`（AstrBot 配置里的
+        平台**实例 id**，用户常自定义）——两者一旦对不上，推送全部
+        「未匹配到平台适配器」。实例 id 与 `unified_msg_origin` 首段一致、全局
+        唯一，是唯一可靠的值。
+        """
         try:
-            return str(event.get_platform_name() or "")
+            pid = str(event.get_platform_id() or "").strip()
+            if pid:
+                return pid
+        except Exception:
+            pass
+        try:  # 兜底：unified_msg_origin 首段就是平台实例 id
+            return str(getattr(event, "unified_msg_origin", "") or "").split(":", 1)[0]
         except Exception:
             return ""
+
+    def _resolve_platform_id(self, stored: str) -> str:
+        """把 fortunes.platform 解析成平台**实例 id**（推送发送前的兜底）。
+
+        新记录（v1.11.4 起）存的就是实例 id，直接命中；旧记录存的是适配器
+        类型名（如 aiocqhttp），这里按类型名找**唯一**的同类型平台实例顶上
+        （并记 info 日志）。同类型多个实例（多机器人）时不猜——无法确定这个
+        群在哪个机器人上，发错群比不发更糟，交由调用方如实记录 no_platform。
+        """
+        stored = str(stored or "")
+        if not stored:
+            return ""
+        try:
+            insts = list(self.context.platform_manager.platform_insts)
+        except Exception:
+            return stored
+        try:  # 新数据：本身就是实例 id
+            for inst in insts:
+                if inst.meta().id == stored:
+                    return stored
+        except Exception:
+            return stored
+        try:  # 旧数据：类型名 → 同类型实例唯一时用它的 id
+            same = [inst.meta().id for inst in insts if inst.meta().name == stored]
+        except Exception:
+            same = []
+        if len(same) == 1:
+            logger.info(
+                f"[{PLUGIN_NAME}] 平台 {stored} 是适配器类型名（旧数据），"
+                f"已解析为平台实例 id：{same[0]}"
+            )
+            return same[0]
+        return stored
 
     async def _group_name_of(self, event: AstrMessageEvent) -> str:
         """群名快照（v1.9.3）：优先取事件自带的群名（OneBot/NapCat 下发的 group_name），
@@ -1167,6 +1214,9 @@ class StarWhisperPlugin(Star):
                     "skip", f"群 {gid} 的记录里没有平台信息，无法定位会话，已跳过", gid=gid,
                 )
                 continue  # 没有平台信息无法定位会话
+            # v1.11.4：旧记录存的是适配器类型名，发送前解析成平台实例 id
+            #（send_message 只认 meta().id；解析不出的保持原值，让下面如实记录）
+            platform = self._resolve_platform_id(platform)
             # v1.10.22：内容按群生成（宜忌/幸运/主色每群不同），所以放在循环里
             public = self._push_public(gid)
             board_line = self._push_board_line(gid, public["prev"])  # 本群数据：各群不同

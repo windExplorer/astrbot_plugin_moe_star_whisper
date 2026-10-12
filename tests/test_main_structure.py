@@ -353,6 +353,25 @@ def main() -> int:
     check("target = self._push_target_dt()" in src,
           "_next_push_delay 必须复用 _push_target_dt（别把时刻解析抄第二份）")
 
+    # v1.11.4：平台必须存**实例 id**（send_message 只认 platform.meta().id），
+    # 旧记录（适配器类型名）推送前解析兜底——「未匹配到平台适配器」的根因。
+    check("def _resolve_platform_id(self" in src,
+          "必须有 _resolve_platform_id（旧记录类型名→实例 id 解析）")
+    m_sp = _re.search(r"def _sender_platform\(.*?(?=\n    def )", src, _re.S)
+    sp_body = m_sp.group(0) if m_sp else ""
+    check("get_platform_id" in sp_body and "get_platform_name" not in sp_body,
+          "_sender_platform 必须存平台实例 id，不能再存适配器类型名（get_platform_name）")
+    m_res = _re.search(r"def _resolve_platform_id\(self.*?(?=\n    def )", src, _re.S)
+    res_body = m_res.group(0) if m_res else ""
+    for token, why in (
+        ("inst.meta().id == stored", "实例 id 直接命中（新数据）"),
+        ("inst.meta().name == stored", "旧数据按类型名找同类型实例"),
+        ("len(same) == 1", "同类型多个实例（多机器人）时不猜，发错群比不发更糟"),
+    ):
+        check(token in res_body, f"_resolve_platform_id 缺少：{why}")
+    check("platform = self._resolve_platform_id(platform)" in src,
+          "推送发送前必须解析平台 id（旧数据否则全部 no_platform）")
+
     # v1.10.16：/星语星象 —— 把每日推送搬到指令上（随时看 / 不用等 08:00 / 不用真开推送）
     check("push_cmd" in methods, "缺少 /星语星象 指令（push_cmd）")
     check('@filter.command("星语星象"' in src, "指令名必须是 /星语星象（主指令统一「星语」前缀）")

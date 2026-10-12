@@ -2,6 +2,37 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v1.11.4 (2026-10-12)
+
+修复推送「未匹配到平台适配器」——平台存的是适配器**类型名**，发送却按**实例 id** 匹配（版本 v1.11.3 -> v1.11.4）。
+
+- **现象（用户反馈）**：到点推送了，但事件里每个群都是「发送失败：未匹配到平台适配器」。
+- **根因**（对照 AstrBot 4.28.1 源码实证）：
+  - `fortunes.platform` 存的是 `event.get_platform_name()` → `platform_meta.name`，
+    即适配器**类型**名（如 `aiocqhttp`）；
+  - 而 `StarTools.send_message()` → `Context.send_message()` 用会话串首段
+    （`MessageSesion.platform_name`）匹配 `platform.meta().id`——AstrBot 配置里
+    该平台的**实例 id**（`platform_config["id"]`，用户常自定义）；
+  - 事件对象的 `unified_msg_origin` 首段恰恰就是实例 id（`MessageSession`
+   构造时取 `platform_meta.id`）。类型名 ≠ 实例 id → 匹配不上 → 返回 False。
+- **修复**（`main.py`）：
+  - `_sender_platform` 改存 `event.get_platform_id()`（实例 id），取不到时从
+    `unified_msg_origin` 首段兜底——**新记录**从此可发；
+  - 新增 `_resolve_platform_id(stored)`：推送发送前把库存平台值解析成实例 id。
+    新数据直接命中；**旧数据**（类型名）按类型名找**唯一**的同类型平台实例顶上
+    并记 info 日志——所以历史群记录不用迁移，装上新版下一轮推送即可恢复；
+    同类型多个实例（多机器人）时不猜（无法确定群在哪个机器人上，发错群比不发
+    更糟），如实记 `no_platform`。
+- **守卫**：`tests/test_main_structure.py` 锁死——`_sender_platform` 必须取
+  实例 id（禁 `get_platform_name`）、`_resolve_platform_id` 必须「id 直接命中 /
+  类型名唯一才解析 / 多实例不猜」、推送前必须调用解析。
+- **实测**（临时探针，AST 抠真代码，跑完即删）：新 id 直发、旧类型名唯一实例
+  解析成功、同类型双实例不猜、空值/无平台实例/context 缺失均不炸、
+  `_sender_platform` 三种事件形态取值正确——全过。
+- **多机器人用户注意**：若你跑了两个同类型适配器（如两个 QQ 机器人），旧记录
+  无法自动判断群属于哪个——让该群成员**重新抽一次签**（写实例 id）即可。
+- 版本 v1.11.3 -> v1.11.4。
+
 ## v1.11.3 (2026-10-12)
 
 修复每日推送**永不到点**的死代码——推送从功能上线起一次都没真正触发过（版本 v1.11.2 -> v1.11.3）。
