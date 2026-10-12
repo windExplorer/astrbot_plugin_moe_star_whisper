@@ -30,6 +30,25 @@ def main() -> int:
         return 0
     print(f"font: {ff}")
 
+    # 3.0) v1.11.6：本群数据行「保尾巴」排版——昵称再长也不能把「（吉凶 分数）」截掉
+    _paren = "昨日本群 7 人抽签 · 最吉：小明（大吉 96）"
+    check(card._split_paren_tail(_paren) == ("昨日本群 7 人抽签 · 最吉：小明", "（大吉 96）"),
+          "行尾括注应被拆出（尾巴独立保完整）")
+    check(card._split_paren_tail("昨日本群还没有人抽签，今天来当第一个吧")
+          == ("昨日本群还没有人抽签，今天来当第一个吧", ""), "没有括注时原样返回")
+    check(card._split_paren_tail("（大吉 96）") == ("（大吉 96）", ""),
+          "整行就是括注时不拆（否则头会被截成空）")
+    _f34 = card._font(ff, 34)
+    _avail = 1024 - 48 * 2 - 32  # 1024 宽卡的内容可用宽
+    _long = "昨日本群 7 人抽签 · 最吉：" + "可可爱爱若梦酱" * 4 + "（大吉 96）"
+    _fitted = card.fit_board_line(_long, _f34, _avail)
+    check(_fitted.endswith("（大吉 96）"),
+          f"昵称过长时必须保住末尾的吉凶与分数，实际 {_fitted!r}")
+    check("…" in _fitted, f"被截断的是昵称那半（应有省略号），实际 {_fitted!r}")
+    check(card.draw_len(_fitted, _f34) <= _avail, "保尾巴后的整行仍在可用宽度内")
+    check(card.fit_board_line(_paren, _f34, _avail) == _paren,
+          "放得下时原样返回（不无谓截断）")
+
     r = fortune.roll_fortune(
         fortune.derive_seed("2026-09-27", "utest", "card"), lex, None
     )

@@ -306,6 +306,35 @@ def _shrink_to_fit(text: str, font_file: str, size: int, avail: float,
     return font, _fit_text(text, font, avail)
 
 
+def _split_paren_tail(text: str) -> tuple[str, str]:
+    """拆出行尾的「（……）」括注：返回 (前半, 尾巴)；没有则 (原串, "")。
+
+    v1.11.6：本群数据行是「昨日本群 7 人抽签 · 最吉：<昵称>（大吉 96）」，
+    整行一起 `_fit_text` 时昵称一长就把后面的**吉凶与分数**（关键是分数）截掉了——
+    结算数据不该被昵称挤掉，所以拆开：只截昵称那半，尾巴永远保完整。
+    """
+    s = str(text or "")
+    if s.endswith("）"):
+        idx = s.rfind("（")
+        if 0 < idx < len(s) - 1:
+            return s[:idx], s[idx:]
+    return s, ""
+
+
+def fit_board_line(text: str, font: ImageFont.FreeTypeFont, avail: float) -> str:
+    """本群数据行的「保尾巴」排版（v1.11.6）：只截昵称，末尾（吉凶 分数）保证完整。
+
+    尾巴本身都放不下（极端窄卡）时才退回整行截断——那时候没有更好的选择。
+    """
+    head, tail = _split_paren_tail(text)
+    if tail and draw_len(tail, font) < avail:
+        head_fit = _fit_text(head, font, max(60, avail - draw_len(tail, font)))
+        line = head_fit + tail
+        if draw_len(line, font) <= avail:
+            return line
+    return _fit_text(text, font, avail)
+
+
 def _fit_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> str:
     """按像素宽度截断并补省略号（二分回退）；放不下一个字符时返回空串。
 
@@ -998,8 +1027,9 @@ def render_push_card(
         row_h = int(56 * u)
         f = _font(font_file, int(34 * u))
         _sparkle(draw, left + int(10 * u), y + row_h // 2, 9 * u, accent, 210)
+        # v1.11.6：只截昵称、保住末尾的「（吉凶 分数）」——昵称太长时分数以前会被截掉
         draw.text((left + int(32 * u), y + row_h // 2),
-                  _fit_text(board_line, f, right - left - int(32 * u)),
+                  fit_board_line(board_line, f, right - left - int(32 * u)),
                   font=f, fill=ink, anchor="lm")
         y += int(56 * u)
 
