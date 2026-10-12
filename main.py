@@ -874,33 +874,85 @@ class StarWhisperPlugin(Star):
         self._log_push("init", "推送循环已启动（开关/时刻/目标群见下方实时状态）")
         self._push_task = asyncio.create_task(self._push_loop())
 
-    def _next_push_delay(self) -> float:
-        """距下次推送时刻的秒数（时刻已过则顺延到明天）。"""
+    def _push_target_dt(self):
+        """今天（按配置时区）的推送时刻；配置非法时回落 08:00。
+
+        与 `_next_push_delay` 的分工：这个返回「今天的那个时刻」本身（不含
+        顺延逻辑），循环拿它做到点判断；`_next_push_delay` 只给 WebUI 面板
+        展示「距下次还有多久」。
+        """
         tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
         now = fortune.now_in(tz_name)
         raw = str(self._cfg("daily_push_time", "08:00") or "08:00")
         try:
             hh, mm = raw.split(":")[:2]
             hour, minute = int(hh), int(mm)
+            return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         except Exception:
-            hour, minute = 8, 0
-        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            # 时刻写错（如 "99:00"）时不能抛——旧实现在 replace 里抛 ValueError，
+            # 循环只能捕获后每 300 秒重试一次，永远推不了（v1.11.3）
+            logger.warning(
+                f"[{PLUGIN_NAME}] 推送时刻配置无法解析：{raw!r}，本次按 08:00 处理"
+            )
+            return now.replace(hour=8, minute=0, second=0, microsecond=0)
+
+    def _next_push_delay(self) -> float:
+        """距下次推送时刻的秒数（时刻已过则顺延到明天）——WebUI 面板展示用。"""
+        now = fortune.now_in(str(self._cfg("timezone", "Asia/Shanghai")))
+        target = self._push_target_dt()
         if target <= now:
             target += timedelta(days=1)
         return (target - now).total_seconds()
 
     async def _push_loop(self):
+        """每日推送定时循环。
+
+        **v1.11.3 修复「永不到点」死代码**（推送从上线起一次都没真正触发过）：
+        旧逻辑先取 `_next_push_delay()`、**返回正值就睡**——该函数在
+        目标时刻已过时会把目标顺延到明天、返回值恒为正，于是循环睡到点
+        那一刻醒来时，目标又被推成明天，`_do_daily_push` 永远执行不到，
+        表现就是「推送从来没发生过」（事件留痕里只有 init，没有 cycle/ok）。
+
+        新逻辑：每轮现场算「今天的目标时刻」`target`，`now >= target` 即触发；
+        推送是否「今天推过」用两道闸——
+
+        1. 内存 `attempted_today`：今天尝试过就不再尝试（空目标也不会每分钟重试）；
+        2. 落库 `count_push_history(today)`：重启后内存丢了，查留档表防止
+           今天已经真推过的群被重推一遍（消息重发 + 用户被打扰）。
+
+        关闭推送时清空 `attempted_today`——重开后若今天时刻已过，顺延明天
+        （与 v1.10.26 起的既有口径一致；改动推送时刻当天最多推一次）。
+        """
+        attempted_today = ""
         while True:
             try:
                 if not bool(self._cfg("daily_push_enabled", False)):
+                    attempted_today = ""
                     await asyncio.sleep(60)
                     continue
-                wait = self._next_push_delay()
-                if wait > 0:
-                    await asyncio.sleep(min(wait, 1800))
+                now = fortune.now_in(str(self._cfg("timezone", "Asia/Shanghai")))
+                today = now.strftime("%Y-%m-%d")
+                target = self._push_target_dt()
+                if attempted_today != today and now >= target:
+                    attempted_today = today
+                    try:  # 重启后防重推：今天已有任何群的推送留档就不再推
+                        already = bool(self._store is not None
+                                       and self._store.count_push_history(today))
+                    except Exception:
+                        already = False
+                    if already:
+                        self._log_push(
+                            "skip", f"今天（{today}）已有推送留档，重启后不重复推送",
+                        )
+                    else:
+                        await self._do_daily_push()
+                    await asyncio.sleep(120)  # 推完避开同一时刻，防重复
                     continue
-                await self._do_daily_push()
-                await asyncio.sleep(120)  # 推完避开同一时刻，防重复
+                if target > now:
+                    wait = (target - now).total_seconds()
+                else:  # 今天已推过（或刚推完）：睡到明天的目标时刻
+                    wait = (target + timedelta(days=1) - now).total_seconds()
+                await asyncio.sleep(min(max(wait, 1.0), 1800))
             except asyncio.CancelledError:
                 raise
             except Exception:

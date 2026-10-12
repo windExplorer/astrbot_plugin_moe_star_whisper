@@ -255,6 +255,12 @@ class Store:
         self._db.commit()
         return cur.rowcount > 0
 
+    def count_push_history(self, date: str) -> int:
+        """某天的推送留档条数（重启后防重推：今天推过就 >0）。"""
+        return int(self._db.execute(
+            "SELECT COUNT(*) FROM push_history WHERE date=?", (str(date),),
+        ).fetchone()[0])
+
     def list_push_history(self, page: int = 1, size: int = 20,
                           group_id: str = "", date_from: str = "",
                           date_to: str = "") -> dict:

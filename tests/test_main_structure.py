@@ -331,6 +331,28 @@ def main() -> int:
     check('if mode != "图卡" or card is None:' in push_body,
           "图卡模式下推送只发卡；卡渲染失败才回落到那段文字（消息不能是空的）")
 
+    # v1.11.3：推送循环「到点即推」。旧逻辑是 wait = _next_push_delay(); if wait > 0:
+    # sleep——该函数时刻已过就顺延明天、**恒为正**，_do_daily_push 是死代码，
+    # 推送从上线起一次都没真正触发过（用户：配了推送从来没收到）。锁死新结构。
+    check("def _push_target_dt(self)" in src,
+          "必须有 _push_target_dt（今天的推送时刻本身，顺延由调用方处理）")
+    m_loop = _re.search(r"async def _push_loop\(self.*?(?=\n    def )", src, _re.S)
+    check(bool(m_loop), "找不到 _push_loop 方法体")
+    loop_body = m_loop.group(0) if m_loop else ""
+    for token, why in (
+        ("self._push_target_dt()", "循环必须现场算今天的目标时刻（改配置即时生效）"),
+        ("now >= target", "循环必须按「现在 >= 今天目标时刻」触发推送（到点即推）"),
+        ("attempted_today", "必须有「今天尝试过」内存闸（空目标也不能每分钟重试）"),
+        ("count_push_history", "重启后必须查留档表，防止当天已真推过的群被重推"),
+        ("await self._do_daily_push()", "循环必须真正调用 _do_daily_push"),
+    ):
+        check(token in loop_body, f"_push_loop 缺少：{why}")
+    check("if wait > 0" not in loop_body,
+          "禁止回退「wait>0 就睡」的死代码模式（_next_push_delay 恒为正 → 永远推不了）")
+    # _next_push_delay 保留给面板展示，但必须基于 _push_target_dt（时刻解析只此一份）
+    check("target = self._push_target_dt()" in src,
+          "_next_push_delay 必须复用 _push_target_dt（别把时刻解析抄第二份）")
+
     # v1.10.16：/星语星象 —— 把每日推送搬到指令上（随时看 / 不用等 08:00 / 不用真开推送）
     check("push_cmd" in methods, "缺少 /星语星象 指令（push_cmd）")
     check('@filter.command("星语星象"' in src, "指令名必须是 /星语星象（主指令统一「星语」前缀）")

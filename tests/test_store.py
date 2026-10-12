@@ -376,6 +376,10 @@ def main() -> int:
           and all(r["group_id"] == "g1" for r in only_g1["rows"]), "留档按群过滤")
     ranged = st.list_push_history(date_from="2026-10-11")
     check(ranged["total"] == 1, f"留档按起始日过滤（10-11 仅 g1 一条），实际 {ranged['total']}")
+    check(st.count_push_history("2026-10-11") == 1
+          and st.count_push_history("2026-10-10") == 2
+          and st.count_push_history("2026-10-12") == 0,
+          "count_push_history 按日计数（重启防重推用）")
     paged_h = st.list_push_history(page=2, size=2)
     check(paged_h["total"] == 3 and len(paged_h["rows"]) == 1, "留档分页")
 
