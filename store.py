@@ -229,13 +229,35 @@ class Store:
         )
         self._db.commit()
 
-    def list_push_events(self, limit: int = 120) -> list:
-        """最近推送事件（最新在前），detail 为 JSON 字符串（可能为空）。"""
+    def list_push_events(self, page: int = 1, size: int = 50, kind: str = "") -> dict:
+        """推送事件分页（最新在前），detail 为 JSON 字符串（可能为空）。
+
+        表是环形保留（最近 500 条，插入时清理），所以这里无需再截断上限；
+        分页只为 WebUI「事件日志」展示（首页只取前几条）。
+        """
+        try:
+            page = max(1, int(page))
+        except (TypeError, ValueError):
+            page = 1
+        try:
+            size = max(1, min(int(size), 200))
+        except (TypeError, ValueError):
+            size = 50
+        where, args = [], []
+        if str(kind or "").strip():
+            where.append("kind=?")
+            args.append(str(kind).strip())
+        cond = (" WHERE " + " AND ".join(where)) if where else ""
+        total = int(self._db.execute(
+            f"SELECT COUNT(*) FROM push_log{cond}", args,
+        ).fetchone()[0])
         rows = self._db.execute(
-            "SELECT ts, kind, message, detail FROM push_log ORDER BY id DESC LIMIT ?",
-            (max(1, int(limit)),),
+            f"SELECT ts, kind, message, detail FROM push_log{cond}"
+            " ORDER BY id DESC LIMIT ? OFFSET ?",
+            (*args, size, (page - 1) * size),
         ).fetchall()
-        return [dict(r) for r in rows]
+        return {"total": total, "page": page, "size": size,
+                "rows": [dict(r) for r in rows]}
 
     # ---------- push_history（每日推送留档，v1.11.2：一群一天一条，永不清理） ----------
 
@@ -260,6 +282,18 @@ class Store:
         return int(self._db.execute(
             "SELECT COUNT(*) FROM push_history WHERE date=?", (str(date),),
         ).fetchone()[0])
+
+    def pushed_group_ids(self, date: str) -> set:
+        """某天已成功留档的群号集合（v1.11.5）。
+
+        用途（每日推送的两件事）：①**按群去重**——今天已推成功的群不再重发；
+        ②**失败重试**——某个群没推成功（平台掉线等）时，下一轮只补它。
+        比 v1.11.3 的「今天试过一次就整天不推」精确得多：那次失败会连累一整天。
+        """
+        rows = self._db.execute(
+            "SELECT group_id FROM push_history WHERE date=?", (str(date),),
+        ).fetchall()
+        return {str(r["group_id"]) for r in rows}
 
     def list_push_history(self, page: int = 1, size: int = 20,
                           group_id: str = "", date_from: str = "",

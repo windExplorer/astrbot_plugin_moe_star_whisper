@@ -367,14 +367,24 @@ async def h_overview(plugin) -> dict:
 
 # ---------- 每日推送面板（v1.10.26） ----------
 
-def _push_log_core(plugin) -> dict:
+def _push_log_core(plugin, page=1, size=8, kind="") -> dict:
     """「每日推送」面板核心：实时状态 + 目标群 + 推送事件（push_log 表，持久化）。
 
     状态是**现场重算**的（开关/时刻/下次推送/目标群直接读当前值，与推送循环同一口径：
     `_next_push_delay` 算下次时刻、`list_active_group_ids(7)` - 停用群算目标）；
-    事件读自库表 push_log（环形保留最近 500 条，重启不丢，v1.11.1）。
+    事件读自库表 push_log（环形保留最近 500 条，重启不丢，v1.11.1），**分页**：
+    首页面板只要最近几条（size 小），完整日志在「推送记录」页的「事件日志」标签
+    里分页翻（v1.11.5，用户反馈首页别越堆越长）。
     Store 事件方法缺失（热更过渡期的旧实例）时回落内存兜底缓冲。
     """
+    try:
+        page = max(1, int(page))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        size = max(1, min(int(size), 200))
+    except (TypeError, ValueError):
+        size = 8
     tz_name = str(plugin._cfg("timezone", "Asia/Shanghai"))
     enabled = bool(plugin._cfg("daily_push_enabled", False))
     push_time = str(plugin._cfg("daily_push_time", "08:00") or "08:00")
@@ -411,10 +421,13 @@ def _push_log_core(plugin) -> dict:
             })
     except Exception:
         pass
-    # 事件读库（最新在前）；detail JSON 解回事件字段（gid/targets/error 等）
+    # 事件读库（最新在前，分页）；detail JSON 解回事件字段（gid/targets/error 等）
     events: list[dict] = []
+    events_meta = {"total": 0, "page": page, "size": size}
     try:
-        for row in plugin._store.list_push_events(120):
+        data = plugin._store.list_push_events(page=page, size=size, kind=kind)
+        events_meta = {"total": data["total"], "page": data["page"], "size": data["size"]}
+        for row in data["rows"]:
             ev = {
                 "ts": row.get("ts") or "",
                 "kind": row.get("kind") or "",
@@ -428,9 +441,11 @@ def _push_log_core(plugin) -> dict:
                 pass
             events.append(ev)
     except Exception:
-        # 热更过渡期旧 Store 实例没有 list_push_events：回落内存兜底缓冲
-        events = list(getattr(plugin, "_push_log", None) or [])[-120:]
-        events.reverse()
+        # 热更过渡期旧 Store 实例没有新签名：回落内存兜底缓冲（只给第一页）
+        rows = list(getattr(plugin, "_push_log", None) or [])[-size:]
+        rows.reverse()
+        events = rows
+        events_meta = {"total": len(events), "page": 1, "size": size}
     return ok({
         "enabled": enabled,
         "push_time": push_time,
@@ -441,14 +456,21 @@ def _push_log_core(plugin) -> dict:
         "disabled_active": disabled_active,
         "group_names": group_names,
         "events": events,
+        "events_meta": events_meta,
     })
 
 
 async def h_push_log(plugin) -> dict:
-    """「每日推送」面板：开关/推送时刻/下次推送/目标群与最近推送事件。"""
+    """「每日推送」面板：开关/推送时刻/下次推送/目标群与推送事件（分页）。
+
+    首页面板传小 size（只看最近几条）；「推送记录」页的「事件日志」标签传
+    page/size 翻页（表最多留 500 条，环形清理，不会无限增长）。
+    """
     if plugin._store is None:
         return err("插件未初始化完成")
-    return _push_log_core(plugin)
+    return _push_log_core(
+        plugin, page=_q("page", 1), size=_q("size", 8), kind=_q("kind", ""),
+    )
 
 
 def _push_history_core(store, tz_name: str, page=1, size=20, group_id="", days=0) -> dict:

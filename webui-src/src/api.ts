@@ -314,7 +314,9 @@ export interface PushLogPayload {
   disabled_active: number;
   /** 群号 -> 群名（fortunes 的群名快照，事件文案用它把群号翻译成群名）。 */
   group_names: Record<string, string>;
+  /** 事件（分页）：首页面板取最近几条，完整日志在「推送记录」页翻页看。 */
   events: PushEvent[];
+  events_meta: { total: number; page: number; size: number };
 }
 
 /** 推送留档行（push_history 表，一群一天一条，永不清理）。 */

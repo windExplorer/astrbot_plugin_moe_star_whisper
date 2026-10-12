@@ -44,7 +44,7 @@
     <section class="panel">
       <div class="head">
         <b>每日推送</b>
-        <span class="sub">事件持久化在插件数据库（保留最近 500 条）；长期记录另见 AstrBot 日志（搜 star_whisper）</span>
+        <span class="sub">事件持久化在插件数据库（最多保留 500 条，自动清理）</span>
         <a class="refresh" @click="loadPush">{{ pushLoading ? "刷新中…" : "刷新" }}</a>
       </div>
       <ul class="kv">
@@ -73,6 +73,10 @@
         <div v-if="!(pushData?.events || []).length" class="sub ev-empty">
           暂无推送事件——开启推送并等到推送时刻后，这里会出现每次推送的记录（含没推成的原因）
         </div>
+      </div>
+      <div class="more">
+        <span class="sub">最近 {{ (pushData?.events || []).length }} / 共 {{ pushData?.events_meta?.total ?? 0 }} 条</span>
+        <a @click="goPushes">查看全部事件日志 →</a>
       </div>
     </section>
 
@@ -321,10 +325,15 @@ const targetText = computed(() => {
   return `${n} 个${bad ? `（${bad} 个缺平台）` : ""}${tail}`;
 });
 
+function goPushes() {
+  router.push({ path: "/pushes", query: { tab: "events" } });
+}
+
 async function loadPush() {
   pushLoading.value = true;
   try {
-    pushData.value = await apiGet<PushLogPayload>("pushlog");
+    // 首页只取最近 5 条：完整事件日志在「推送记录」页分页看（用户反馈首页别越堆越长）
+    pushData.value = await apiGet<PushLogPayload>("pushlog", { page: 1, size: 5 });
   } catch {
     pushData.value = null; // 面板加载失败不打扰总览，状态行显示 -
   } finally {
@@ -590,5 +599,12 @@ a {
 }
 .ev-empty {
   padding: 8px 0;
+}
+.more {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 12px;
 }
 </style>

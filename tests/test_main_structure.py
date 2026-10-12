@@ -342,13 +342,28 @@ def main() -> int:
     for token, why in (
         ("self._push_target_dt()", "循环必须现场算今天的目标时刻（改配置即时生效）"),
         ("now >= target", "循环必须按「现在 >= 今天目标时刻」触发推送（到点即推）"),
-        ("attempted_today", "必须有「今天尝试过」内存闸（空目标也不能每分钟重试）"),
-        ("count_push_history", "重启后必须查留档表，防止当天已真推过的群被重推"),
-        ("await self._do_daily_push()", "循环必须真正调用 _do_daily_push"),
+        ("pending = await self._do_daily_push()", "循环必须拿 _do_daily_push 的「还有待推群」返回值"),
+        ("self._PUSH_RETRY_WAIT", "有群没推成功时必须稍后重试（失败要能当天自愈）"),
     ):
         check(token in loop_body, f"_push_loop 缺少：{why}")
     check("if wait > 0" not in loop_body,
           "禁止回退「wait>0 就睡」的死代码模式（_next_push_delay 恒为正 → 永远推不了）")
+    check("attempted_today" not in loop_body,
+          "禁止回退「今天试过一次就整天不推」的内存闸（v1.11.5：一次失败会连累一整天）")
+
+    # v1.11.5：推送主体按「群+日期」去重 + 失败重试，返回是否仍有待推群
+    for token, why in (
+        ("async def _do_daily_push(self) -> bool:", "推送主体必须返回「是否还有群待重试」"),
+        ("self._store.pushed_group_ids(today)", "必须按当天已推成功的群集合去重（绝不重发）"),
+        ("self._PUSH_MAX_TRIES", "每群每天必须限制尝试次数（防失败死循环刷事件）"),
+        ("self._push_tries", "必须维护每群今日尝试计数"),
+        ("self._push_empty_noted", "「无推送目标」当天只留痕一次（否则每 30 分钟刷一条）"),
+        ("return True", "还有待推群时返回 True（循环据此安排重试）"),
+        ("return False", "没有待推群时返回 False（循环睡到明天）"),
+    ):
+        check(token in push_body, f"_do_daily_push 缺少：{why}")
+    check("count_push_history" not in push_body and "attempted" not in push_body,
+          "推送主体不应再用「今天试过一次」的粗粒度闸，去重按群算")
     # _next_push_delay 保留给面板展示，但必须基于 _push_target_dt（时刻解析只此一份）
     check("target = self._push_target_dt()" in src,
           "_next_push_delay 必须复用 _push_target_dt（别把时刻解析抄第二份）")

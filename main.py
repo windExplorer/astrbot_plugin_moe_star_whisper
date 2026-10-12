@@ -83,6 +83,11 @@ class StarWhisperPlugin(Star):
         self._push_task = None
         # 推送事件内存兜底（v1.11.1 起主路径落库 push_log 表，此处仅库不可用时暂存）
         self._push_log: deque = deque(maxlen=300)
+        # 本群今日推送尝试次数 {"<日期>:<群号>": n}（v1.11.5）：内存即可，
+        # 跨天靠键里的日期自然失效；「今天推成功没有」以 push_history 表为准
+        self._push_tries: dict = {}
+        # 「无推送目标」事件当天只留痕一次（循环每 30 分钟会再进来，不能刷屏）
+        self._push_empty_noted = ""
         self._member_cache: dict = {}  # group_id -> (monotonic_ts, {成员 id})，榜单用（v1.9.4）
         self._avatar_cache: dict = {}  # uid -> (monotonic_ts, bytes|None)，榜单头像用（v1.10.3）
         self._reload_modules()
@@ -886,6 +891,11 @@ class StarWhisperPlugin(Star):
 
     # ---------- 每日群推送（F17，插件自管定时循环，PRD §7.5） ----------
 
+    # 每群每天最多尝试发送次数；达到后放弃到明天（v1.11.5，防失败死循环刷事件）
+    _PUSH_MAX_TRIES = 3
+    # 有群没推成功时的重试间隔（秒）：平台掉线恢复后当天能自愈
+    _PUSH_RETRY_WAIT = 1800
+
     def _log_push(self, kind: str, message: str = "", **fields) -> None:
         """记录一条推送事件：**落库持久化**（v1.11.1），WebUI「每日推送」面板读取。
 
@@ -960,45 +970,37 @@ class StarWhisperPlugin(Star):
         那一刻醒来时，目标又被推成明天，`_do_daily_push` 永远执行不到，
         表现就是「推送从来没发生过」（事件留痕里只有 init，没有 cycle/ok）。
 
-        新逻辑：每轮现场算「今天的目标时刻」`target`，`now >= target` 即触发；
-        推送是否「今天推过」用两道闸——
+        v1.11.3：每轮现场算「今天的目标时刻」`target`，`now >= target` 即触发。
 
-        1. 内存 `attempted_today`：今天尝试过就不再尝试（空目标也不会每分钟重试）；
-        2. 落库 `count_push_history(today)`：重启后内存丢了，查留档表防止
-           今天已经真推过的群被重推一遍（消息重发 + 用户被打扰）。
-
-        关闭推送时清空 `attempted_today`——重开后若今天时刻已过，顺延明天
-        （与 v1.10.26 起的既有口径一致；改动推送时刻当天最多推一次）。
+        **v1.11.5 去掉「一天只试一次」的内存闸**（用户报「到点没推、也没记录」）：
+        v1.11.3 用一个内存变量记「今天试过了」——只要当天**尝试过一次**，
+        之后整天不再推（哪怕那次全失败、哪怕改了推送时刻或修了平台问题），
+        而且不产生任何事件，表现就是「到点没推、日志里也没记录」。
+        现在改为**按群+日期去重 + 失败自动重试**：`_do_daily_push()` 只推
+        「今天还没成功过的群」，返回「是否还有群待重试」；有待重试就等
+        `_PUSH_RETRY_WAIT` 再来一轮（每群每天最多 `_PUSH_MAX_TRIES` 次），
+        全部到位才睡到明天。核对「今天到底推没推」始终以 push_history 留档表
+        为准（重启也不丢，也不会因为重启而重发已成功的群）。
         """
-        attempted_today = ""
         while True:
             try:
                 if not bool(self._cfg("daily_push_enabled", False)):
-                    attempted_today = ""
+                    self._push_tries.clear()
                     await asyncio.sleep(60)
                     continue
                 now = fortune.now_in(str(self._cfg("timezone", "Asia/Shanghai")))
-                today = now.strftime("%Y-%m-%d")
                 target = self._push_target_dt()
-                if attempted_today != today and now >= target:
-                    attempted_today = today
-                    try:  # 重启后防重推：今天已有任何群的推送留档就不再推
-                        already = bool(self._store is not None
-                                       and self._store.count_push_history(today))
-                    except Exception:
-                        already = False
-                    if already:
-                        self._log_push(
-                            "skip", f"今天（{today}）已有推送留档，重启后不重复推送",
-                        )
+                if now >= target:
+                    pending = await self._do_daily_push()
+                    if pending:
+                        # 还有群没推成功（平台掉线等）：下一轮只补这些群
+                        await asyncio.sleep(min(self._PUSH_RETRY_WAIT, 1800))
                     else:
-                        await self._do_daily_push()
-                    await asyncio.sleep(120)  # 推完避开同一时刻，防重复
+                        # 今天全部到位：睡到明天的目标时刻（分片睡，改配置能及时生效）
+                        wait = (target + timedelta(days=1) - now).total_seconds()
+                        await asyncio.sleep(min(max(wait, 1.0), 1800))
                     continue
-                if target > now:
-                    wait = (target - now).total_seconds()
-                else:  # 今天已推过（或刚推完）：睡到明天的目标时刻
-                    wait = (target + timedelta(days=1) - now).total_seconds()
+                wait = (target - now).total_seconds()
                 await asyncio.sleep(min(max(wait, 1.0), 1800))
             except asyncio.CancelledError:
                 raise
@@ -1187,29 +1189,61 @@ class StarWhisperPlugin(Star):
             caption += self._push_text_fallback(public, board_line)
         return caption, card
 
-    async def _do_daily_push(self):
+    async def _do_daily_push(self) -> bool:
+        """向「今天还没成功推送」的群推一轮；返回「是否还有群待重试」。
+
+        v1.11.5 起按**群+日期**去重（`pushed_group_ids`）+ 失败自动重试：某个群
+        没推成功（平台掉线、发送异常）时，下一轮只补它，已成功的群绝不重发；
+        每群每天最多试 `_PUSH_MAX_TRIES` 次（防死循环刷事件），用尽即放弃到明天。
+        """
         if self._store is None:
-            return
+            return False
+        tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
+        today = fortune.local_today(tz_name)
         # v1.10.19：推送也跟随「出签方式」——「仅文字」不发卡、「萌系图卡」只发卡（不带那段标题文字）
         mode = str(self._cfg("output_mode", "图卡"))
         want_card = mode != "纯文本"
         disabled = self._disabled_groups()
         targets = [g for g in self._store.list_active_group_ids(7) if g[0] not in disabled]
         if not targets:
-            # v1.10.26：目标为空从「静默跳过」改为留痕——推送没发生也要能看到为什么
-            self._log_push(
-                "empty",
-                "近 7 天有抽签记录且未停用的群为 0，本次无推送目标"
-                "（推送只发给近 7 天有人抽过签的群）",
-            )
-            return
-        self._log_push(
-            "cycle", f"开始推送（目标 {len(targets)} 个群）",
-            targets=[g for g, _p in targets],
-        )
+            # v1.10.26：目标为空从「静默跳过」改为留痕——推送没发生也要能看到为什么。
+            # v1.11.5：只在当天首次留痕（循环每 30 分钟还会再进来，不能刷屏）
+            if self._push_empty_noted != today:
+                self._push_empty_noted = today
+                self._log_push(
+                    "empty",
+                    "近 7 天有抽签记录且未停用的群为 0，本次无推送目标"
+                    "（推送只发给近 7 天有人抽过签的群）",
+                )
+            return False
+        try:
+            done = self._store.pushed_group_ids(today)
+        except Exception:
+            done = set()
+        if len(self._push_tries) > 500:  # 内存计数防膨胀（键含日期，跨天自然失效）
+            self._push_tries.clear()
+        pending = []
         for gid, platform in targets:
+            if gid in done:
+                continue  # 今天这个群已推成功过：绝不重发
+            if self._push_tries.get(f"{today}:{gid}", 0) >= self._PUSH_MAX_TRIES:
+                continue  # 今天的尝试次数用尽，明天再说
+            pending.append((gid, platform))
+        if not pending:
+            return False
+        self._log_push(
+            "cycle",
+            f"开始推送（本轮 {len(pending)} 个群；今天已成功 {len(done)} 个）",
+            targets=[g for g, _p in pending],
+        )
+        for gid, platform in pending:
+            key = f"{today}:{gid}"
+            self._push_tries[key] = self._push_tries.get(key, 0) + 1
+            tries = self._push_tries[key]
             if not platform:
                 # v1.10.26：缺平台信息从静默 continue 改为留痕
+                # v1.11.5：这种群永远发不了，直接标记放弃、不参与重试
+                self._push_tries[key] = self._PUSH_MAX_TRIES
                 self._log_push(
                     "skip", f"群 {gid} 的记录里没有平台信息，无法定位会话，已跳过", gid=gid,
                 )
@@ -1230,34 +1264,63 @@ class StarWhisperPlugin(Star):
                 chain.chain.append(Image.fromFileSystem(card))
             try:
                 ok = await StarTools.send_message(session, chain)
-                self._log_push(
-                    "ok" if ok else "no_platform",
-                    f"群 {gid}：{'已发送' if ok else '发送失败：未匹配到平台适配器'}",
-                    gid=gid, platform=platform, with_card=bool(card),
-                )
-                logger.info(f"[{PLUGIN_NAME}] 推送 {gid}: {'ok' if ok else 'no platform matched'}")
                 if ok:
+                    self._push_tries.pop(key, None)  # 成功：清掉本群今日的重试计数
+                    self._log_push(
+                        "ok", f"群 {gid}：已发送",
+                        gid=gid, platform=platform, with_card=bool(card),
+                    )
+                    logger.info(f"[{PLUGIN_NAME}] 推送 {gid}: ok")
                     # v1.11.2：推送成功即按（群, 日期）**永久留档**——WebUI「推送记录」可查。
+                    # 它同时是「今天这个群推过没有」的唯一依据（重启也不会重发已成功的群）。
                     # 只记每日推送，/星语星象（手动指令）不留档；卡文件 push_<日期>_<群号>.png
                     # 天然按群按日不覆盖，card_path 长期有效。
                     try:
                         self._store.record_push_history(
                             gid, public["today"],
-                            fortune.now_in(
-                                str(self._cfg("timezone", "Asia/Shanghai"))
-                            ).strftime("%Y-%m-%d %H:%M:%S"),
+                            fortune.now_in(tz_name).strftime("%Y-%m-%d %H:%M:%S"),
                             caption=caption, card_path=card or "",
                         )
                     except Exception:
                         logger.warning(
                             f"[{PLUGIN_NAME}] 推送留档失败（{gid}）\n{traceback.format_exc()}"
                         )
+                else:
+                    self._log_push(
+                        "no_platform",
+                        f"群 {gid}：发送失败：未匹配到平台适配器"
+                        f"（第 {tries}/{self._PUSH_MAX_TRIES} 次，稍后自动重试）",
+                        gid=gid, platform=platform,
+                    )
+                    logger.warning(
+                        f"[{PLUGIN_NAME}] 推送 {gid}: no platform matched"
+                        f"（第 {tries}/{self._PUSH_MAX_TRIES} 次）"
+                    )
             except Exception:
                 self._log_push(
-                    "error", f"群 {gid}：发送异常", gid=gid,
-                    error=traceback.format_exc()[-400:],
+                    "error",
+                    f"群 {gid}：发送异常（第 {tries}/{self._PUSH_MAX_TRIES} 次，稍后自动重试）",
+                    gid=gid, error=traceback.format_exc()[-400:],
                 )
                 logger.error(f"[{PLUGIN_NAME}] 推送 {gid} 失败\n{traceback.format_exc()}")
+        # 本轮结束：还有没有「今天没成功 + 次数没用尽」的群？（决定循环是重试还是等明天）
+        try:
+            done = self._store.pushed_group_ids(today)
+        except Exception:
+            pass
+        left = [
+            g for g, _p in targets
+            if g not in done
+            and self._push_tries.get(f"{today}:{g}", 0) < self._PUSH_MAX_TRIES
+        ]
+        if left:
+            self._log_push(
+                "retry",
+                f"{len(left)} 个群本轮未成功，{max(1, self._PUSH_RETRY_WAIT // 60)} 分钟后自动重试",
+                targets=left,
+            )
+            return True
+        return False
 
     def _format_result(self, payload: dict, repeat: bool = False) -> str:
         dims = payload.get("dims") or {}

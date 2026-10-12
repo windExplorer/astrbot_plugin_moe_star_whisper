@@ -348,16 +348,23 @@ def main() -> int:
                          ts="10-11 08:00:00")
     st.record_push_event("ok", "群 g1：已发送", '{"gid": "g1", "platform": "aiocqhttp"}',
                          ts="10-11 08:00:01")
-    evs = st.list_push_events(10)
+    evs = st.list_push_events(page=1, size=10)["rows"]
     check([e["kind"] for e in evs] == ["ok", "cycle", "init"],
           f"推送事件最新在前，实际 {[e['kind'] for e in evs]}")
     check(evs[0]["ts"] == "10-11 08:00:01" and '"g1"' in (evs[0]["detail"] or ""),
           f"事件 ts/detail 原样读回，实际 {evs[0]}")
+    # v1.11.5：事件查询分页（首页只取前几条，完整日志在「推送记录」页翻页）
+    pg = st.list_push_events(page=2, size=1)
+    check(pg["total"] == 3 and pg["page"] == 2 and len(pg["rows"]) == 1
+          and pg["rows"][0]["kind"] == "cycle",
+          f"事件分页取第 2 页，实际 {pg}")
+    check(st.list_push_events(kind="ok")["total"] == 1, "事件按类型过滤")
     for i in range(510):  # 灌满触发环形清理
         st.record_push_event("ok", f"evt-{i}", "", ts=f"10-12 00:{i % 60:02d}:00")
-    evs2 = st.list_push_events(1000)
-    check(len(evs2) == 500, f"push_log 环形保留 500 条，实际 {len(evs2)}")
-    check(evs2[0]["message"] == "evt-509", f"保留的是最新一批，实际 {evs2[0]['message']}")
+    evs2 = st.list_push_events(page=1, size=200)
+    check(evs2["total"] == 500, f"push_log 环形保留 500 条，实际 {evs2['total']}")
+    check(evs2["rows"][0]["message"] == "evt-509",
+          f"保留的是最新一批，实际 {evs2['rows'][0]['message']}")
 
     # 推送留档（v1.11.2）：一群一天一条、同天重推覆盖、永不清理
     st.record_push_history("g1", "2026-10-10", "2026-10-10 08:00:00",
@@ -380,8 +387,17 @@ def main() -> int:
           and st.count_push_history("2026-10-10") == 2
           and st.count_push_history("2026-10-12") == 0,
           "count_push_history 按日计数（重启防重推用）")
+    # v1.11.5：按群去重 / 失败重试的判定依据
+    check(st.pushed_group_ids("2026-10-10") == {"g1", "g2"}
+          and st.pushed_group_ids("2026-10-11") == {"g1"}
+          and st.pushed_group_ids("2026-10-12") == set(),
+          "pushed_group_ids 返回当天已推成功的群集合")
+    st.record_push_history("g9", "2026-10-11", "2026-10-11 09:00:00", caption="补推")
+    check(st.pushed_group_ids("2026-10-11") == {"g1", "g9"}
+          and st.count_push_history("2026-10-11") == 2,
+          "补推成功的群进入当天已完成集合（重试后不再重发）")
     paged_h = st.list_push_history(page=2, size=2)
-    check(paged_h["total"] == 3 and len(paged_h["rows"]) == 1, "留档分页")
+    check(paged_h["total"] == 4 and len(paged_h["rows"]) == 2, "留档分页")
 
     st.close()
     if FAILED:

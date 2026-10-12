@@ -242,8 +242,14 @@ async def main_async() -> int:
         def record_push_event(self, kind, message, detail="", ts=""):
             self._events.append({"ts": ts, "kind": kind, "message": message, "detail": detail})
 
-        def list_push_events(self, limit=120):
-            return list(reversed(self._events[-max(1, int(limit)):]))
+        def list_push_events(self, page=1, size=50, kind=""):
+            """分页（最新在前）——与真 store 的 v1.11.5 签名一致。"""
+            rows = [e for e in reversed(self._events) if not kind or e["kind"] == kind]
+            size = max(1, min(int(size), 200))
+            page = max(1, int(page))
+            start = (page - 1) * size
+            return {"total": len(rows), "page": page, "size": size,
+                    "rows": rows[start:start + size]}
 
     push_store = PushStore()
     push_stub = types.SimpleNamespace(
@@ -275,6 +281,16 @@ async def main_async() -> int:
     ev0 = pl["data"]["events"][0]
     check(ev0["kind"] == "error" and ev0["ts"] == "10-11 08:01:00",
           "pushlog core：库表事件最新在上且 ts 带出")
+    # v1.11.5：事件分页（首页取小 size，完整日志在「推送记录」页翻页）
+    check(pl["data"]["events_meta"]["total"] == 2, "pushlog core：事件分页元信息带 total")
+    pg2 = webui_api._push_log_core(push_stub, page=2, size=1)
+    check(pg2["data"]["events"][0]["kind"] == "ok"
+          and pg2["data"]["events_meta"]["page"] == 2,
+          "pushlog core：事件分页可翻页（第 2 页拿到更早那条）")
+    only_ok = webui_api._push_log_core(push_stub, kind="ok")
+    check(only_ok["data"]["events_meta"]["total"] == 1
+          and only_ok["data"]["events"][0]["kind"] == "ok",
+          "pushlog core：事件按类型过滤")
     check(ev0.get("gid") is None, "pushlog core：坏 detail JSON 不炸、不解出字段")
     ok_ev = next(e for e in pl["data"]["events"] if e["kind"] == "ok")
     check(ok_ev.get("gid") == "g1" and ok_ev.get("platform") == "aiocqhttp",
