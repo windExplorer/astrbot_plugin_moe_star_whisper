@@ -30,24 +30,70 @@ def main() -> int:
         return 0
     print(f"font: {ff}")
 
-    # 3.0) v1.11.6：本群数据行「保尾巴」排版——昵称再长也不能把「（吉凶 分数）」截掉
-    _paren = "昨日本群 7 人抽签 · 最吉：小明（大吉 96）"
-    check(card._split_paren_tail(_paren) == ("昨日本群 7 人抽签 · 最吉：小明", "（大吉 96）"),
-          "行尾括注应被拆出（尾巴独立保完整）")
-    check(card._split_paren_tail("昨日本群还没有人抽签，今天来当第一个吧")
-          == ("昨日本群还没有人抽签，今天来当第一个吧", ""), "没有括注时原样返回")
-    check(card._split_paren_tail("（大吉 96）") == ("（大吉 96）", ""),
-          "整行就是括注时不拆（否则头会被截成空）")
-    _f34 = card._font(ff, 34)
-    _avail = 1024 - 48 * 2 - 32  # 1024 宽卡的内容可用宽
-    _long = "昨日本群 7 人抽签 · 最吉：" + "可可爱爱若梦酱" * 4 + "（大吉 96）"
-    _fitted = card.fit_board_line(_long, _f34, _avail)
-    check(_fitted.endswith("（大吉 96）"),
-          f"昵称过长时必须保住末尾的吉凶与分数，实际 {_fitted!r}")
-    check("…" in _fitted, f"被截断的是昵称那半（应有省略号），实际 {_fitted!r}")
-    check(card.draw_len(_fitted, _f34) <= _avail, "保尾巴后的整行仍在可用宽度内")
-    check(card.fit_board_line(_paren, _f34, _avail) == _paren,
-          "放得下时原样返回（不无谓截断）")
+    # 3.0) v1.11.7：本群数据块的「胶囊 + 昵称完整折行」——名字要显示全，吉凶/分数独立成色块
+    _parsed = card.board_from_line("昨日本群 7 人抽签 · 最吉：可可爱爱若梦酱（大吉 96）")
+    check(_parsed == {"count": 7, "nickname": "可可爱爱若梦酱", "grade": "大吉", "score": 96},
+          f"本群数据文字应被解析成结构化数据，实际 {_parsed}")
+    check(card.board_from_line("") is None, "空文本返回 None（整块不画）")
+    check(card.board_from_line("昨日本群还没有人抽签，今天来当第一个吧")
+          == {"plain": "昨日本群还没有人抽签，今天来当第一个吧"},
+          "解析不出结构的文案走 plain（按段落折行，绝不丢内容）")
+    check(card.board_from_line("昨日本群 3 人抽签 · 最吉：小凶测（凶 12）")["score"] == 12,
+          "两位数分数也要解析出来")
+    # 昵称清洗（v1.11.7）：零宽字符造空白名 / 控制符打乱排版 / 空昵称
+    check(card.clean_nickname("\u200b\u200b\u3164\ufeff") == "旅人",
+          "全是零宽/占位字符的昵称应回落兜底名（否则卡上一片空白）")
+    check(card.clean_nickname("") == "旅人" and card.clean_nickname(None) == "旅人",
+          "空昵称 / None 都要有兜底名")
+    check(card.clean_nickname("　　") == "旅人", "全角空格也算空白")
+    check(card.clean_nickname("\u200b小\u200b明\u200b") == "小明", "零宽字符应被删除")
+    check(card.clean_nickname("小\n明\r\n酱") == "小 明 酱",
+          "换行/回车等控制空白折叠成单个空格（不能让昵称把卡面撑乱）")
+    check(card.clean_nickname("  A \t B  ") == "A B", "连续空白折叠")
+    check(card.clean_nickname("小明", "旅人") == "小明", "正常昵称原样返回")
+    # 字体字形覆盖：不传 font（纯文本回落）时不动名字；传 font 时剔掉画不出的 emoji
+    _f_nick = card._font(ff, 38)
+    check(card.clean_nickname("\U0001f338可可爱爱\U0001f338") == "\U0001f338可可爱爱\U0001f338",
+          "纯文本路径不删 emoji（文字本身支持，名字不该被改）")
+    _emoji_clean = card.clean_nickname("\U0001f338可可爱爱\U0001f338", "旅人", _f_nick)
+    check("\U0001f338" not in _emoji_clean and "可可爱爱" in _emoji_clean,
+          f"卡面路径应剔掉该字体画不出的 emoji（豆腐块），实际 {_emoji_clean!r}")
+    check(card.clean_nickname("\U0001f338\U0001f339\U0001f33a", "旅人", _f_nick) == "旅人",
+          "整名都是画不出的符号时回落兜底名，不能画一串豆腐块")
+    if card.font_has_glyph(_f_nick, "★"):  # 有字形的符号必须留下（不同字体覆盖不同）
+        check("★" in card.clean_nickname("★小明★", "旅人", _f_nick), "有字形的符号要保留")
+    # 解析回来的昵称同样要清（独立使用 card 时也是干净的名字）
+    _bad = card.board_from_line("昨日本群 3 人抽签 · 最吉：\u200b\u3164（大吉 96）")
+    check(_bad and _bad["count"] == 3 and card.clean_nickname(_bad["nickname"]) == "旅人",
+          f"零宽昵称解析后经清洗应成兜底名，实际 {_bad}")
+    check(card.board_from_line("昨日本群 3 人抽签 · 最吉：（大吉 96）")
+          == {"count": 3, "nickname": "", "grade": "大吉", "score": 96},
+          "昵称缺失的文案也要能解析出吉凶/分数（昵称由布局层补兜底）")
+    check(card.board_from_line("昨日本群 5 人抽签 · 最吉：小\u200b明\n酱\r（大吉 96）")
+          == {"count": 5, "nickname": "小明 酱", "grade": "大吉", "score": 96},
+          "带零宽/换行的昵称必须先清洗再解析（否则锚定正则失配、色块消失）")
+
+    _f38 = card._font(ff, 38)
+    # 1024 宽卡：内容宽 = 1024 - 两侧 margin(48)*2 - 两侧内边距(48)*2 = 832；
+    # 再减胶囊左右内边距 26*2 = 780，与 card._board_view 的口径一致
+    _inner = 832 - 26 * 2
+    _nick = "可可爱爱若梦酱" * 5  # 30 字：一行放不下，必折行
+    _lines = card._wrap_text(_nick, _f38, _inner, max_lines=3)
+    check("".join(_lines) == _nick, f"正常长昵称必须完整折行、一个字不丢，实际 {_lines}")
+    check(len(_lines) > 1, f"超出一行的昵称应折成多行，实际 {_lines}")
+    check(all(card.draw_len(t, _f38) <= _inner for t in _lines), "每折行都在可用宽度内")
+    _capped = card._wrap_text(_nick * 5, _f38, _inner, max_lines=2)
+    check(len(_capped) == 2 and _capped[-1].endswith("…"),
+          f"病态长昵称按上限折行并在末行省略号，实际 {_capped}")
+    # 卡片高度必须跟着昵称行数长（内容不截断，靠加高而不是裁字）
+    _args = ("2026-10-12", "星期一", {"name": "新月", "text": "许愿的好时机"}, "")
+    _h_short = Image.open(card.render_push_card(
+        *_args, cards_root=Path(tempfile.mkdtemp(prefix="moe_b1_")),
+        board_line="昨日本群 7 人抽签 · 最吉：小明（大吉 96）")).size[1]
+    _h_long = Image.open(card.render_push_card(
+        *_args, cards_root=Path(tempfile.mkdtemp(prefix="moe_b2_")),
+        board_line="昨日本群 7 人抽签 · 最吉：" + _nick + "（大吉 96）")).size[1]
+    check(_h_long > _h_short, f"昵称折行后卡应更高（不裁字），实际 {_h_short} -> {_h_long}")
 
     r = fortune.roll_fortune(
         fortune.derive_seed("2026-09-27", "utest", "card"), lex, None

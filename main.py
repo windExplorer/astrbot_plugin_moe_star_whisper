@@ -29,9 +29,11 @@ try:  # M2 起提供图卡；缺失/失败时回退纯文本
         render_card, render_push_card, render_help_card,
         render_wallet_card, render_shop_card, render_rank_card,
         render_pk_card, render_notice_card, render_calendar_card,
+        clean_nickname,
     )
 except Exception:  # pragma: no cover
     card = None
+    clean_nickname = None
     render_card = None
     render_push_card = None
     render_help_card = None
@@ -59,6 +61,21 @@ ITEM_DEFS = {
 DEFAULT_PRICES = {"reroll": 80, "amulet": 50, "streak_guard": 30, "candle": 20}
 # 每日推送 / /星语星象 卡底部的指令引导（v1.10.15 起；抽成常量避免两处各写一份）
 PUSH_HINT = "发送 /星语 抽今日签 ｜ /星语榜 看今日排行"
+
+
+def _clean_nickname(raw, fallback: str = "旅人") -> str:
+    """昵称清洗（v1.11.7）：具体实现在 `card.clean_nickname`（纯 Pillow 模块、可独立测）。
+
+    这里做一层「card 不可用」的兜底（无 PIL 时 card 导入失败）——文本这条路
+    也绝不能出现空白名字或换行。
+    """
+    if clean_nickname is not None:
+        try:
+            return clean_nickname(raw, fallback)
+        except Exception:
+            pass
+    text = str(raw if raw is not None else "").strip()
+    return text or fallback
 _ITEM_ALIASES = {
     "reroll": "reroll", "换签卡": "reroll", "换签": "reroll", "改运卡": "reroll",
     "amulet": "amulet", "厄运护身符": "amulet", "护身符": "amulet", "护身": "amulet",
@@ -1032,7 +1049,9 @@ class StarWhisperPlugin(Star):
         if not rows:
             return "昨日本群还没有人抽签，今天来当第一个吧"
         top = rows[0]
-        nick = str(top.get("nickname") or "").strip() or "旅人"
+        # v1.11.7：昵称清洗（零宽字符造空白名 / 控制符打乱卡面 / 空昵称）——
+        # 清洗只此一处，卡片与纯文本两条路都拿到干净的名字
+        nick = _clean_nickname(top.get("nickname"), "旅人")
         return (f"昨日本群 {len(rows)} 人抽签 · 最吉：{nick}"
                 f"（{str(top.get('grade') or '？')} {int(top.get('score') or 0)}）")
 

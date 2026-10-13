@@ -387,6 +387,13 @@ def main() -> int:
     check("platform = self._resolve_platform_id(platform)" in src,
           "推送发送前必须解析平台 id（旧数据否则全部 no_platform）")
 
+    # v1.11.7：本群数据的昵称必须清洗（零宽字符造空白名 / 换行打乱卡面 / 空昵称）
+    check("def _clean_nickname(" in src, "必须有昵称清洗包装（card 不可用时的兜底）")
+    check('_clean_nickname(top.get("nickname"), "旅人")' in src,
+          "_push_board_line 的昵称必须过清洗，不能直接取原值")
+    check("clean_nickname," in src and "from .card import" in src,
+          "main 必须从 card 复用清洗实现（不许抄第二份规则）")
+
     # v1.10.16：/星语星象 —— 把每日推送搬到指令上（随时看 / 不用等 08:00 / 不用真开推送）
     check("push_cmd" in methods, "缺少 /星语星象 指令（push_cmd）")
     check('@filter.command("星语星象"' in src, "指令名必须是 /星语星象（主指令统一「星语」前缀）")

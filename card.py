@@ -306,33 +306,201 @@ def _shrink_to_fit(text: str, font_file: str, size: int, avail: float,
     return font, _fit_text(text, font, avail)
 
 
-def _split_paren_tail(text: str) -> tuple[str, str]:
-    """拆出行尾的「（……）」括注：返回 (前半, 尾巴)；没有则 (原串, "")。
+# 零宽 / 占位型不可见字符：平台昵称里很常见（造空白名、防重名前缀），
+# 画到卡上就是空一块，用户以为卡坏了；控制符（含换行）还会把排版打乱。
+_INVISIBLE_RE = re.compile(
+    "[\u0000-\u0008\u000b-\u001f\u007f\u00ad\u115f\u1160\u17b5\u180e"
+    "\u200b-\u200f\u202a-\u202e\u2060-\u2064\u206a-\u206f\u3164\ufeff\uffa0"
+    "\ufff9-\ufffb]"
+)
+_WS_RE = re.compile(r"[\s\u3000]+")
 
-    v1.11.6：本群数据行是「昨日本群 7 人抽签 · 最吉：<昵称>（大吉 96）」，
-    整行一起 `_fit_text` 时昵称一长就把后面的**吉凶与分数**（关键是分数）截掉了——
-    结算数据不该被昵称挤掉，所以拆开：只截昵称那半，尾巴永远保完整。
+
+def _sanitize_text(raw) -> str:
+    """去不可见/控制字符、折叠空白（不带兜底）——昵称清洗与数据行解析共用。
+
+    `\\t\\n\\r` 不删而是当空白折叠成单个空格：平台昵称偶尔带换行，直接保留会
+    把卡片排版打乱，也会**打断「本群数据」行的解析**（v1.11.7 实测踩到：
+    带换行的昵称整行走 plain，吉凶色块就没了）。
     """
-    s = str(text or "")
-    if s.endswith("）"):
-        idx = s.rfind("（")
-        if 0 < idx < len(s) - 1:
-            return s[:idx], s[idx:]
-    return s, ""
+    s = str(raw if raw is not None else "")
+    return _WS_RE.sub(" ", _INVISIBLE_RE.sub("", s)).strip()
 
 
-def fit_board_line(text: str, font: ImageFont.FreeTypeFont, avail: float) -> str:
-    """本群数据行的「保尾巴」排版（v1.11.6）：只截昵称，末尾（吉凶 分数）保证完整。
+def clean_nickname(raw, fallback: str = "旅人", font=None) -> str:
+    """昵称清洗（v1.11.7）：去不可见字符与控制符、折叠空白；清完为空用兜底名。
 
-    尾巴本身都放不下（极端窄卡）时才退回整行截断——那时候没有更好的选择。
+    给了 `font` 时再剔一道「这个字体根本画不出来」的字符（emoji 在 msyh 这类
+    中文字体上是豆腐块「口」，画到卡上比不显示更难看）；★ ● 【 这类**有字形**
+    的符号照旧保留。纯文本回落那条路不传 font（文字本身支持 emoji），
+    所以名字不会被改掉，只是卡面上不强画缺字形的符号。
     """
-    head, tail = _split_paren_tail(text)
-    if tail and draw_len(tail, font) < avail:
-        head_fit = _fit_text(head, font, max(60, avail - draw_len(tail, font)))
-        line = head_fit + tail
-        if draw_len(line, font) <= avail:
-            return line
-    return _fit_text(text, font, avail)
+    s = _sanitize_text(raw)
+    if font is not None:
+        s = _sanitize_text(strip_unrenderable(s, font))
+    return s or fallback
+
+
+# 「豆腐块」掩码缓存：`_font` 按 (路径, 字号) 缓存字体对象，所以 id 稳定
+_missing_mask_cache: dict = {}
+
+
+def _missing_mask(font):
+    """该字体渲染「缺字形字符」的结果（拿私用区 U+E123 取样，几乎没有字体给它做字形）。"""
+    key = id(font)
+    if key in _missing_mask_cache:
+        return _missing_mask_cache[key]
+    try:
+        mask = font.getmask("\ue123")
+        ref = (mask.size, bytes(mask))
+    except Exception:
+        ref = None
+    _missing_mask_cache[key] = ref
+    return ref
+
+
+def font_has_glyph(font, ch: str) -> bool:
+    """这个字符在该字体里有没有真实字形（没有就是豆腐块）。判断不了时按「有」处理。"""
+    ref = _missing_mask(font)
+    if ref is None:
+        return True
+    try:
+        mask = font.getmask(ch)
+    except Exception:
+        return False
+    return (mask.size, bytes(mask)) != ref
+
+
+def strip_unrenderable(text: str, font) -> str:
+    """去掉该字体画不出来的字符（emoji 在多数中文字体上就是豆腐块）。"""
+    if font is None:
+        return text
+    return "".join(ch for ch in str(text or "") if font_has_glyph(font, ch))
+
+
+def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: float,
+               max_lines: int = 0) -> list:
+    """按像素宽度折行（逐字贪心，中英混排都行）；返回行列表。
+
+    `max_lines > 0` 时最多这些行，超出部分在末行用省略号收尾——只有病态长文本
+    才会触发（本群数据块的昵称给 3 行、约 60+ 字，正常昵称完整显示，v1.11.7
+    用户要求「把别人的名字显示全」）。
+    """
+    text = str(text or "")
+    if not text:
+        return []
+    out: list = []
+    cur = ""
+    for ch in text:
+        if ch == "\n":
+            out.append(cur)
+            cur = ""
+            continue
+        if cur and draw_len(cur + ch, font) > max_width:
+            out.append(cur)
+            cur = ch
+            if max_lines and len(out) >= max_lines:
+                break
+        else:
+            cur += ch
+    if max_lines and len(out) >= max_lines:
+        if cur:  # 打断了但还有剩余：把剩余并进末行并加省略号
+            out[-1] = _fit_text(out[-1] + cur, font, max_width)
+        return out[:max_lines]
+    if cur:
+        out.append(cur)
+    return out
+
+
+# 「昨日本群 7 人抽签 · 最吉：可可爱爱若梦酱（大吉 96）」——main._push_board_line 的格式
+_BOARD_RE = re.compile(r"^昨日本群\s*(\d+)\s*人抽签\s*·\s*最吉：(.+)（(.+?)\s+(\d+)）$")
+# 昵称缺失（历史数据/上游异常）：「昨日本群 7 人抽签 · 最吉：（大吉 96）」
+_BOARD_RE_NO_NAME = re.compile(
+    r"^昨日本群\s*(\d+)\s*人抽签\s*·\s*最吉：\s*（(.+?)\s+(\d+)）$"
+)
+
+
+def board_from_line(text: str) -> dict | None:
+    """把「本群数据」文字解析成结构化数据（供胶囊块排版，v1.11.7）。
+
+    调用方（`main._push_board_line`）给的仍是同一句文字，这里解析回
+    「人数 / 昵称 / 吉凶 / 分数」——文案只有一处来源，卡片与纯文本回落永远一致。
+    解析不出来（自定义文案/未来格式变化）时返回 `{"plain": 原文}`，卡片按
+    普通折行段落画，绝不丢内容。
+    """
+    # 先清洗再解析：零宽字符与换行会让锚定正则匹配失败（整行沦为 plain、色块丢失）
+    s = _sanitize_text(text)
+    if not s:
+        return None
+    m = _BOARD_RE.match(s)
+    if m:
+        return {
+            "count": int(m.group(1)),
+            "nickname": m.group(2).strip(),
+            "grade": m.group(3).strip(),
+            "score": int(m.group(4)),
+        }
+    m = _BOARD_RE_NO_NAME.match(s)  # 昵称缺失：昵称留空，布局层会补兜底名
+    if m:
+        return {"count": int(m.group(1)), "nickname": "",
+                "grade": m.group(2).strip(), "score": int(m.group(3))}
+    return {"plain": s}
+
+
+def _board_view(data: dict | None, font_file: str, u: float, avail: float) -> dict:
+    """本群数据胶囊块的**布局**（v1.11.7）：高度 + 标签 + 标签色块 + 换行后的昵称行。
+
+    高度计算与绘制共用这一份视图，避免「量高度用一套、画图用另一套」再次跑偏。
+    两种形态：
+      * 结构化（有最吉）：第一行「✨ 昨日本群 N 人抽签 · 最吉」+ 右侧吉凶/分数色块，
+        下面昵称**完整折行**（最多 3 行，病态长昵称才省略号）；
+      * 纯文字（还没有人抽签 / 解析不出）：整段折行，不画色块。
+    窄卡（700 宽）上标签与色块挤不下时逐档缩字号，仍挤不下就把色块挪到第二行右对齐。
+    """
+    if not data:
+        return {"height": 0}
+    pad_x, pad_y = int(26 * u), int(20 * u)
+    inner = max(int(120 * u), avail - 2 * pad_x)
+    count = int(data.get("count") or 0)
+    if not count:
+        font = _font(font_file, int(32 * u))
+        lines = _wrap_text(str(data.get("plain") or ""), font, inner, max_lines=2)
+        line_h = int(46 * u)
+        return {"height": pad_y * 2 + line_h * len(lines), "lines": lines, "font": font,
+                "line_h": line_h, "pad_x": pad_x, "pad_y": pad_y,
+                "label": "", "label_font": None, "chip": "", "chip_font": None,
+                "chip_w": 0, "chip_h": 0, "chip_own_row": False, "row_gap": 0}
+
+    label = f"昨日本群 {count} 人抽签 · 最吉"
+    chip = f"{data.get('grade') or '？'} · {int(data.get('score') or 0)}"
+    chip_h = int(46 * u)
+    label_size, chip_size, chip_w = int(30 * u), int(28 * u), 0
+    for lsz, csz in ((30, 28), (26, 24), (23, 21)):
+        lf, cf = _font(font_file, int(lsz * u)), _font(font_file, int(csz * u))
+        cw = draw_len(chip, cf) + int(34 * u)
+        if draw_len(label, lf) + int(16 * u) + cw <= inner:
+            label_size, chip_size, chip_w = lsz, csz, cw
+            break
+    else:  # 最窄档都挤不下：色块自己一行（右对齐）
+        chip_size = 21
+        chip_w = draw_len(chip, _font(font_file, int(chip_size * u))) + int(34 * u)
+    label_font = _font(font_file, int(label_size * u))
+    chip_font = _font(font_file, int(chip_size * u))
+    chip_own_row = bool(chip_w and draw_len(label, label_font) + int(16 * u) + chip_w > inner)
+    nick_font = _font(font_file, int(38 * u))
+    # v1.11.7：清洗昵称——零宽字符会造成「空白名字」，控制符会打乱折行，
+    # 该字体画不出的 emoji 是豆腐块；清完为空回落「旅人」（调用方通常已清过，
+    # 这里兜底，独立使用 card 也安全）
+    lines = _wrap_text(clean_nickname(data.get("nickname"), "旅人", nick_font),
+                       nick_font, inner, max_lines=3)
+    line_h = int(52 * u)
+    height = pad_y * 2 + chip_h + int(16 * u) + line_h * len(lines)
+    if chip_own_row:
+        height += chip_h + int(10 * u)
+    return {"height": height, "lines": lines, "font": nick_font, "line_h": line_h,
+            "pad_x": pad_x, "pad_y": pad_y, "label": label, "label_font": label_font,
+            "chip": chip, "chip_font": chip_font, "chip_w": int(chip_w), "chip_h": chip_h,
+            "chip_own_row": chip_own_row, "row_gap": int(16 * u)}
 
 
 def _fit_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> str:
@@ -870,8 +1038,12 @@ def render_push_card(
       全群同一份（只由日期种子抽），当天不变。
     - `lucky`（v1.10.15）：`{"color": {"name","hex"}, "number": int, "dir": str}`，
       一行「色块 + 幸运色 · 幸运数字 · 幸运方位」，同样全群同一份。
-    - `board_line`（v1.10.15）：本群自己的数据（如「昨日本群 23 人抽签 · 最吉：小明（大吉 96）」），
-      各群不同——所以调用方**每群单独渲染**，并靠 `file_key`（一般传群号）分开落盘，
+    - `board_line`（v1.10.15；v1.11.7 起卡片渲染成**胶囊区块**）：本群自己的数据
+      （如「昨日本群 23 人抽签 · 最吉：小明（大吉 96）」）——文字会被
+      `board_from_line` 解析成「人数 / 昵称 / 吉凶 / 分数」，卡面排成
+      「✨ 昨日本群 N 人抽签 · 最吉  〔大吉 · 96〕」+ 下方昵称**完整折行**（不再截断，
+      用户要求名字显示全；病态长昵称最多 3 行后省略号），解析不出时按普通段落折行。
+      各群数据不同——所以调用方**每群单独渲染**，并靠 `file_key`（一般传群号）分开落盘，
       避免多群共用一个文件名时互相覆盖。
     - `hint`（v1.10.15）：底部一行小字引导（如「发送 /星语 抽今日签 ｜ /星语榜 看今日排行」）。
     """
@@ -891,8 +1063,14 @@ def render_push_card(
         need += sep + int(112 * u)
     if lucky:
         need += sep + int(56 * u)
-    if board_line:
-        need += sep + int(56 * u)
+    # v1.11.7：本群数据块改胶囊式（标签 + 吉凶分数色块 + 昵称完整折行），
+    # 高度由内容算（昵称越长块越高），所以这里先量好布局再定画布高度
+    _board = board_from_line(board_line)
+    _board_view_data = _board_view(
+        _board, font_file, u, (W - margin - int(48 * u)) - (margin + int(48 * u)),
+    )
+    if _board_view_data.get("height"):
+        need += sep + int(_board_view_data["height"])
     H = max(int(height), margin * 2 + need)
     accent = _hex_rgb(accent_hex)
     ink, sub = (74, 74, 96), (150, 150, 168)
@@ -1021,17 +1199,43 @@ def render_push_card(
             x += draw_len(text, font) + int(14 * u)
         y += int(56 * u)
 
-    # 本群数据（v1.10.15）：各群不同，所以每群单独渲染（调用方传 file_key 分开落盘）
-    if board_line:
+    # 本群数据（v1.10.15；v1.11.7 改胶囊块）：各群不同，所以每群单独渲染
+    # （调用方传 file_key 分开落盘）。昵称**完整折行**显示——用户反馈「把别人的
+    # 名字显示全最好」，所以不再截断；吉凶与分数独立成右上角色块，绝不被昵称挤掉。
+    _bv = _board_view_data
+    if _bv.get("height"):
         y += sep
-        row_h = int(56 * u)
-        f = _font(font_file, int(34 * u))
-        _sparkle(draw, left + int(10 * u), y + row_h // 2, 9 * u, accent, 210)
-        # v1.11.6：只截昵称、保住末尾的「（吉凶 分数）」——昵称太长时分数以前会被截掉
-        draw.text((left + int(32 * u), y + row_h // 2),
-                  fit_board_line(board_line, f, right - left - int(32 * u)),
-                  font=f, fill=ink, anchor="lm")
-        y += int(56 * u)
+        px, py = left + _bv["pad_x"], y + _bv["pad_y"]
+        overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        od = ImageDraw.Draw(overlay)
+        od.rounded_rectangle(
+            [left, y, right, y + _bv["height"]], radius=int(28 * u),
+            fill=accent + (30,), outline=accent + (86,), width=max(1, int(2 * u)),
+        )
+        chip_box = None
+        if _bv["chip"]:
+            cy_chip = py if not _bv["chip_own_row"] else py + _bv["chip_h"] + int(10 * u)
+            chip_box = [right - _bv["pad_x"] - _bv["chip_w"], cy_chip,
+                        right - _bv["pad_x"], cy_chip + _bv["chip_h"]]
+            od.rounded_rectangle(chip_box, radius=_bv["chip_h"] // 2, fill=accent + (78,))
+        img = Image.alpha_composite(img, overlay)
+        draw = ImageDraw.Draw(img)
+        text_y = py
+        if _bv["label"]:
+            _sparkle(draw, px + int(9 * u), py + _bv["chip_h"] // 2, int(9 * u), accent, 200)
+            draw.text((px + int(30 * u), py + _bv["chip_h"] // 2), _bv["label"],
+                      font=_bv["label_font"], fill=sub, anchor="lm")
+            if _bv["chip"]:
+                cx = (chip_box[0] + chip_box[2]) / 2
+                cy = (chip_box[1] + chip_box[3]) / 2
+                draw.text((cx, cy), _bv["chip"], font=_bv["chip_font"], fill=ink, anchor="mm")
+            text_y = py + _bv["chip_h"] + int(16 * u)
+            if _bv["chip_own_row"]:
+                text_y += _bv["chip_h"] + int(10 * u)
+        for i, line_text in enumerate(_bv["lines"]):
+            draw.text((px, text_y + _bv["line_h"] * i + _bv["line_h"] // 2), line_text,
+                      font=_bv["font"], fill=ink, anchor="lm")
+        y += _bv["height"]
 
     draw.text((left, H - margin - int(96 * u)), "今天的专属星语签已就位",
               font=_font(font_file, int(38 * u)), fill=ink)
