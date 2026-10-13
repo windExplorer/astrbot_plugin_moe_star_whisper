@@ -447,7 +447,8 @@ def board_from_line(text: str) -> dict | None:
     return {"plain": s}
 
 
-def _board_view(data: dict | None, font_file: str, u: float, avail: float) -> dict:
+def _board_view(data: dict | None, font_file: str, u: float, avail: float,
+                has_avatar: bool = False) -> dict:
     """本群数据胶囊块的**布局**（v1.11.7）：高度 + 标签 + 标签色块 + 换行后的昵称行。
 
     高度计算与绘制共用这一份视图，避免「量高度用一套、画图用另一套」再次跑偏。
@@ -469,7 +470,8 @@ def _board_view(data: dict | None, font_file: str, u: float, avail: float) -> di
         return {"height": pad_y * 2 + line_h * len(lines), "lines": lines, "font": font,
                 "line_h": line_h, "pad_x": pad_x, "pad_y": pad_y,
                 "label": "", "label_font": None, "chip": "", "chip_font": None,
-                "chip_w": 0, "chip_h": 0, "chip_own_row": False, "row_gap": 0}
+                "chip_w": 0, "chip_h": 0, "chip_own_row": False, "row_gap": 0,
+                "avatar_d": 0, "text_off": 0, "text_h": 0, "clean_name": ""}
 
     label = f"昨日本群 {count} 人抽签 · 最吉"
     chip = f"{data.get('grade') or '？'} · {int(data.get('score') or 0)}"
@@ -486,21 +488,28 @@ def _board_view(data: dict | None, font_file: str, u: float, avail: float) -> di
         chip_w = draw_len(chip, _font(font_file, int(chip_size * u))) + int(34 * u)
     label_font = _font(font_file, int(label_size * u))
     chip_font = _font(font_file, int(chip_size * u))
-    chip_own_row = bool(chip_w and draw_len(label, label_font) + int(16 * u) + chip_w > inner)
+    # 有「最吉」就画头像圆（v1.11.8）：取不到图时画首字占位圆，版式不塌
+    avatar_d = int(104 * u) if has_avatar else 0
+    text_off = (avatar_d + int(22 * u)) if has_avatar else 0
+    chip_own_row = bool(
+        chip_w and draw_len(label, label_font) + int(16 * u) + chip_w > inner - text_off
+    )
     nick_font = _font(font_file, int(38 * u))
     # v1.11.7：清洗昵称——零宽字符会造成「空白名字」，控制符会打乱折行，
     # 该字体画不出的 emoji 是豆腐块；清完为空回落「旅人」（调用方通常已清过，
     # 这里兜底，独立使用 card 也安全）
-    lines = _wrap_text(clean_nickname(data.get("nickname"), "旅人", nick_font),
-                       nick_font, inner, max_lines=3)
+    clean = clean_nickname(data.get("nickname"), "旅人", nick_font)
+    lines = _wrap_text(clean, nick_font, inner - text_off, max_lines=3)
     line_h = int(52 * u)
-    height = pad_y * 2 + chip_h + int(16 * u) + line_h * len(lines)
+    text_h = chip_h + int(16 * u) + line_h * len(lines)
     if chip_own_row:
-        height += chip_h + int(10 * u)
-    return {"height": height, "lines": lines, "font": nick_font, "line_h": line_h,
-            "pad_x": pad_x, "pad_y": pad_y, "label": label, "label_font": label_font,
-            "chip": chip, "chip_font": chip_font, "chip_w": int(chip_w), "chip_h": chip_h,
-            "chip_own_row": chip_own_row, "row_gap": int(16 * u)}
+        text_h += chip_h + int(10 * u)
+    return {"height": pad_y * 2 + max(avatar_d, text_h), "lines": lines, "font": nick_font,
+            "line_h": line_h, "pad_x": pad_x, "pad_y": pad_y, "label": label,
+            "label_font": label_font, "chip": chip, "chip_font": chip_font,
+            "chip_w": int(chip_w), "chip_h": chip_h, "chip_own_row": chip_own_row,
+            "row_gap": int(16 * u), "avatar_d": avatar_d, "text_off": text_off,
+            "text_h": text_h, "clean_name": clean}
 
 
 def _fit_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> str:
@@ -1018,6 +1027,7 @@ def render_push_card(
     yiji: dict | None = None,
     lucky: dict | None = None,
     board_line: str = "",
+    board_avatar: bytes | None = None,
     hint: str = "",
     file_key: str = "",
     lunar_line: str = "",
@@ -1068,6 +1078,8 @@ def render_push_card(
     _board = board_from_line(board_line)
     _board_view_data = _board_view(
         _board, font_file, u, (W - margin - int(48 * u)) - (margin + int(48 * u)),
+        # 有「最吉」就预留头像位（v1.11.8）：拿不到图时画首字占位圆，版式不塌
+        has_avatar=bool((_board or {}).get("count")),
     )
     if _board_view_data.get("height"):
         need += sep + int(_board_view_data["height"])
@@ -1219,21 +1231,45 @@ def render_push_card(
                         right - _bv["pad_x"], cy_chip + _bv["chip_h"]]
             od.rounded_rectangle(chip_box, radius=_bv["chip_h"] // 2, fill=accent + (78,))
         img = Image.alpha_composite(img, overlay)
+        # 头像（v1.11.8）：有「最吉」就画——取到图用图，取不到用首字占位圆
+        av_d = int(_bv.get("avatar_d") or 0)
+        if av_d:
+            av_img = None
+            if board_avatar:
+                try:
+                    av_img = _circle_img(
+                        Image.open(io.BytesIO(board_avatar)).convert("RGBA"), av_d,
+                    )
+                except Exception:
+                    av_img = None
+            if av_img is None:
+                # 拿不到图（接口挂了/没授权）：幸运色压深当底 + 名字首字，白字才看得清
+                ph = Image.new("RGBA", (av_d * 2, av_d * 2),
+                               _mix(accent, ink, 0.55) + (255,))
+                ph_name = str(_bv.get("clean_name") or "旅人")
+                ImageDraw.Draw(ph).text(
+                    (av_d, av_d), ph_name[0], font=_font(font_file, int(58 * u)),
+                    fill=(255, 255, 255, 255), anchor="mm",
+                )
+                av_img = _circle_img(ph, av_d)
+            img.paste(av_img, (px, py), av_img)
         draw = ImageDraw.Draw(img)
-        text_y = py
+        tx = px + int(_bv.get("text_off") or 0)
+        # 文案块相对头像垂直居中（头像比文字高时不会上重下轻）
+        text_y = py + max(0, (av_d - int(_bv.get("text_h") or 0)) // 2)
         if _bv["label"]:
-            _sparkle(draw, px + int(9 * u), py + _bv["chip_h"] // 2, int(9 * u), accent, 200)
-            draw.text((px + int(30 * u), py + _bv["chip_h"] // 2), _bv["label"],
+            _sparkle(draw, tx + int(9 * u), text_y + _bv["chip_h"] // 2, int(9 * u), accent, 200)
+            draw.text((tx + int(30 * u), text_y + _bv["chip_h"] // 2), _bv["label"],
                       font=_bv["label_font"], fill=sub, anchor="lm")
             if _bv["chip"]:
                 cx = (chip_box[0] + chip_box[2]) / 2
                 cy = (chip_box[1] + chip_box[3]) / 2
                 draw.text((cx, cy), _bv["chip"], font=_bv["chip_font"], fill=ink, anchor="mm")
-            text_y = py + _bv["chip_h"] + int(16 * u)
+            text_y = text_y + _bv["chip_h"] + int(16 * u)
             if _bv["chip_own_row"]:
                 text_y += _bv["chip_h"] + int(10 * u)
         for i, line_text in enumerate(_bv["lines"]):
-            draw.text((px, text_y + _bv["line_h"] * i + _bv["line_h"] // 2), line_text,
+            draw.text((tx, text_y + _bv["line_h"] * i + _bv["line_h"] // 2), line_text,
                       font=_bv["font"], fill=ink, anchor="lm")
         y += _bv["height"]
 

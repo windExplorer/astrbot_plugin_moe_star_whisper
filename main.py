@@ -1166,11 +1166,14 @@ class StarWhisperPlugin(Star):
                       f" · 数字 {lucky.get('number')} · 方位 {lucky.get('dir')}")
         return extra
 
-    def _push_card(self, public: dict, board_line: str, file_key: str) -> str | None:
+    def _push_card(self, public: dict, board_line: str, file_key: str,
+                   board_avatar: bytes | None = None) -> str | None:
         """渲染「今日星象」卡（推送与指令共用）；失败返回 None，由调用方回落文字。
 
         `file_key` 必须区分群（推送传群号）：图片是异步上传的，多群共用一个文件名
         会互相覆盖，把 A 群的卡发给 B 群。
+        `board_avatar`（v1.11.8）是「昨日本群最吉那位」的头像 bytes；为 None 时
+        卡面画首字占位圆（版式不塌）。
         """
         if render_push_card is None:
             return None
@@ -1185,7 +1188,8 @@ class StarWhisperPlugin(Star):
                 extra_font_dirs=self._font_dirs(data_dir),
                 signer=str(self._cfg("fortune_signer", "星语者")),
                 yiji=public["yiji"], lucky=public["lucky"],
-                board_line=board_line, hint=PUSH_HINT, file_key=file_key,
+                board_line=board_line, board_avatar=board_avatar,
+                hint=PUSH_HINT, file_key=file_key,
                 lunar_line=public.get("lunar_line", ""),
                 jieqi_line=public.get("jieqi_line", ""),
             )
@@ -1195,14 +1199,37 @@ class StarWhisperPlugin(Star):
             )
             return None
 
+    async def _push_board_avatar(self, gid: str, prev: str):
+        """本群数据块的「最吉」头像（v1.11.8）；取不到返回 None（卡面画首字占位圆）。
+
+        走主插件统一的头像缓存下载（`_fetch_avatar_bytes`，10 分钟 TTL）——推送与
+        星语榜用同一个接口，不会两套逻辑。任何一步失败都静默返回 None。
+        """
+        if self._store is None:
+            return None
+        try:
+            rows = self._store.list_group_day(gid, prev, limit=1)
+        except Exception:
+            return None
+        if not rows:
+            return None
+        uid = str(rows[0].get("user_id") or "").strip()
+        if not uid:
+            return None
+        try:
+            return await self._fetch_avatar_bytes(uid)
+        except Exception:
+            return None
+
     def _push_message(self, public: dict, board_line: str, file_key: str,
-                      with_card: bool = True):
+                      with_card: bool = True, board_avatar: bytes | None = None):
         """(文字, 卡路径|None)：卡在就发卡（文字只留标题 + 引导），卡没了把内容补进文字。
 
         `with_card=False`（v1.10.19，「出签方式 = 仅文字」）连渲染都跳过，直接走文字，
         省一次绘图；此时文字会自动带上本群数据/宜忌/幸运/农历/节气（内容不丢）。
         """
-        card = self._push_card(public, board_line, file_key) if with_card else None
+        card = (self._push_card(public, board_line, file_key, board_avatar=board_avatar)
+                if with_card else None)
         caption = self._push_caption(public)
         if card is None:
             caption += self._push_text_fallback(public, board_line)
@@ -1273,7 +1300,10 @@ class StarWhisperPlugin(Star):
             # v1.10.22：内容按群生成（宜忌/幸运/主色每群不同），所以放在循环里
             public = self._push_public(gid)
             board_line = self._push_board_line(gid, public["prev"])  # 本群数据：各群不同
-            caption, card = self._push_message(public, board_line, gid, with_card=want_card)
+            # v1.11.8：本群数据块带头像（昨天最吉那位；取不到图时卡面画首字占位圆）
+            board_avatar = await self._push_board_avatar(gid, public["prev"])
+            caption, card = self._push_message(
+                public, board_line, gid, with_card=want_card, board_avatar=board_avatar)
             session = f"{platform}:GroupMessage:{gid}"
             chain = MessageChain(chain=[])
             if mode != "图卡" or card is None:
@@ -1896,11 +1926,14 @@ class StarWhisperPlugin(Star):
             return
         public = self._push_public(gid)
         board_line = self._push_board_line(gid, public["prev"]) if gid else ""
+        # v1.11.8：群里带头像（私聊没有群可算，自然是 None → 不画头像）
+        board_avatar = await self._push_board_avatar(gid, public["prev"]) if gid else None
         # v1.10.19：跟随「出签方式」——默认「萌系图卡」只发卡（不再把标题那段文字一起发），
         # 「图卡加文字」才图 + 文，「仅文字」连卡都不渲染、全走文字。
         mode = str(self._cfg("output_mode", "图卡"))
         caption, card = self._push_message(
-            public, board_line, gid or "private", with_card=mode != "纯文本")
+            public, board_line, gid or "private", with_card=mode != "纯文本",
+            board_avatar=board_avatar)
         comps: list = []
         if card:
             comps.append(Image.fromFileSystem(card))

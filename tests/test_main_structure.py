@@ -319,8 +319,9 @@ def main() -> int:
     m_push = _re.search(r"async def _do_daily_push\(self.*?(?=\n    (?:async )?def )", src, _re.S)
     check(bool(m_push), "找不到 _do_daily_push 方法体")
     push_body = m_push.group(0) if m_push else ""
-    check('self._push_message(public, board_line, gid, with_card=want_card)' in push_body,
-          "推送必须按群取内容（文件名键 = 群号，否则多群同名互相覆盖）")
+    check('self._push_message(' in push_body and "with_card=want_card" in push_body
+          and "board_avatar=board_avatar" in push_body,
+          "推送必须按群取内容（文件名键 = 群号）并带上本群头像（v1.11.8）")
     check("public = self._push_public(gid)" in push_body
           and "_push_text_fallback" not in push_body,
           "推送要在群循环里按群取内容 + 共用组装方法（回退逻辑不该在推送里再写一遍）")
@@ -393,6 +394,14 @@ def main() -> int:
           "_push_board_line 的昵称必须过清洗，不能直接取原值")
     check("clean_nickname," in src and "from .card import" in src,
           "main 必须从 card 复用清洗实现（不许抄第二份规则）")
+
+    # v1.11.8：本群数据块头像——复用统一头像下载，两处内容生成 + 渲染共 3 处透传
+    check("async def _push_board_avatar(self" in src and "_fetch_avatar_bytes(uid)" in src,
+          "必须有 _push_board_avatar 且复用统一头像下载（不许另写一套下载逻辑）")
+    check(src.count("board_avatar=board_avatar") >= 3,
+          "头像要透传到两处 _push_message 与 render_push_card（共 3 处以上）")
+    check("board_avatar=board_avatar," in src,
+          "render_push_card 调用必须真的传 board_avatar（否则卡面永远只有占位圆）")
 
     # v1.10.16：/星语星象 —— 把每日推送搬到指令上（随时看 / 不用等 08:00 / 不用真开推送）
     check("push_cmd" in methods, "缺少 /星语星象 指令（push_cmd）")

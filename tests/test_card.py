@@ -2,6 +2,7 @@
 """card.py 冒烟测试。需 pillow：
 uv run --no-project --with pillow python tests/test_card.py
 退出码即结论。"""
+import io
 import sys
 import tempfile
 from pathlib import Path
@@ -94,6 +95,26 @@ def main() -> int:
         *_args, cards_root=Path(tempfile.mkdtemp(prefix="moe_b2_")),
         board_line="昨日本群 7 人抽签 · 最吉：" + _nick + "（大吉 96）")).size[1]
     check(_h_long > _h_short, f"昵称折行后卡应更高（不裁字），实际 {_h_short} -> {_h_long}")
+    # v1.11.8：本群数据块带头像——有图/无图都预留头像位（无图用首字占位圆，版式一致）
+    _av_buf = io.BytesIO()
+    Image.new("RGB", (80, 80), (232, 106, 138)).save(_av_buf, "PNG")
+    _board_short = "昨日本群 7 人抽签 · 最吉：小明（大吉 96）"
+    _h_av = Image.open(card.render_push_card(
+        *_args, cards_root=Path(tempfile.mkdtemp(prefix="moe_av1_")),
+        board_line=_board_short, board_avatar=_av_buf.getvalue())).size[1]
+    _h_ph = Image.open(card.render_push_card(
+        *_args, cards_root=Path(tempfile.mkdtemp(prefix="moe_av2_")),
+        board_line=_board_short)).size[1]
+    check(_h_av == _h_ph, f"有图/无图都必须预留头像位（版式一致），实际 {_h_av} vs {_h_ph}")
+    _h_plain = Image.open(card.render_push_card(
+        *_args, cards_root=Path(tempfile.mkdtemp(prefix="moe_av3_")),
+        board_line="昨日本群还没有人抽签，今天来当第一个吧")).size[1]
+    check(_h_av > _h_plain, f"纯文字块（昨日无人）不画头像，应更矮，实际 {_h_plain} vs {_h_av}")
+    check(card._board_view(card.board_from_line(_board_short), ff, 1.0, 832,
+                           has_avatar=True)["avatar_d"] > 0,
+          "有「最吉」时布局必须预留头像直径")
+    check(card._board_view(card.board_from_line(_board_short), ff, 1.0, 832)["avatar_d"] == 0,
+          "未要求头像时不留头像位（独立调用 card 不被强制加头像）")
 
     r = fortune.roll_fortune(
         fortune.derive_seed("2026-09-27", "utest", "card"), lex, None
@@ -418,8 +439,6 @@ def main() -> int:
           f"超长昵称应截断到 16 字并带省略号，实际长度 {len(cleaned_long)}")
 
     # 10) 多主题（v1.10.3）：主题不止换色——边框/装饰随主题变；榜单头像列
-    import io
-
     for t in ("tarot", "sakura", "mint"):
         tdef = card._THEME_DEFS.get(t)
         check(bool(tdef) and tdef.get("border") and tdef.get("ink") and tdef.get("line"),
