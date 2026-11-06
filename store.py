@@ -459,6 +459,76 @@ class Store:
         ).fetchone()
         return int(row["total"] or 0)
 
+    # ---------- 星尘 2.0（v1.11.12）：任务 / 成长 / 排行 ----------
+
+    def day_income(self, user_id: str, date: str) -> int:
+        """当日**全部**正向收入（抽签 + 每日任务 + 礼盒返利），钱包卡用。
+
+        `day_stardust` 只数 reason='draw'，加了任务奖励后不能拿它当「今日 +N」，
+        否则用户明明多了 24 星尘，卡上却还是只显示抽签那一份。
+        """
+        row = self._db.execute(
+            "SELECT COALESCE(SUM(delta), 0) AS total FROM ledger"
+            " WHERE user_id=? AND ref_date=? AND delta>0",
+            (user_id, date),
+        ).fetchone()
+        return int(row["total"] or 0)
+
+    def task_progress(self, user_id: str, date: str, reasons) -> dict:
+        """每日任务完成情况 {reason: bool}；沿用 has_ledger 的 (uid, 日期, reason) 闸。"""
+        return {r: self.has_ledger(user_id, date, r) for r in reasons}
+
+    def economy_stats(self, user_id: str) -> dict:
+        """等级 / 成就所需指标一次拿齐（累计获得、累计消费、余额、玩法种类、
+        抽签天数、最高连签）。等级按累计获得算，花钱不降级。"""
+        row = self._one(
+            "SELECT COALESCE(SUM(CASE WHEN delta>0 THEN delta ELSE 0 END), 0) AS earned,"
+            " COALESCE(-SUM(CASE WHEN delta<0 THEN delta ELSE 0 END), 0) AS spent,"
+            " COALESCE(SUM(delta), 0) AS balance,"
+            " COUNT(DISTINCT CASE WHEN reason LIKE 'fun:%' THEN reason END) AS fun_kinds"
+            " FROM ledger WHERE user_id=?",
+            (user_id,),
+        )
+        draws = self._one(
+            "SELECT COUNT(*) AS n FROM fortunes WHERE user_id=?", (user_id,)
+        )
+        profile = self.get_profile(user_id) or {}
+        return {
+            "balance": int(row["balance"] or 0),
+            "total_earned": int(row["earned"] or 0),
+            "total_spent": int(row["spent"] or 0),
+            "fun_kinds": int(row["fun_kinds"] or 0),
+            "draw_days": int(draws["n"] or 0),
+            "max_streak": int(profile.get("max_streak") or 0),
+        }
+
+    def stardust_ranking(self, span: str = "all", limit: int = 10,
+                         today: str = "", week_from: str = "") -> list[dict]:
+        """星尘榜：day / week 按区间内获得合计，all 按累计获得（只数 delta>0）。
+
+        只统计带 ref_date 的自然收入（抽签 / 任务 / 礼盒）；管理员手动发放不带
+        ref_date，不进日/周榜，避免一次发放就把榜刷穿。
+        """
+        cond, params = "", ()
+        if span == "day" and today:
+            cond, params = " AND ref_date=?", (today,)
+        elif span == "week" and week_from:
+            cond, params = " AND ref_date>=?", (week_from,)
+        rows = self._query(
+            "SELECT user_id, SUM(delta) AS total FROM ledger WHERE delta>0"
+            + cond
+            + " GROUP BY user_id ORDER BY total DESC LIMIT ?",
+            params + (max(1, min(int(limit), 50)),),
+        )
+        return [
+            {
+                "user_id": str(r["user_id"]),
+                "total": int(r["total"] or 0),
+                "nickname": self.last_nickname(str(r["user_id"])) or "旅人",
+            }
+            for r in rows
+        ]
+
     def month_fortunes(self, user_id: str, month_prefix: str) -> list[dict]:
         """某月全部签记录（运势日历用）：date/grade/score，按日期升序。"""
         rows = self._db.execute(

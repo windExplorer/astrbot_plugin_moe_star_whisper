@@ -217,8 +217,8 @@
     "default": ""
   },
   "economy_enabled": {
-    "description": "道具经济",
-    "hint": "星尘与四道具体系总开关；关闭后抽签不发星尘、经济类指令提示未开放",
+    "description": "星尘经济",
+    "hint": "星尘体系总开关（抽签发放 / 道具 / 任务 / 小玩法 / 等级成就）；关闭后抽签不发星尘、经济类指令提示未开放",
     "type": "bool",
     "default": true
   },
@@ -244,5 +244,21 @@
     "hint": "每种道具最多同时持有几张，防囤积破坏经济循环",
     "type": "int",
     "default": 3
+  },
+  "fun_prices": {
+    "description": "玩法价格",
+    "hint": "三种服务型玩法的星尘售价：小确幸签 / 星语祝福卡 / 星尘礼盒。每天按日期挑一项半价，改动即时生效",
+    "type": "dict",
+    "default": {
+      "delight": 30,
+      "bless": 40,
+      "gift": 60
+    }
+  },
+  "task_reward": {
+    "description": "每日任务奖励",
+    "hint": "看运势日历 / 星语榜 / 今日星象各完成一次，每项奖励多少星尘；填 0 等于关闭任务奖励。周日首签翻倍不受此项影响",
+    "type": "int",
+    "default": 8
   }
 }

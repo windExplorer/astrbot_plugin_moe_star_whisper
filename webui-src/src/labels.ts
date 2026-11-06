@@ -19,6 +19,13 @@ export const REASON_LABELS: Record<string, string> = {
   streak_guard: "连签保护卡消耗",
   grant: "管理员发放",
   birthday: "生日彩蛋",
+  "task:calendar": "每日任务 · 运势日历",
+  "task:rank": "每日任务 · 星语榜",
+  "task:star": "每日任务 · 今日星象",
+  "fun:delight": "玩法 · 小确幸签",
+  "fun:bless": "玩法 · 星语祝福卡",
+  "fun:gift": "玩法 · 星尘礼盒",
+  "gift:back": "礼盒星尘返利",
 };
 
 /** 绘图任务状态：未知值原样显示（便于排查新状态）。 */

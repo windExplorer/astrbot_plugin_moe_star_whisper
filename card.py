@@ -1624,13 +1624,18 @@ def render_wallet_card(
     date_str: str = "",
     accent_hex: str = "#F6C6D3",
     hint: str = "购买与使用：/星语商店 · /星语使用",
+    extras: list | None = None,
     font_path: str | None = None,
     extra_font_dirs=None,
     signer: str = "星语者",
     width: int = 900,
     theme: str = "light",
 ) -> str:
-    """星尘钱包卡：余额大数字 + 今日获得 + 背包 2×2 持有格。items=[(名称, 数量)]。"""
+    """星尘钱包卡：余额大数字 + 今日获得 + 背包 2×2 持有格。items=[(名称, 数量)]。
+
+    extras（v1.11.12）：背包下方追加若干行小字（等级/称号/今日任务进度）。
+    默认 None 时版式与旧版完全一致，既有渲染守卫不受影响。
+    """
     font_file = find_font(font_path, extra_font_dirs)
     if not font_file:
         raise RuntimeError("未找到可用中文字体")
@@ -1638,7 +1643,8 @@ def render_wallet_card(
     u0 = width / 900.0
     grid_rows = (len(items) + 1) // 2
     # 版式高度 = 标题区 218 + 身份行 112 + 余额块 171 + 小标题 44 + 网格 + 底部 96
-    H = int((218 + 112 + 171 + 44 + grid_rows * 100 + 96) * u0)
+    H = int((218 + 112 + 171 + 44 + grid_rows * 100 + 96
+             + len(extras or []) * 34) * u0)
     ctx = _utility_card_base(width, H, accent_hex, font_file,
                              subtitle="萌萌星语 · 道具经济", title="星尘钱包",
                              dark=dark, title_right=date_str, theme=theme)
@@ -1660,7 +1666,7 @@ def render_wallet_card(
     if today_gain:
         draw.text((right, y + int(58 * u)), f"+{today_gain}",
                   font=_font(ctx["disp"], int(48 * u)), fill=gold_soft, anchor="ra")
-        draw.text((right, y + int(116 * u)), "今日抽签所得",
+        draw.text((right, y + int(116 * u)), "今日星尘收入",
                   font=_font(ff, int(20 * u)), fill=ctx["sub"], anchor="ra")
     y += int(150 * u)
 
@@ -1678,6 +1684,10 @@ def render_wallet_card(
                   font=_font(ff, int(23 * u)), fill=ctx["sub"])
         draw.text((cx + int(16 * u), cy + int(38 * u)), f"×{count}",
                   font=_font(ctx["disp"], int(36 * u)), fill=ctx["ink"])
+    y += grid_rows * (ch + int(12 * u)) + int(10 * u)
+    for line in extras or []:
+        draw.text((left, y), str(line), font=_font(ff, int(22 * u)), fill=ctx["sub"])
+        y += int(34 * u)
     return _utility_card_save(ctx, cards_root, f"wallet_{file_key}.png", signer, footer=hint)
 
 
@@ -1690,13 +1700,17 @@ def render_shop_card(
     avatar_data: bytes | None = None,
     accent_hex: str = "#F6C6D3",
     hint: str = "购买：/星语购买 <名称> [数量]",
+    extras: list | None = None,
     font_path: str | None = None,
     extra_font_dirs=None,
     signer: str = "星语者",
     width: int = 900,
     theme: str = "light",
 ) -> str:
-    """道具商店卡：每道具一栏（名称+说明+售价+持有）。entries=[(名称, 价格, 说明, 持有)]。"""
+    """道具商店卡：每道具一栏（名称+说明+售价+持有）。entries=[(名称, 价格, 说明, 持有)]。
+
+    extras（v1.11.12）：列表下方追加小字（今日特价 / 玩法入口），默认 None 零影响。
+    """
     font_file = find_font(font_path, extra_font_dirs)
     if not font_file:
         raise RuntimeError("未找到可用中文字体")
@@ -1707,7 +1721,8 @@ def render_shop_card(
     for _name, _price, desc, _held in entries:
         n_desc = len(_wrap(str(desc), _font(font_file, int(22 * u0)), int((width - 88 - 88 - 190) * u0)))
         row_hs.append(int((84 + max(1, n_desc) * 30) * u0))
-    H = int((218 + 96 + sum(row_hs) + len(row_hs) * 14 * u0 + 96) * u0)
+    H = int((218 + 96 + sum(row_hs) + len(row_hs) * 14 * u0 + 96
+             + len(extras or []) * 34) * u0)
     ctx = _utility_card_base(width, H, accent_hex, font_file,
                              subtitle="萌萌星语 · 道具经济", title="道具商店",
                              dark=dark, theme=theme)
@@ -1736,6 +1751,10 @@ def render_shop_card(
                       font=_font(ff, int(22 * u)), fill=ctx["sub"])
             dy += int(30 * u)
         y += rh + int(14 * u)
+    for line in extras or []:
+        draw.text((left + int(6 * u), y), str(line),
+                  font=_font(ff, int(22 * u)), fill=ctx["sub"])
+        y += int(34 * u)
     return _utility_card_save(ctx, cards_root, f"shop_{file_key}.png", signer, footer=hint)
 
 

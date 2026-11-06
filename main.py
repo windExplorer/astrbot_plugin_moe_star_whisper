@@ -59,6 +59,27 @@ ITEM_DEFS = {
     "candle": ("幸运香烛", "当日幸运指数 +8（抽签前使用）"),
 }
 DEFAULT_PRICES = {"reroll": 80, "amulet": 50, "streak_guard": 30, "candle": 20}
+
+# v1.11.12 星尘 2.0：服务型消费——付了星尘立刻出结果、不进背包，所以刻意不进
+# ITEM_DEFS（那张表被钱包/背包/WebUI 的 4 个固定 id 引用，加进去要连锁改一大圈）。
+FUN_DEFS = {
+    "delight": ("小确幸签", "抽一条只属于今天的小确幸，看看生活藏了什么糖", 30),
+    "bless": ("星语祝福卡", "挑一句祝福送给 @ 的人（或自己），不转移星尘", 40),
+    "gift": ("星尘礼盒", "随机开出星尘返利、一张道具或一条趣味签", 60),
+}
+FUN_ALIASES = {
+    "delight": "delight", "小确幸": "delight", "小确幸签": "delight", "确幸": "delight",
+    "bless": "bless", "祝福": "bless", "祝福卡": "bless", "星语祝福卡": "bless",
+    "gift": "gift", "礼盒": "gift", "星尘礼盒": "gift", "盲盒": "gift",
+}
+DEFAULT_FUN_PRICES = {k: v[2] for k, v in FUN_DEFS.items()}
+# 每日任务：(流水 reason, 展示名)；reason 同时充当「今天做过没有」的幂等闸
+TASK_DEFS = (
+    ("task:calendar", "看一次运势日历"),
+    ("task:rank", "看一次星语榜"),
+    ("task:star", "看一次今日星象"),
+)
+
 # 每日推送 / /星语星象 卡底部的指令引导（v1.10.15 起；抽成常量避免两处各写一份）
 PUSH_HINT = "发送 /星语 抽今日签 ｜ /星语榜 看今日排行"
 
@@ -977,6 +998,10 @@ class StarWhisperPlugin(Star):
             reward = fortune.stardust_reward(
                 result["grade"], streak, int(self._cfg("draw_reward_base", 10))
             )
+            # v1.11.12：周日双倍星尘日（固定星期天，可预期，不随机）
+            if fortune.is_double_day(date):
+                reward *= 2
+                result["double_day"] = True
             self._store.add_ledger(uid, reward, "draw", date)
             result["stardust"] = reward
             result["stardust_total"] = self._store.get_balance(uid)
@@ -993,6 +1018,95 @@ class StarWhisperPlugin(Star):
             except Exception:
                 pass
         return DEFAULT_PRICES[item_id]
+
+    # ---------- 星尘 2.0 辅助（v1.11.12） ----------
+
+    def _task_reward(self) -> int:
+        """每日任务奖励（配置写坏也不炸，最低 0）。"""
+        try:
+            return max(0, int(self._cfg("task_reward", 8)))
+        except (TypeError, ValueError):
+            return 8
+
+    def _award_task(self, uid: str, date: str, reason: str) -> int:
+        """每日任务完成即发奖，**静默**（不额外发消息，避免污染原指令的输出形态）。
+
+        复用护身符那套 `has_ledger(uid, date, reason)` 幂等闸：同一天同一任务
+        只会有一条正向流水，Indices 里已有 (user_id, ref_date, reason) 索引。
+        """
+        if not uid or self._store is None or not self._economy_on():
+            return 0
+        try:
+            if self._store.has_ledger(uid, date, reason):
+                return 0
+            reward = self._task_reward()
+            if reward <= 0:
+                return 0
+            self._store.add_ledger(uid, reward, reason, date)
+            return reward
+        except Exception:
+            logger.warning(
+                f"[{PLUGIN_NAME}] 每日任务发奖失败（{reason}）\n{traceback.format_exc()}"
+            )
+            return 0
+
+    def _today_special(self, date: str) -> str:
+        """今日半价的玩法 key（按日期+盐值派生，同一天所有人一致）。"""
+        return fortune.daily_special(
+            date, str(self._cfg("salt", "moe-star-whisper")), FUN_DEFS.keys()
+        )
+
+    def _fun_price(self, fun_id: str, date: str = "") -> int:
+        """服务型玩法售价：可被 fun_prices 配置覆盖；命中今日特价则半价。"""
+        price = DEFAULT_FUN_PRICES.get(fun_id, 0)
+        raw = self._cfg("fun_prices", None)
+        if isinstance(raw, dict) and raw.get(fun_id) is not None:
+            try:
+                price = max(0, int(raw[fun_id]))
+            except (TypeError, ValueError):
+                pass
+        if date and self._today_special(date) == fun_id:
+            price = max(1, price // 2)
+        return price
+
+    def _wallet_extras(self, uid: str, date: str) -> list[str]:
+        """钱包卡下方的等级 / 任务 / 成就进度（让余额不只是个数字）。"""
+        if self._store is None:
+            return []
+        try:
+            stats = self._store.economy_stats(uid)
+            lv = fortune.stardust_level(stats["total_earned"])
+            ach = fortune.achievements(stats)
+            progress = self._store.task_progress(uid, date, [r for r, _ in TASK_DEFS])
+            lines = [
+                f"Lv.{lv['level']} {lv['title']} · 累计获得 {stats['total_earned']}"
+                + (f" · 距下一级 {lv['to_next']}" if lv["next"] else " · 已达最高等级"),
+                f"今日任务 {sum(progress.values())}/{len(TASK_DEFS)}"
+                f" · 成就徽章 {sum(1 for a in ach if a['done'])}/{len(ach)}",
+            ]
+            if fortune.is_double_day(date):
+                lines.append("✨ 今天是周日双倍星尘日")
+            return lines
+        except Exception:
+            logger.warning(
+                f"[{PLUGIN_NAME}] 钱包卡成长信息读取失败\n{traceback.format_exc()}"
+            )
+            return []
+
+    def _shop_extras(self, uid: str, date: str) -> list[str]:
+        """商店卡下方：今日特价 + 3 个服务型玩法入口与价格。"""
+        special = self._today_special(date)
+        lines = [
+            f"今日特价：{FUN_DEFS[special][0]} {self._fun_price(special, date)} 星尘（半价）",
+        ]
+        lines += [
+            f"· /星语玩 {v[0]} {self._fun_price(k, date)}★"
+            for k, v in FUN_DEFS.items()
+        ]
+        lines.append(
+            f"每项每天限一次 · 当前余额 {self._store.get_balance(uid) if self._store else 0}"
+        )
+        return lines
 
     async def _try_llm_sign(self, result: dict, event: AstrMessageEvent | None = None) -> None:
         """LLM 星语（F16，可选增强默认关）：当日首次抽签改写签文；失败静默回退本地模板。
@@ -1588,6 +1702,8 @@ class StarWhisperPlugin(Star):
             total = payload.get("stardust_total")
             tail = f"累计 {total}，" if total is not None else ""
             lines.append(f"星尘 +{stardust}（{tail}/星尘 查看背包）")
+        if payload.get("double_day"):
+            lines.append("✨ 周日双倍星尘日，今天的收获翻倍～")
         lines.append("—— 星语者")
         if repeat:
             lines.insert(0, "（今天已经抽过啦，这是你今天的星语签～）")
@@ -1762,6 +1878,7 @@ class StarWhisperPlugin(Star):
         span = "周" if ("周" in arg or "week" in arg.lower()) else "日"
         tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
         today = fortune.local_today(tz_name)
+        self._award_task(str(event.get_sender_id() or ""), today, "task:rank")
         members = await self._group_member_ids(event, gid)
         limit = self._rank_size()  # v1.10.10：人数可配（rank_size），两榜共用
 
@@ -2062,6 +2179,7 @@ class StarWhisperPlugin(Star):
                 "格式：/星语日历 [月份]——/星语日历、/星语日历 8、/星语日历 2026-08"
             )
             return
+        self._award_task(uid, today, "task:calendar")  # 每日任务：静默发奖
         month_prefix = f"{year:04d}-{month:02d}"
         rows = self._store.month_fortunes(uid, month_prefix)
         days = {r["date"]: (r["grade"], int(r["score"])) for r in rows}
@@ -2124,6 +2242,9 @@ class StarWhisperPlugin(Star):
         if gid and gid in self._disabled_groups():
             yield event.plain_result("本群已停用星语签，管理员可用 /星语开关 on 开启～")
             return
+        self._award_task(str(event.get_sender_id() or ""),
+                         fortune.local_today(str(self._cfg("timezone", "Asia/Shanghai"))),
+                         "task:star")
         public = self._push_public(gid)
         board_line = self._push_board_line(gid, public["prev"]) if gid else ""
         # v1.11.8：群里带头像（私聊没有群可算，自然是 None → 不画头像）
@@ -2166,7 +2287,8 @@ class StarWhisperPlugin(Star):
                 render_wallet_card,
                 nickname=event.get_sender_name() or "旅行者",
                 balance=balance, items=items,
-                today_gain=max(0, self._store.day_stardust(uid, today)),
+                today_gain=max(0, self._store.day_income(uid, today)),
+                extras=self._wallet_extras(uid, today),
                 uid=uid, avatar_data=await self._fetch_avatar_bytes(uid),
                 date_str=today, accent_hex=self._accent_hex(uid, today),
                 file_key=f"{uid}_{today}",
@@ -2178,6 +2300,7 @@ class StarWhisperPlugin(Star):
         for item_id, (name, _desc) in ITEM_DEFS.items():
             count = self._store.get_item(uid, item_id)
             lines.append(f"{name} ×{count}")
+        lines += self._wallet_extras(uid, today)
         lines.append("用 /星语商店 看看有什么好东西～")
         yield event.plain_result("\n".join(lines))
 
@@ -2199,7 +2322,7 @@ class StarWhisperPlugin(Star):
             card_path = await self._utility_card_async(
                 render_shop_card,
                 nickname=event.get_sender_name() or "旅行者",
-                entries=entries, uid=uid,
+                entries=entries, extras=self._shop_extras(uid, today), uid=uid,
                 avatar_data=await self._fetch_avatar_bytes(uid),
                 accent_hex=self._accent_hex(uid, today),
                 file_key=f"{uid}_{today}",
@@ -2210,6 +2333,8 @@ class StarWhisperPlugin(Star):
         lines = ["🛒 萌萌星语 · 道具商店", ""]
         for name, price, desc, held in entries:
             lines.append(f"【{name}】{price} 星尘\n　{desc}\n　持有 ×{held}")
+        lines.append("")
+        lines += self._shop_extras(uid, today)
         lines.append("\n购买：/星语购买 <名称> [数量]")
         yield event.plain_result("\n".join(lines))
 
@@ -2460,6 +2585,170 @@ class StarWhisperPlugin(Star):
             f"已{'发放' if delta > 0 else '扣除'} {abs(delta)} 颗星尘，当前余额 {self._store.get_balance(target)}。"
         )
 
+    # ---------- 星尘 2.0 指令（v1.11.12） ----------
+
+    @filter.command("星语玩", alias={"运势玩", "星语小玩"})
+    async def fun_cmd(self, event: AstrMessageEvent):
+        """花星尘玩抽签之外的小项目：小确幸签 / 祝福卡 / 星尘礼盒（每项每天一次）。
+
+        这些是**即时服务**，不进背包、不进 ITEM_DEFS：扣款走 ledger 的 `fun:<id>`
+        （负 delta 可审计），同一天同一项的扣款记录本身就是幂等闸。
+        """
+        if self._store is None or not self._economy_on():
+            yield event.plain_result("道具经济未开放～")
+            return
+        uid = str(event.get_sender_id() or "").strip()
+        tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
+        today = fortune.local_today(tz_name)
+        salt = str(self._cfg("salt", "moe-star-whisper"))
+        raw = str(event.message_str or "").replace(" ", "")
+        for w in ("运势玩", "星语小玩", "星语玩", "/"):
+            raw = raw.replace(w, "")
+        fun_id = FUN_ALIASES.get(raw.strip())
+        if fun_id is None:
+            opts = " / ".join(v[0] for v in FUN_DEFS.values())
+            yield event.plain_result(f"玩什么？可选：{opts}（/星语商店 看今日价格）")
+            return
+        reason = f"fun:{fun_id}"
+        if self._store.has_ledger(uid, today, reason):
+            yield event.plain_result("今天已经玩过这个啦，明天再来～（/星语商店 看看别的）")
+            return
+        price = self._fun_price(fun_id, today)
+        balance = self._store.get_balance(uid)
+        if balance < price:
+            yield event.plain_result(
+                f"星尘不够啦：需要 {price}，你还差 {price - balance}。明天来抽签攒一点～"
+            )
+            return
+        # 先扣款再出结果：中途异常也不会白玩（流水已留痕）
+        self._store.add_ledger(uid, -price, reason, today)
+        name = FUN_DEFS[fun_id][0]
+        seed = fortune.derive_seed(today, uid, salt, 900 + list(FUN_DEFS).index(fun_id))
+        lines = [f"{name} · -{price} 星尘"]
+        if fun_id == "delight":
+            lines.append(fortune.pick_text(seed, "delight", list(fortune.DELIGHT_LINES)))
+        elif fun_id == "bless":
+            target = ""
+            for seg in event.get_messages():
+                if isinstance(seg, At):
+                    q = str(getattr(seg, "qq", "") or "")
+                    if q and q != "all":
+                        target = q
+                        break
+            wish = fortune.pick_text(seed, "bless", list(fortune.BLESS_LINES))
+            lines.append(f"送给 {'@' + target if target else '今天的自己'}：{wish}")
+            lines.append("（只是一句话，星尘不转账）")
+        else:  # gift
+            kind = fortune.pick_from(seed, "gift_kind", ("back", "item", "delight"))
+            if kind == "back":
+                amount = fortune.pick_from(seed, "gift_amount", (20, 30, 40, 50, 60, 80))
+                self._store.add_ledger(uid, amount, "gift:back", today)
+                lines.append(f"开出了 {amount} 颗星尘返利 ✨")
+            elif kind == "item":
+                item_id = fortune.pick_from(seed, "gift_item", tuple(ITEM_DEFS))
+                self._store.add_item(uid, item_id, 1)
+                lines.append(f"开出一张 {ITEM_DEFS[item_id][0]}，已放进背包")
+            else:
+                lines.append(fortune.pick_text(seed, "gift_line", list(fortune.DELIGHT_LINES)))
+                lines.append("（礼盒里藏着一句小确幸）")
+        lines.append(f"余额 {self._store.get_balance(uid)} · /星尘 看背包")
+        card_path = None
+        if self._utility_cards_on():
+            card_path = await self._utility_card_async(
+                render_notice_card,
+                title="星尘小玩法",
+                lines=lines,
+                subtitle="萌萌星语 · 星尘 2.0",
+                accent_hex=self._accent_hex(uid, today),
+                file_key=f"{uid}_{today}_{fun_id}",
+                footer="每天每项可玩一次 · /星语商店 看今日特价",
+            )
+        if card_path:
+            yield event.image_result(card_path)
+            return
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command("星语任务", alias={"运势任务", "星语成就"})
+    async def task_cmd(self, event: AstrMessageEvent):
+        """今日任务进度 + 等级称号 + 成就徽章（攒星尘的长期目标）。"""
+        if self._store is None or not self._economy_on():
+            yield event.plain_result("道具经济未开放～")
+            return
+        uid = str(event.get_sender_id() or "").strip()
+        today = fortune.local_today(str(self._cfg("timezone", "Asia/Shanghai")))
+        stats = self._store.economy_stats(uid)
+        lv = fortune.stardust_level(stats["total_earned"])
+        ach = fortune.achievements(stats)
+        progress = self._store.task_progress(uid, today, [r for r, _ in TASK_DEFS])
+        reward = self._task_reward()
+        lines = [
+            f"Lv.{lv['level']} {lv['title']} · 累计获得 {stats['total_earned']}",
+            f"距下一级还差 {lv['to_next']} 星尘" if lv["next"] else "已达最高等级 ✨",
+            f"—— 今日任务（每项 +{reward}）——",
+        ]
+        for reason, desc in TASK_DEFS:
+            lines.append(("✅ " if progress.get(reason) else "· ") + desc)
+        lines.append(f"—— 成就徽章（{sum(1 for a in ach if a['done'])}/{len(ach)}）——")
+        for a in ach:
+            lines.append(("✅ " if a["done"] else "· ")
+                         + f"{a['name']} {a['cur']}/{a['need']}")
+        lines.append(f"当前余额 {stats['balance']} · /星语玩 把星尘花出去")
+        card_path = None
+        if self._utility_cards_on():
+            card_path = await self._utility_card_async(
+                render_notice_card,
+                title="今日任务与成就",
+                lines=lines,
+                subtitle="萌萌星语 · 星尘 2.0",
+                accent_hex=self._accent_hex(uid, today),
+                file_key=f"{uid}_{today}_tasks",
+                footer="等级按累计获得计算，花钱不会掉级",
+            )
+        if card_path:
+            yield event.image_result(card_path)
+            return
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command("星语星尘榜", alias={"运势星尘榜", "星尘榜"})
+    async def stardust_rank_cmd(self, event: AstrMessageEvent):
+        """星尘排行榜：日 / 周 / 总（只统计自然获得，管理员发放不进日周榜）。"""
+        if self._store is None or not self._economy_on():
+            yield event.plain_result("道具经济未开放～")
+            return
+        uid = str(event.get_sender_id() or "").strip()
+        today = fortune.local_today(str(self._cfg("timezone", "Asia/Shanghai")))
+        arg = str(event.message_str or "").replace(" ", "")
+        if "周" in arg or "week" in arg.lower():
+            span, key = "周", "week"
+        elif "总" in arg or "all" in arg.lower():
+            span, key = "总", "all"
+        else:
+            span, key = "日", "day"
+        week_from = (
+            datetime.strptime(today, "%Y-%m-%d") - timedelta(days=6)
+        ).strftime("%Y-%m-%d")
+        rows = self._store.stardust_ranking(key, self._rank_size(), today, week_from)
+        lines = [f"{i}. {r['nickname']} · {r['total']} 星尘"
+                 for i, r in enumerate(rows, 1)]
+        if not lines:
+            lines = ["还没有人攒到星尘，先来 /星语 抽一支吧～"]
+        lines.append("（只统计自然获得：抽签 / 任务 / 礼盒）")
+        card_path = None
+        if self._utility_cards_on():
+            card_path = await self._utility_card_async(
+                render_notice_card,
+                title=f"{span}星尘榜",
+                lines=lines,
+                subtitle="萌萌星语 · 星尘 2.0",
+                accent_hex=self._accent_hex(uid, today),
+                file_key=f"{today}_{key}_stardust",
+                footer="/星语星尘榜 日 | 周 | 总",
+            )
+        if card_path:
+            yield event.image_result(card_path)
+            return
+        yield event.plain_result("\n".join(lines))
+
     @filter.command("星语帮助", alias={"运势帮助"})
     async def help_cmd(self, event: AstrMessageEvent):
         """查看萌萌星语的全部指令（帮助图）"""
@@ -2485,11 +2774,14 @@ class StarWhisperPlugin(Star):
                 ("/星座 [@某人]", "查看星座与今日吉凶"),
             ]),
             ("道具经济", [
-                ("/星尘", "星尘余额与背包"),
-                ("/星语商店", "道具与价格"),
+                ("/星尘", "星尘余额、背包与等级进度"),
+                ("/星语商店", "道具与价格（含每日半价玩法）"),
                 ("/星语购买 <名称> [数量]", "购买道具"),
                 ("/星语使用 <名称>", "使用换签卡/护身符/香烛"),
                 ("/星语补签", "断签 3 天内补回昨天"),
+                ("/星语玩 <名称>", "星尘小玩法：小确幸签/祝福卡/礼盒（每天每项一次）"),
+                ("/星语任务", "今日任务、星尘等级称号与成就徽章"),
+                ("/星语星尘榜 [日|周|总]", "星尘获得排行"),
                 ("/星语发放 @用户 <±n>", "手动调整星尘（管理员）"),
             ]),
         ]

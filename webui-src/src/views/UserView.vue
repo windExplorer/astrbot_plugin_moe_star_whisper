@@ -88,6 +88,11 @@
       </div>
       <div class="stat"><div class="k">当前连签</div><div class="v">{{ data.profile.streak }}</div><div class="d">最高 {{ data.profile.max_streak }} 天</div></div>
       <div class="stat"><div class="k">星尘余额</div><div class="v">{{ data.balance }}</div><div class="d">全流水可审计</div></div>
+      <div class="stat">
+        <div class="k">星尘等级</div>
+        <div class="v">Lv.{{ data.economy?.level?.level ?? 1 }}</div>
+        <div class="d">{{ data.economy?.level?.title || "拾星新手" }} · 成就 {{ data.economy?.done_achievements ?? 0 }}/{{ data.economy?.achievements?.length ?? 8 }}</div>
+      </div>
       <div class="stat"><div class="k">星座</div><div class="v" style="font-size: 18px">{{ data.profile.constellation || "未绑定" }}</div><div class="d">生日 {{ data.profile.birthday || "未绑定" }}</div></div>
       <div class="stat"><div class="k">背包</div><div class="v" style="font-size: 16px">
         换签×{{ data.items.reroll || 0 }}</div>
@@ -133,6 +138,20 @@
         </div>
       </section>
     </div>
+
+    <section class="panel" v-if="data.economy?.achievements?.length">
+      <div class="head"><b>星尘等级与成就</b><span class="sub">按累计获得升级，花钱不掉级</span></div>
+      <div class="tags">
+        <span class="tag" :class="{ ok: a.done }" v-for="(a, i) in data.economy.achievements" :key="i">
+          {{ a.done ? "✅" : "·" }} {{ a.name }} {{ a.cur }}/{{ a.need }}
+        </span>
+      </div>
+      <div class="path">
+        今日任务 {{ data.economy.tasks_done ?? 0 }}/{{ data.economy.tasks_total ?? 3 }}
+        · 累计获得 {{ data.economy.stats?.total_earned ?? 0 }}
+        · 累计消费 {{ data.economy.stats?.total_spent ?? 0 }}
+      </div>
+    </section>
 
     <section class="panel">
       <div class="head"><b>运势日历</b><span class="sub">近 {{ months }} 个月</span></div>

@@ -140,6 +140,11 @@ def pick_text(seed: bytes, tag: str, pool: list) -> str:
     return _pick(seed, tag, pool)
 
 
+def pick_from(seed: bytes, tag: str, pool):
+    """从任意池确定性取一项（v1.11.12：礼盒的返利金额、道具 id 等非文本池）。"""
+    return _pick(seed, tag, pool)
+
+
 def pick_two(seed: bytes, tag: str, pool: list) -> list:
     """从池中确定性取两条不重复项（公开接口，v1.10.15 每日推送的宜忌用）。
 
@@ -521,6 +526,118 @@ def stardust_reward(grade: str, streak: int, base: int = 10) -> int:
     else:
         streak_bonus = 0
     return int(base) + STARDUST_GRADE_BONUS.get(grade, 10) + streak_bonus
+
+
+# ---------- v1.11.12：星尘 2.0（每日任务 / 趣味消费 / 等级 / 成就） ----------
+#
+# 以前星尘只有「抽签发放 → 买 4 种抽签辅助道具」一条路，且每种道具持有上限 3，
+# 买满 12 张之后余额只涨不花。这一版把它补成闭环：
+#   产出：周日双倍 + 3 条每日小任务
+#   消耗：3 种「抽签之外」的即时玩法 + 每日轮换半价
+#   目标：按累计获得升级的称号 + 8 枚成就徽章 + 星尘排行榜
+# 趣味文案放模块常量而不是 data/lexicon 词库：老用户自定义词库缺这些键时也必须
+# 能正常加载（v1.10.17 的「缺可选键合法」口径）。
+
+DELIGHT_LINES = (
+    "窗外的云今天长得像一只打哈欠的猫。",
+    "你翻到的那一页，正好是最想读的那句。",
+    "热水刚好，不烫也不凉。",
+    "走错的那条路，尽头有一家很好吃的店。",
+    "耳机里随机到的歌，居然刚好对上心情。",
+    "有人记得你不加香菜。",
+    "风把窗帘吹起来，阳光落了一地。",
+    "今天的信息已读不回也没关系，慢慢来。",
+    "口袋里摸到上次忘掉的一颗糖。",
+    "排队时前面那位刚好让了你半个身位。",
+    "猫主动蹭了你的裤脚。",
+    "睡前想起的那件小事，其实早就做完了。",
+    "杯底最后一口，温度刚刚好。",
+    "抬头发现月亮跟着你走了一路。",
+    "写错的字，正好变成更好听的句子。",
+    "今天什么都不做，也算一件正经事。",
+)
+
+BLESS_LINES = (
+    "愿你今天被温柔地让一次路。",
+    "愿你想的那件事，悄悄往好里挪一步。",
+    "愿你的热水永远刚好、被子永远不潮。",
+    "愿你遇到的猫都愿意让你摸一下。",
+    "愿所有没说出口的话，都有人替你听懂。",
+    "愿加班的灯早点灭，回家的车刚好来。",
+    "愿你今天的小失误，都变成明天的笑点。",
+    "愿你被记住的是名字，不是工号。",
+    "愿雨落在你带伞的那天。",
+    "愿你攒的星尘，都换成一点开心。",
+    "愿你睡前不用再复盘白天那句话。",
+    "愿明天的你，比今天多睡十分钟。",
+)
+
+# 等级按「累计获得」算，不按余额——花钱买东西不该掉级。
+STARDUST_LEVELS = (
+    (0, "拾星新手"), (100, "星屑收集者"), (300, "观星学徒"),
+    (600, "星语见习生"), (1000, "逐星者"), (1600, "星轨记录员"),
+    (2500, "星河旅人"), (4000, "星语者"), (6000, "星辰守望"),
+)
+
+# 成就：(名称, 说明, 取 stats 的哪个键, 门槛)
+ACHIEVEMENT_DEFS = (
+    ("初次拾星", "抽第一支星语签", "draw_days", 1),
+    ("七日连签", "连续 7 天来抽签", "max_streak", 7),
+    ("月月不落", "连续 30 天来抽签", "max_streak", 30),
+    ("小有积蓄", "累计获得 500 星尘", "total_earned", 500),
+    ("星河富翁", "累计获得 2000 星尘", "total_earned", 2000),
+    ("懂得花钱", "累计消费 300 星尘", "total_spent", 300),
+    ("什么都想试", "玩过 3 种星尘玩法", "fun_kinds", 3),
+    ("存钱罐", "手上攒到 1000 星尘", "balance", 1000),
+)
+
+
+def stardust_level(total_earned: int) -> dict:
+    """累计获得星尘 → 等级 / 称号 / 距下一级进度（纯函数，可测）。"""
+    total = max(0, int(total_earned or 0))
+    level, title, floor, nxt = 1, STARDUST_LEVELS[0][1], 0, None
+    for i, (threshold, name) in enumerate(STARDUST_LEVELS, 1):
+        if total >= threshold:
+            level, title, floor = i, name, threshold
+        else:
+            nxt = threshold
+            break
+    span = (nxt - floor) if nxt else 0
+    progress = 1.0 if not nxt else min(1.0, (total - floor) / span if span else 0.0)
+    return {
+        "level": level, "title": title, "floor": floor, "next": nxt,
+        "progress": round(progress, 3),
+        "to_next": max(0, nxt - total) if nxt else 0,
+    }
+
+
+def achievements(stats: dict) -> list[dict]:
+    """成就徽章达成情况（纯函数；stats 由 store.economy_stats 提供）。"""
+    out = []
+    for name, desc, key, need in ACHIEVEMENT_DEFS:
+        cur = int((stats or {}).get(key) or 0)
+        out.append({
+            "name": name, "desc": desc, "cur": min(cur, need), "need": need,
+            "done": cur >= need,
+        })
+    return out
+
+
+def is_double_day(date: str) -> bool:
+    """周日双倍星尘日（固定星期天，可预期；不做随机，免得用户摸不着头脑）。"""
+    try:
+        return datetime.strptime(date, "%Y-%m-%d").weekday() == 6
+    except (TypeError, ValueError):
+        return False
+
+
+def daily_special(date: str, salt: str, keys) -> str:
+    """今日轮换半价的玩法 key（按日期种子确定，同一天所有人一致）。"""
+    pool = tuple(keys)
+    if not pool:
+        return ""
+    seed = derive_seed(date, "shop-special", salt)
+    return pool[_sub_int(seed, "special", len(pool))]
 
 
 # ---------- M8 / v1.11.11：每日牌库（塔罗 78 张 + 星语神谕卡 36 张） ----------

@@ -31,7 +31,8 @@
           <li><span>今日均分</span><b>{{ data?.day?.avg_score ?? 0 }}</b></li>
           <li><span>吉签 / 凶签</span><b>{{ data?.day?.lucky ?? 0 }} / {{ data?.day?.unlucky ?? 0 }}</b></li>
           <li><span>库内记录</span><b>{{ data?.counts?.fortunes ?? 0 }} 签</b></li>
-          <li><span>累计星尘</span><b>{{ data?.counts?.ledger ?? 0 }} 笔流水</b></li>
+          <li><span>星尘流水</span><b>{{ data?.counts?.ledger ?? 0 }} 笔</b></li>
+          <li><span>累计发放 / 消耗</span><b>{{ data?.stardust?.income ?? 0 }} / {{ data?.stardust?.spend ?? 0 }}</b></li>
         </ul>
         <div class="chips">
           <span class="chip" v-for="(v, k) in data?.switches || {}" :key="k">

@@ -345,6 +345,9 @@ def _overview_core(store, cfg_get, tz_name: str, days: int = 14) -> dict:
         # 带头像/昵称的用户列表（与「用户查询」页同一份数据，取最近活跃 12 人）
         "recent_users": store.list_users(page=1, size=12, order="last")["rows"],
         "counts": store.count_all(),
+        # v1.11.12：总览原来只给「ledger 有多少笔流水」，标签却写「累计星尘」，
+        # 口径对不上；这里补真实的累计发放/消耗金额。
+        "stardust": _safe_stardust_totals(store),
         "switches": {
             "timezone": cfg_get("timezone", ""),
             "output_mode": cfg_get("output_mode", ""),
@@ -672,6 +675,42 @@ def _profile_summary(profile: dict) -> dict:
     }
 
 
+# 每日任务的三个 reason（与 main.TASK_DEFS 对应；这里不 import main 避免循环依赖）
+_TASK_REASONS = ("task:calendar", "task:rank", "task:star")
+
+
+def _safe_stardust_totals(store) -> dict:
+    """累计发放/消耗；老版本 Store 或测试桩缺方法时返回 0，不让总览 500。"""
+    try:
+        agg = store.stats_ledger("")
+        return {"income": int(agg.get("income") or 0),
+                "spend": int(agg.get("spend") or 0)}
+    except Exception:
+        return {"income": 0, "spend": 0}
+
+
+def _economy_view(store, uid: str, today: str) -> dict:
+    """用户详情的星尘 2.0 视图：指标 / 等级 / 成就 / 今日任务。"""
+    try:
+        stats = store.economy_stats(uid)
+        ach = fortune.achievements(stats)
+        tasks = store.task_progress(uid, today, _TASK_REASONS)
+        return {
+            "stats": stats,
+            "level": fortune.stardust_level(stats["total_earned"]),
+            "achievements": ach,
+            "done_achievements": sum(1 for a in ach if a["done"]),
+            "tasks": tasks,
+            "tasks_done": sum(1 for v in tasks.values() if v),
+            "tasks_total": len(_TASK_REASONS),
+        }
+    except Exception:
+        return {"stats": {}, "level": fortune.stardust_level(0),
+                "achievements": fortune.achievements({}),
+                "done_achievements": 0, "tasks": {},
+                "tasks_done": 0, "tasks_total": len(_TASK_REASONS)}
+
+
 def _user_core(store, cfg_get, tz_name: str, uid: str, months: int = 3) -> dict:
     today = fortune.local_today(tz_name)
     row = store.get_fortune(uid, today)
@@ -708,6 +747,7 @@ def _user_core(store, cfg_get, tz_name: str, uid: str, months: int = 3) -> dict:
         "balance": store.get_balance(uid),
         "items": {item_id: store.get_item(uid, item_id) for item_id in
                   ("reroll", "amulet", "streak_guard", "candle")},
+        "economy": _economy_view(store, uid, today),
         "draw_jobs": jobs,
         "history": store.user_history(uid, 60),
         "ledger": store.user_ledger(uid, 30),

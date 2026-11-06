@@ -167,6 +167,8 @@ export interface Overview {
   recent: RecordRow[];
   recent_users: UserRow[];
   counts: Record<string, number>;
+  /** v1.11.12：真实累计发放 / 消耗（counts.ledger 只是流水笔数，别混用）。 */
+  stardust?: { income: number; spend: number };
   switches: Record<string, any>;
 }
 
@@ -277,6 +279,30 @@ export interface UserPayload {
   };
   balance: number;
   items: Record<string, number>;
+  /** v1.11.12：等级 / 成就 / 今日任务（老后端可能没有，故可选）。 */
+  economy?: {
+    stats: {
+      balance: number;
+      total_earned: number;
+      total_spent: number;
+      fun_kinds: number;
+      draw_days: number;
+      max_streak: number;
+    };
+    level: {
+      level: number;
+      title: string;
+      floor: number;
+      next: number | null;
+      progress: number;
+      to_next: number;
+    };
+    achievements: { name: string; desc: string; cur: number; need: number; done: boolean }[];
+    done_achievements: number;
+    tasks: Record<string, boolean>;
+    tasks_done: number;
+    tasks_total: number;
+  };
   draw_jobs: {
     id: number;
     status: string;
