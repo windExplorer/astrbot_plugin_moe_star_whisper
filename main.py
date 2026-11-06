@@ -652,7 +652,12 @@ class StarWhisperPlugin(Star):
         template = str(
             self._cfg("draw_llm_prompt", "") or fortune.builtin_draw_prompt(lang, fmt)
         )
-        prompt = template.replace("{facts}", fortune.llm_facts(result))
+        # v1.11.9：把今日塔罗的牌面意象与画面规则一起塞进 {facts}（自定义模板同样受益）。
+        # 以前只给牌名与关键词，LLM 不知道倒吊人要倒挂，22 张牌画出来都是站着的少女。
+        visual_lang = lang if bool(self._cfg("tarot_visual_in_prompt", True)) else ""
+        prompt = template.replace(
+            "{facts}", fortune.llm_facts(result, visual_lang=visual_lang)
+        )
         try:
             umo = getattr(event, "unified_msg_origin", None) if event is not None else None
             provider = self.context.get_using_provider(umo)
@@ -807,7 +812,11 @@ class StarWhisperPlugin(Star):
         result = fortune.roll_fortune(seed, lex, weights)
         result["date"] = date
         result["reroll_count"] = nonce
-        result["tarot"] = fortune.tarot_of(seed)  # 今日大阿卡纳（M8 塔罗卡面）
+        # 今日塔罗（M8）：v1.11.9 起按配置在 22 张大阿卡纳 / 完整 78 张之间选池，
+        # 且正逆位各自带关键词、解读与牌面意象。
+        result["tarot"] = fortune.tarot_of(
+            seed, scope=str(self._cfg("tarot_deck_scope", "full"))
+        )
         if streak is None:
             streak = self._store.bump_streak(uid, date, fortune.prev_date(date))
         result["streak"] = streak

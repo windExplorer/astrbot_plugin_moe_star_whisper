@@ -107,8 +107,13 @@ const GROUP_META: { name: string; description: string; keys: string[] }[] = [
     description: "时区、种子盐、出签方式与卡面外观",
     keys: [
       "timezone", "salt", "output_mode", "card_theme", "card_font_style", "card_font_path",
-      "card_width", "card_height", "fortune_signer", "tarot_label_on_image",
+      "card_width", "card_height", "fortune_signer",
     ],
+  },
+  {
+    name: "塔罗牌",
+    description: "每日塔罗的牌库范围、卡面标注与生图提示词",
+    keys: ["tarot_deck_scope", "tarot_label_on_image", "tarot_visual_in_prompt"],
   },
   { name: "吉凶与权重", description: "六档吉凶的抽中权重", keys: ["grade_weights"] },
   { name: "LLM 星语", description: "用大模型改写签文", keys: ["llm_enabled", "llm_prompt_persona"] },
