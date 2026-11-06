@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-"""塔罗牌库与生图提示词守卫（v1.11.9）。纯函数测试，无 astrbot 依赖。
+"""每日牌库与生图提示词守卫（v1.11.9 起，v1.11.11 扩到两套牌）。纯函数测试，无 astrbot 依赖。
 
 背景：旧版只有 22 张大阿卡纳、每张只有一条正位口径解读，标着「逆位」也照读正位；
 生图提示词里只塞牌名与关键词，AI 不知道倒吊人要倒挂，画出来全是站着的少女。
-这个测试把「78 张 / 正逆位两套 / 牌面意象进提示词」三件事锁死。
+这个测试锁死「78 张塔罗 / 36 张星语神谕卡 / 正逆位两套 / 牌面意象进提示词 /
+四档牌池」这几件事，以及两套牌都能走通事实清单、生图兜底与旧 payload 反查。
 退出码即结论。
 """
 import json
@@ -86,6 +87,77 @@ def main() -> int:
     rev_ratio = sum(1 for t in full if t["reversed"]) / len(full)
     check(0.35 < rev_ratio < 0.65, f"正逆位应大致各半，实际逆位占比 {rev_ratio:.2f}")
     check(len({t["name_cn"] for t in full}) > 60, "600 次抽样应覆盖大部分牌，别总抽同几张")
+
+    # 4.5) v1.11.11：第二套「星语神谕卡」——独立牌面 / 独立解读 / 四档牌池
+    oracle = fortune.ORACLE_DECK
+    check(len(oracle) == 36, f"神谕卡必须是 36 张，实际 {len(oracle)}")
+    check(len({c["cn"] for c in oracle}) == 36, "神谕卡中文牌名不得重复")
+    check(len({c["en"] for c in oracle}) == 36, "神谕卡英文牌名不得重复")
+    check(not ({c["cn"] for c in oracle} & {c["cn"] for c in deck}),
+          "神谕卡不得与塔罗牌重名（否则旧 payload 反查会串牌）")
+    for group in ("moon", "season", "creature", "elemental"):
+        hit = [c for c in oracle if c["suit"] == group]
+        check(len(hit) == 9, f"{group} 组应有 9 张神谕卡，实际 {len(hit)}")
+        check(all(c["suit_cn"] and c["group_en"] for c in hit),
+              f"{group} 组每张都要带中英文分类名")
+    for card in oracle:
+        name = card["cn"]
+        for key in fields + ("group_en", "deck"):
+            check(bool(card.get(key)), f"神谕卡 {name} 缺字段 {key}")
+        check(card["deck"] == "oracle", f"神谕卡 {name} 必须标记 deck=oracle")
+        for a, b in (("kw_up", "kw_rev"), ("up", "rev"),
+                     ("vzh_up", "vzh_rev"), ("ven_up", "ven_rev")):
+            check(card[a] != card[b], f"神谕卡 {name} 的 {a}/{b} 必须不同")
+        check(len(card["up"]) <= 40 and len(card["rev"]) <= 40,
+              f"神谕卡 {name} 解读过长会撑破卡面两行")
+        check("{" not in card["vzh_up"] and "{" not in card["ven_up"],
+              f"神谕卡 {name} 画面意象不得留占位符")
+        for key in ("ven_up", "ven_rev"):
+            check(not any("\u4e00" <= ch <= "\u9fff" for ch in card[key]),
+                  f"神谕卡 {name} 的 {key} 不得混入中文（英文提示词会不合规）")
+
+    check(len(fortune.tarot_deck("full")) == 78, "full 仍是标准塔罗 78 张")
+    check(len(fortune.tarot_deck("major")) == 22, "major 仍是 22 张大阿卡纳")
+    check(len(fortune.tarot_deck("oracle")) == 36, "oracle 只含 36 张神谕卡")
+    check(len(fortune.tarot_deck("mixed")) == 114, "mixed = 78 + 36 = 114 张")
+    check(len(fortune.tarot_deck("not-a-scope")) == 78, "未知范围回落 full，配置写坏不炸")
+    oracle_draws = [fortune.tarot_of(fortune.derive_seed("2026-11-06", f"o{i}", "s"),
+                                     scope="oracle") for i in range(300)]
+    check(all(t["deck_kind"] == "oracle" and t["deck_size"] == 36
+              for t in oracle_draws), "scope=oracle 只能抽到神谕卡")
+    check(len({t["name_cn"] for t in oracle_draws}) > 30,
+          "300 次抽样应覆盖大部分神谕卡")
+    mixed_draws = [fortune.tarot_of(fortune.derive_seed("2026-11-06", f"x{i}", "s"),
+                                    scope="mixed") for i in range(600)]
+    check(all(t["deck_size"] == 114 for t in mixed_draws), "mixed 牌池大小必须是 114")
+    check(any(t["deck_kind"] == "oracle" for t in mixed_draws)
+          and any(t["deck_kind"] == "tarot" for t in mixed_draws),
+          "mixed 必须两套牌都抽得到（不然等于没加牌组）")
+    check(len({t["name_cn"] for t in mixed_draws}) > 80,
+          "600 次抽样应覆盖大部分 114 张牌")
+
+    # 神谕卡也要走通事实清单 / 生图兜底 / 旧 payload 反查三条链路
+    o = oracle_draws[0]
+    # 不依赖下面第 5 组才构造的 result（llm_facts / local_draw_prompt 都容忍缺字段）
+    o_result = {"grade": "吉", "score": 70, "tarot": o}
+    o_plain = fortune.llm_facts(o_result)
+    check("今日星语神谕卡：" in o_plain and "今日塔罗：" not in o_plain,
+          "神谕卡事实清单必须如实写牌种，不能冒充塔罗")
+    o_en = fortune.llm_facts(o_result, visual_lang="en")
+    check("Card group: " + o["group_en"] in o_en, "神谕卡英文事实清单要写分类名")
+    check(o["visual_en"][:12] in o_en and "Visual rules:" in o_en,
+          "神谕卡生图事实清单也要带画面意象与画面规则")
+    for lang, fmt in (("en", "tags"), ("zh", "natural")):
+        lp = fortune.local_draw_prompt(o_result, lang, fmt)
+        check(o["name_cn" if lang == "zh" else "name_en"] in lp,
+              f"神谕卡 {lang}+{fmt} 兜底应带牌名")
+        check(o["visual_zh" if lang == "zh" else "visual_en"][:6] in lp,
+              f"神谕卡 {lang}+{fmt} 兜底必须带画面意象")
+    comp = fortune.complement_tarot(
+        {"name_cn": o["name_cn"], "label": o["label"], "keywords": o["keywords"],
+         "reversed": o["reversed"]})
+    check(comp.get("visual_zh") == o["visual_zh"] and comp.get("deck_kind") == "oracle",
+          "神谕卡旧 payload 也要能反查补齐画面意象与牌种")
 
     # 5) 事实清单：签文用（默认）保持精简，生图用（visual_lang）注入画面
     lex = lexicon.load_lexicon()
@@ -173,8 +245,10 @@ def main() -> int:
     # 9) 配置与前端分区：新增键不能落到「其他」，也不能缺 type
     schema = json.loads((ROOT / "_conf_schema.json").read_text(encoding="utf-8"))
     check(schema.get("tarot_deck_scope", {}).get("type") == "string"
-          and schema["tarot_deck_scope"]["default"] == "full",
-          "牌库范围配置必须是 string 且默认完整牌组")
+          and schema["tarot_deck_scope"]["default"] == "mixed",
+          "牌库范围配置必须是 string 且默认混合牌组（114 张）")
+    check(set(schema["tarot_deck_scope"]["options"])
+          == {"full", "major", "oracle", "mixed"}, "四档牌池都要出现在 options 里")
     check(len(schema["tarot_deck_scope"]["labels"])
           == len(schema["tarot_deck_scope"]["options"]), "牌库范围 labels 与 options 等长")
     check(schema.get("tarot_visual_in_prompt", {}).get("type") == "bool"
@@ -186,6 +260,8 @@ def main() -> int:
     main_src = (ROOT / "main.py").read_text(encoding="utf-8")
     check("visual_lang=visual_lang" in main_src, "生图组装必须传 visual_lang")
     check("tarot_deck_scope" in main_src, "抽签必须读牌库范围配置")
+    check('self._cfg("tarot_deck_scope", "mixed")' in main_src,
+          "主程序的兜底默认牌池要与 schema 默认一致")
 
     if FAILED:
         print(f"\n{len(FAILED)} 项失败")

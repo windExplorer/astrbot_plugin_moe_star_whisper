@@ -213,10 +213,10 @@ DEFAULT_LLM_PERSONA = (
     "先记住：卡片上已经展示了吉凶、幸运指数、六维星数、宜忌，以及幸运物/幸运色/"
     "幸运数字/幸运方位四件套——签文里【一个都不要再提】：不要出现幸运物的名字、"
     "幸运数字、方位、颜色的词，也不要复述宜忌条目原词，那是复读不是解签。"
-    "你要写的是对这一天的解读：顺着运势走向（吉凶与六维强弱）与今日塔罗的"
+    "你要写的是对这一天的解读：顺着运势走向（吉凶与六维强弱）与今日抽到的那张牌的"
     "正位或逆位含义，用画面感说一句只属于今天的话——吉日大方恭喜、给一个值得期待的方向；"
     "凶日温柔安慰、教用户把今天过得松一点。"
-    "塔罗为逆位时语气要偏「提醒与松绑」，不要写成一路顺风的恭喜；"
+    "今日牌为逆位时语气要偏「提醒与松绑」，不要写成一路顺风的恭喜；"
     "也不要把牌名和牌面画面直接复述一遍，要写的是它对这一天意味着什么。"
     "第二人称，60 字以内，2~3 句，像写给朋友的短笺。"
     "只输出签文本身：不要解释、不要引号、不要表情、不要罗列。"
@@ -256,7 +256,11 @@ def llm_facts(result: dict, visual_lang: str = "") -> str:
     tarot = complement_tarot(result.get("tarot") or {})
     tarot_text = ""
     if tarot:
-        tarot_text = (f"\n今日塔罗：{tarot.get('name_cn', '')}"
+        # v1.11.11：塔罗与神谕卡共用一条事实清单，但牌种标题要如实分开写，
+        # 否则「新月」会被当成一张塔罗牌喂给 LLM。
+        card_title = ("今日星语神谕卡" if tarot.get("deck_kind") == "oracle"
+                      else "今日塔罗")
+        tarot_text = (f"\n{card_title}：{tarot.get('name_cn', '')}"
                       f"（{tarot.get('label', '')}）——{tarot.get('keywords', '')}")
         if visual_lang:
             zh = visual_lang == "zh"
@@ -266,8 +270,12 @@ def llm_facts(result: dict, visual_lang: str = "") -> str:
                 en_suit = ELEMENT_EN.get(element, "")
                 if zh:
                     tarot_text += "\n牌组：" + suit_cn + (f"（{element}元素）" if element else "")
+                elif en_suit:
+                    tarot_text += "\nElement: " + en_suit
                 else:
-                    tarot_text += ("\nElement: " + en_suit) if en_suit else "\nCard group: Major Arcana"
+                    # 神谕卡没有四元素，写分类英文名；塔罗大阿卡纳保持历史口径
+                    group_en = str(tarot.get("group_en") or "Major Arcana")
+                    tarot_text += "\nCard group: " + group_en
             visual = str(tarot.get("visual_zh" if zh else "visual_en") or "")
             if visual:
                 tarot_text += (f"\n牌面意象：{visual}" if zh
@@ -309,9 +317,11 @@ DEFAULT_DRAW_NEGATIVE = (
 DRAW_NEGATIVE_HINT_ZH = "画面中只有女性角色，禁止出现男性角色"
 # v1.10.4 起：边框完整可见、左右对称；v1.10.6 用户反馈后改成「画面铺满画布」——
 # 早期版本要求「边框与画布留空隙」，模型会把空隙画成白边，故严禁再加回留空隙。
-BORDER_MARGIN_ZH = ("配华丽对称的塔罗牌边框——边框完整可见、不被裁切，左右两侧粗细一致，"
+# v1.11.11：两套牌共用同一套「华丽对称牌框」的视觉风格，措辞改成通用，
+# 不再把神谕卡的牌面也叫成塔罗牌（边框样式本身仍是塔罗式金框）。
+BORDER_MARGIN_ZH = ("配华丽对称的星语牌边框——边框完整可见、不被裁切，左右两侧粗细一致，"
                     "画面铺满整个画布，四周不要留白边")
-BORDER_MARGIN_EN = ("ornate symmetrical tarot card frame, entire frame fully visible "
+BORDER_MARGIN_EN = ("ornate symmetrical fortune card frame, entire frame fully visible "
                     "and not cropped, left and right sides of the frame equally thick, "
                     "the illustration fills the entire canvas edge to edge, "
                     "no blank white margins around the image")
@@ -324,7 +334,7 @@ def draw_system_hint(lang: str) -> str:
     关键姿态（倒挂 / 跪姿 / 倒水 / 举剑）必须落到画面上，不许退化成通用站姿。
     """
     if lang == "zh":
-        return ("你为一张动漫风格的塔罗牌牌面撰写绘图提示词。"
+        return ("你为一张动漫风格的星语牌面撰写绘图提示词。"
                 + FEMALE_SUBJECT_ZH + "。"
                 "事实清单里的「牌面意象」是必须画出来的画面：写倒吊就画头下脚上地倒挂，"
                 "写跪姿就画跪着，写倒水就画两只杯子来回倾倒，不许偷懒换成普通站姿；"
@@ -372,7 +382,7 @@ DRAW_GRADE_MOODS_ZH = {
 
 
 def builtin_draw_prompt(lang: str, fmt: str) -> str:
-    """封面图提示词的 LLM 指令模板（塔罗牌牌面 + 动漫风格，PRD §7.6-3）。
+    """封面图提示词的 LLM 指令模板（星语牌面 + 动漫风格，PRD §7.6-3）。
 
     v1.11.9：牌池扩到 78 张后不能再写死「大阿卡纳」；更重要的是明确要求
     「照着事实清单里的牌面意象画」，否则 LLM 只知道牌名，依旧会画出通用站姿。
@@ -380,8 +390,8 @@ def builtin_draw_prompt(lang: str, fmt: str) -> str:
     if lang == "zh":
         shape = "一段自然流畅的中文画面描述（不要标签堆砌）" if fmt == "natural" else "中文短语式描述"
         return (
-            "根据下面的事实清单，为一张**动漫风格的塔罗牌牌面**插画写" + shape + "："
-            "画面严格按清单里「今日塔罗」那张牌的「牌面意象」来画，关键姿态不可省略——"
+            "根据下面的事实清单，为一张**动漫风格的星语牌面**插画写" + shape + "："
+            "画面严格按清单里那张今日牌的「牌面意象」来画，关键姿态不可省略——"
             "写倒吊就画头下脚上地倒挂，写跪姿就画跪着，写倒水就画两只杯子来回倾倒；"
             "牌名只作主题提示，不能只画一个普通站着的少女。"
             + FEMALE_SUBJECT_ZH + "，"
@@ -392,8 +402,8 @@ def builtin_draw_prompt(lang: str, fmt: str) -> str:
     if fmt == "natural":
         return (
             "Based on the fortune facts below, write ONE English sentence describing an "
-            "ANIME-STYLE TAROT CARD illustration: a single anime girl as the central figure "
-            "(female only, no male characters), the tarot card named in the facts as the "
+            "ANIME-STYLE FORTUNE CARD illustration: a single anime girl as the central figure "
+            "(female only, no male characters), the card named in the facts as the "
             "central motif, FOLLOW the Card motif line literally (an upside-down hanged girl "
             "really hangs upside down, a kneeling girl really kneels) instead of drawing a "
             "generic standing girl, " + BORDER_MARGIN_EN + ", "
@@ -404,8 +414,8 @@ def builtin_draw_prompt(lang: str, fmt: str) -> str:
         )
     return (
         "Based on the fortune facts below, write ONE line of English Danbooru-style tags for an "
-        "ANIME-STYLE TAROT CARD illustration: " + FEMALE_SUBJECT_EN + ", "
-        "the tarot card named in the facts as the central motif, "
+        "ANIME-STYLE FORTUNE CARD illustration: " + FEMALE_SUBJECT_EN + ", "
+        "the card named in the facts as the central motif, "
         "include the key pose from the Card motif line (hanging upside down, kneeling, "
         "pouring water, raising a sword, etc.) as explicit tags, never a generic standing pose, "
         "symmetrical composition, centered, " + BORDER_MARGIN_EN + ", "
@@ -441,7 +451,7 @@ def local_draw_prompt(result: dict, lang: str, fmt: str) -> str:
             f"{phase}夜空" if phase else "",
         ) if x)
         tail = ("、" + extras) if extras else ""
-        body = (f"动漫风格塔罗牌牌面：{name_cn}（{label}）主题的少女，"
+        body = (f"动漫风格星语牌面：{name_cn}（{label}）主题的少女，"
                 f"【牌面画面】{visual}，{mood}"
                 f"，{DRAW_NEGATIVE_HINT_ZH}，" + BORDER_MARGIN_ZH + "，"
                 "构图饱满不裁边，竖版构图，星月神秘氛围，淡彩，画质精美" + tail)
@@ -453,8 +463,8 @@ def local_draw_prompt(result: dict, lang: str, fmt: str) -> str:
     # The Fool / The Hanged Man 这类牌名自带冠词，别拼出 "the The Hanged Man"
     card_phrase = name_en if name_en.lower().startswith("the ") else f"the {name_en}"
     return (
-        "tarot card design, anime style, " + FEMALE_SUBJECT_EN + f", {mood}, "
-        f"{card_phrase} tarot card motif, {pos} card, " + visual + ", "
+        "fortune card design, anime style, " + FEMALE_SUBJECT_EN + f", {mood}, "
+        f"{card_phrase} fortune card motif, {pos} card, " + visual + ", "
         + BORDER_MARGIN_EN + ", symmetrical composition, centered, nothing cropped, "
         "portrait orientation, stars, crescent moon, mystical ambience, "
         "soft pastel colors, no text, masterpiece, best quality"
@@ -513,12 +523,15 @@ def stardust_reward(grade: str, streak: int, base: int = 10) -> int:
     return int(base) + STARDUST_GRADE_BONUS.get(grade, 10) + streak_bonus
 
 
-# ---------- M8：塔罗牌（22 张大阿卡纳，随种子每日一张） ----------
+# ---------- M8 / v1.11.11：每日牌库（塔罗 78 张 + 星语神谕卡 36 张） ----------
 
-# 每张牌统一字段：
+# 每张牌统一字段（两套牌形状完全一致，卡面与生图链路无需分支）：
 #   cn/en          中英文牌名
-#   suit/suit_cn   牌组（major / wands / cups / swords / pentacles）
-#   element        四元素（大阿卡纳为空）
+#   suit/suit_cn   牌组（塔罗：major / wands / cups / swords / pentacles；
+#                   神谕卡：moon / season / creature / elemental）
+#   element        四元素（大阿卡纳与神谕卡为空）
+#   deck           仅神谕卡带 "oracle"，塔罗缺省视为 "tarot"
+#   group_en       牌组英文名（神谕卡用于生图事实清单的 Card group 行）
 #   kw_up/kw_rev   正位 / 逆位关键词（卡面显示）
 #   up/rev         正位 / 逆位解读（卡面显示，控制在两行内）
 #   vzh_up/vzh_rev 正位 / 逆位牌面画面意象（中文，喂给 LLM 与自然语兜底）
@@ -880,13 +893,310 @@ TAROT_MINOR = _build_minor()
 TAROT_DECK = list(TAROT_MAJOR) + TAROT_MINOR  # 78 张，顺序固定（种子派生依赖顺序，勿重排）
 
 
+# ---------- v1.11.11：第二套牌「星语神谕卡」 ----------
+#
+# 78 张已经是标准韦特塔罗全集，塔罗这一支没有更多牌可加；想让每日抽到的牌
+# 花样更多，只能引入第二套**独立**牌组。这里是本插件自创的 36 张神谕卡，
+# 分 4 组各 9 张，每张都有自己独立的中英文牌名、正逆位关键词/解读/画面意象，
+# 不走小阿卡纳那种「模板 × 花色」组合，所以不会有「四张牌长得一样」的观感。
+# 沿用塔罗卡的字段形状（kw_up/rev、up/rev、vzh_*/ven_*），卡面与生图链路零改动。
+ORACLE_GROUPS = {
+    "moon": ("星月", "Moon & Stars"),
+    "season": ("节气", "Seasons"),
+    "creature": ("生灵", "Creatures"),
+    "elemental": ("元素灵", "Elemental Spirits"),
+}
+
+ORACLE_DEFS = (
+    # ---- 星月 9 张 ----
+    dict(cn="新月", en="New Moon", suit="moon",
+         kw_up="起始 · 留白 · 许愿", kw_rev="迟疑 · 空想 · 没开始",
+         up="还没发生的事最自由，先悄悄许个愿。", rev="愿望停在纸上太久，今天做一件小的就好。",
+         vzh_up="少女在深蓝夜空下双手合起捧着一道极细的银色月牙，四周几乎没有光，脚边一粒刚发芽的种子，靛蓝与银白",
+         vzh_rev="银色月牙被云遮住只剩一圈淡影，少女摊开空空的手掌低头看，种子仍埋在土里，夜色转灰",
+         ven_up="girl cupping a very thin silver crescent between both hands under a deep blue night sky, almost no light around her, one newly sprouting seed at her feet, indigo and silver white",
+         ven_rev="thin silver crescent hidden behind clouds leaving only a faint halo, girl looking down at her empty open palms, seed still buried in soil, grey dim night"),
+    dict(cn="娥眉月", en="Waxing Crescent", suit="moon",
+         kw_up="微光 · 试探 · 慢慢来", kw_rev="畏缩 · 半途 · 怕被看见",
+         up="一点点亮起来就够了，不必一次照满。", rev="别把刚冒头的小心思又藏回去。",
+         vzh_up="少女侧身踮脚，用指尖轻触天边一弯正在变亮的细月，肩头落着几粒星屑，浅紫与银蓝",
+         vzh_rev="少女把手缩回袖子里背过身，细月被薄云盖住一半，星屑落进草丛变暗，浅紫转灰",
+         ven_up="girl standing on tiptoe and touching a slowly brightening thin crescent with one fingertip, a few star motes on her shoulder, pale violet and silver blue",
+         ven_rev="girl withdrawing her hand into her sleeve and turning away, crescent half covered by thin cloud, star motes fallen into the grass and dimmed, grey violet"),
+    dict(cn="上弦月", en="First Quarter Moon", suit="moon",
+         kw_up="决断 · 推进 · 成形", kw_rev="拉扯 · 较劲 · 卡在中途",
+         up="该拍板了，半途其实已经走完最难那段。", rev="两边都想要最耗神，先选一边站定。",
+         vzh_up="少女站在一道把夜空分成明暗两半的半圆月前，一手向前伸出，脚下一条笔直的石阶，金与墨蓝对半",
+         vzh_rev="半圆月歪向一侧，明暗分界倾斜，石阶在中间断开，少女两手各指一边停住，金光变淡",
+         ven_up="girl standing before a half moon that splits the night sky into light and dark, one hand reaching forward, a straight stone stair underfoot, gold and deep blue halves",
+         ven_rev="half moon tilted to one side, slanted light-dark divide, stone stair broken in the middle, girl pointing to both sides and frozen, faded gold"),
+    dict(cn="盈凸月", en="Waxing Gibbous", suit="moon",
+         kw_up="将满 · 打磨 · 再一步", kw_rev="急躁 · 贪多 · 差一口气",
+         up="快好了，最后那点耐心比冲劲值钱。", rev="想一次做完反而拖慢，收一收手上的事。",
+         vzh_up="少女仰头望着快圆起来的月亮，手里用软布细细擦亮一枚将满的银盘，暖金与月白",
+         vzh_rev="少女同时抱着好几枚银盘，最上面那枚滑落倾斜，月亮缺口被云补暗，暖金褪成灰黄",
+         ven_up="girl looking up at an almost full moon, carefully polishing a near-round silver disc with a soft cloth, warm gold and moon white",
+         ven_rev="girl holding too many silver discs at once, the topmost one slipping and tilting, moon gap darkened by cloud, warm gold faded to dull grey"),
+    dict(cn="满月", en="Full Moon", suit="moon",
+         kw_up="圆满 · 照见 · 坦白", kw_rev="过曝 · 情绪 · 舍不得收",
+         up="该看清的都看清了，坦坦白白说出口。", rev="光太亮反而晃眼，先把心放回肚子里。",
+         vzh_up="少女站在巨大满月的正下方，湖面把月亮完整倒映出来，她张开双臂，银白与柔金",
+         vzh_rev="满月白得刺眼，湖面倒影碎成波纹，少女抬手挡住眼睛微微侧身，银白泛冷",
+         ven_up="girl standing directly beneath a huge full moon, a lake reflecting the moon perfectly, arms spread open, silver white and soft gold",
+         ven_rev="full moon glaring overly bright, lake reflection broken into ripples, girl shielding her eyes and turning slightly aside, cold silver white"),
+    dict(cn="月食", en="Lunar Eclipse", suit="moon",
+         kw_up="遮掩 · 转机 · 真相", kw_rev="误会 · 恐惧 · 自己吓自己",
+         up="被挡住的那部分，等一会儿就会露出来。", rev="多半是自己吓自己，先别急着下结论。",
+         vzh_up="少女抬头看一轮被地球影慢慢吞成暗红铜色的月亮，手里提着一盏小灯，暗红与深靛",
+         vzh_rev="暗红的月亮几乎全黑，少女把灯抱紧、影子拉长，云层压低，深靛近墨",
+         ven_up="girl looking up at a moon slowly swallowed by earth shadow into dark copper red, holding a small lantern, dark red and deep indigo",
+         ven_rev="copper moon almost fully black, girl hugging her lantern tightly with a long stretched shadow, low heavy clouds, near-black indigo"),
+    dict(cn="流星", en="Shooting Star", suit="moon",
+         kw_up="一瞬 · 机会 · 许愿成真", kw_rev="错过 · 空想 · 抓不住",
+         up="机会只闪一下，伸手比想清楚更要紧。", rev="光走远了也没关系，下一颗还会来。",
+         vzh_up="少女仰起脸、指尖划过一道斜穿夜空的流星尾迹，发梢与衣带被风扬起，亮银与宝蓝",
+         vzh_rev="流星尾迹只剩一点将熄的余光，少女的手停在半空没赶上，夜空空落落，宝蓝转暗",
+         ven_up="girl tilting her face up and tracing a shooting star trail slanting across the night sky with her fingertip, hair and ribbons lifted by wind, bright silver and sapphire blue",
+         ven_rev="shooting star trail reduced to one fading spark, girl's hand paused in midair too late, empty night sky, darkened sapphire blue"),
+    dict(cn="北极星", en="Polaris", suit="moon",
+         kw_up="方向 · 笃定 · 不迷路", kw_rev="固执 · 绕远 · 认错方向",
+         up="认准一个方向慢慢走，就不会走丢。", rev="太笃定也会走岔，抬头再对一次。",
+         vzh_up="少女立在雪原上，头顶一颗特别亮的星垂直落下一道细光柱照在她脚前，深蓝与冷白",
+         vzh_rev="光柱斜着落到别处，少女仍朝原方向迈步，星被薄云糊住，深蓝里多了灰雾",
+         ven_up="girl standing on a snowfield, a very bright star overhead casting a thin vertical beam of light onto the ground before her feet, deep blue and cool white",
+         ven_rev="beam of light slanting down somewhere else, girl still stepping in her original direction, star blurred by thin cloud, grey mist in the deep blue"),
+    dict(cn="银河", en="Milky Way", suit="moon",
+         kw_up="辽阔 · 连结 · 被托住", kw_rev="散漫 · 失焦 · 想太远",
+         up="你不是一个人，抬头看看有多少光陪着。", rev="想得太远容易脚下踩空，先收回到今天。",
+         vzh_up="少女躺在草坡上，一整条星河从她身侧横过夜空，指尖有细碎星尘连成线，靛紫与乳白",
+         vzh_rev="星河散成零落光点、连线断开，少女坐起来抱着膝盖，视线落回地面，靛紫发灰",
+         ven_up="girl lying on a grassy slope, a whole band of the milky way crossing the sky beside her, fine stardust linking into a line at her fingertips, indigo violet and milky white",
+         ven_rev="milky way scattered into loose dots with the connecting line broken, girl sitting up hugging her knees, gaze dropped to the ground, grey indigo"),
+    # ---- 节气 9 张 ----
+    dict(cn="立春", en="First Spring", suit="season",
+         kw_up="解冻 · 新芽 · 起身", kw_rev="倒春寒 · 犹豫 · 没力气",
+         up="冻住的地方开始松了，动一下就暖。", rev="回暖得慢也别急，先把自己裹暖。",
+         vzh_up="少女蹲在化开一半的溪边，指尖碰着冰面下第一片嫩绿新芽，浅绿与融雪白",
+         vzh_rev="溪面重新结了薄冰，新芽缩回土里，少女把手收回袖口缩着肩，浅绿泛灰",
+         ven_up="girl crouching beside a half-thawed stream, fingertip touching the first pale green shoot beneath the ice, light green and melting snow white",
+         ven_rev="stream refrozen with a thin sheet of ice, shoot withdrawn into soil, girl pulling her hand back into her sleeve with hunched shoulders, greyish light green"),
+    dict(cn="春分", en="Spring Equinox", suit="season",
+         kw_up="平衡 · 对等 · 刚好", kw_rev="偏一边 · 失衡 · 难两全",
+         up="两边刚好一样多，今天适合把话摊平。", rev="天平歪了就先别加码，扶正再说。",
+         vzh_up="少女双手各托一朵同样大小的花，站在一道把白昼与黑夜均分的地平线上，嫩粉与浅青",
+         vzh_rev="一朵花明显低下去，地平线倾斜，少女侧身去够矮的那边，嫩粉褪淡",
+         ven_up="girl holding one flower of equal size in each hand, standing on a horizon that divides day and night evenly, tender pink and pale cyan",
+         ven_rev="one flower hanging noticeably lower, tilted horizon, girl leaning sideways to reach the lower one, washed-out tender pink"),
+    dict(cn="立夏", en="First Summer", suit="season",
+         kw_up="舒展 · 热闹 · 长势", kw_rev="燥热 · 过猛 · 晒蔫",
+         up="劲儿正足，把手伸开去做想做的事。", rev="太猛会先累着自己，躲半刻阴凉。",
+         vzh_up="少女在浓绿树荫下张开手臂，藤蔓绕着她向上窜，光斑洒满裙摆，翠绿与明亮暖黄",
+         vzh_rev="藤蔓垂下打蔫，叶片卷边，少女抬手遮着额头靠在树干上，暖黄晒得发白",
+         ven_up="girl spreading her arms under lush green shade, vines climbing upward around her, dappled sunlight all over her skirt, vivid green and bright warm yellow",
+         ven_rev="vines drooping wilted with curled leaf edges, girl leaning against the trunk shading her forehead with one hand, warm yellow bleached pale"),
+    dict(cn="夏至", en="Summer Solstice", suit="season",
+         kw_up="最盛 · 明亮 · 尽兴", kw_rev="透支 · 眩目 · 盛极转淡",
+         up="今天最亮，尽管把喜欢的事做尽兴。", rev="亮到晃眼就歇一歇，别把力气一次用完。",
+         vzh_up="少女站在正午最高的太阳下，影子短得几乎看不见，四周麦穗金浪翻涌，浓金与天青",
+         vzh_rev="太阳略偏西，影子被拉长，几支麦穗垂下头，少女眯眼坐下，浓金转橘灰",
+         ven_up="girl standing beneath the highest midday sun with an almost invisible short shadow, golden wheat rippling around her, rich gold and sky cyan",
+         ven_rev="sun tilting westward, shadow stretched long, a few wheat ears drooping, girl squinting and sitting down, rich gold turned orange grey"),
+    dict(cn="立秋", en="First Autumn", suit="season",
+         kw_up="收敛 · 收获 · 转凉", kw_rev="恋夏 · 不甘 · 不肯收",
+         up="该收的收进来，轻装一点更舒服。", rev="舍不得放手也会压沉，先挑一样放下。",
+         vzh_up="少女抱着一小篮刚摘的果子，脚下第一片金叶落下，风把发梢吹向身后，琥珀金与浅棕",
+         vzh_rev="篮子倾侧、果子滚落几颗，少女回头望向夏天的方向，金叶被风卷走，琥珀金变暗",
+         ven_up="girl carrying a small basket of freshly picked fruit, first golden leaf falling at her feet, wind blowing her hair backward, amber gold and light brown",
+         ven_rev="basket tipped with a few fruits rolling out, girl looking back toward summer, golden leaf blown away, darkened amber gold"),
+    dict(cn="秋分", en="Autumn Equinox", suit="season",
+         kw_up="平分 · 沉淀 · 妥帖", kw_rev="计较 · 摇摆 · 心不平",
+         up="一半给事一半给自己，这样最妥帖。", rev="总在算谁多谁少，先把秤放下。",
+         vzh_up="少女坐在石阶上，左右两堆落叶数量恰好相同，膝上摊着一本合起的书，赭红与米白",
+         vzh_rev="一侧叶堆被风吹散变少，少女伸手去拨另一堆，书滑到地上，赭红转褐灰",
+         ven_up="girl sitting on stone steps with two exactly equal piles of fallen leaves on either side, a closed book on her lap, ochre red and cream white",
+         ven_rev="one leaf pile blown apart and smaller, girl reaching to adjust the other pile, book slipped to the ground, ochre red turned brownish grey"),
+    dict(cn="立冬", en="First Winter", suit="season",
+         kw_up="收藏 · 休养 · 向内", kw_rev="封冻 · 退缩 · 把自己关起来",
+         up="把力气收回来，慢慢养比硬撑划算。", rev="别连门也一起关上，留条缝透透气。",
+         vzh_up="少女在窗内裹着厚毯捧一杯冒热气的茶，窗玻璃上结着细小冰花，暖橘与雾白",
+         vzh_rev="窗被霜糊得看不清外面，毯子堆在脚边，茶早凉了，少女抱膝背对窗，暖橘变冷灰",
+         ven_up="girl wrapped in a thick blanket indoors holding a steaming cup of tea, tiny frost flowers on the window glass, warm orange and misty white",
+         ven_rev="window frosted opaque, blanket piled at her feet, tea gone cold, girl hugging her knees with her back to the window, warm orange turned cold grey"),
+    dict(cn="冬至", en="Winter Solstice", suit="season",
+         kw_up="最长夜 · 回光 · 守候", kw_rev="熬着 · 怕黑 · 看不到头",
+         up="夜最长的一天，光从明天起就多起来。", rev="别一个人硬熬，点盏小灯等天亮。",
+         vzh_up="少女在最长夜里守着一盏小灯坐在门口，灯焰稳稳向上，天边有一线极淡的将明，墨蓝与暖黄",
+         vzh_rev="灯焰被风吹得歪斜将熄，少女低头拢着火苗，天边那一线仍没亮，墨蓝压得更深",
+         ven_up="girl keeping watch by a small lantern at her doorway on the longest night, flame steady and upright, one faint line of coming dawn at the horizon, ink blue and warm yellow",
+         ven_rev="lantern flame blown sideways nearly out, girl bending low to cup the flame, the faint dawn line still unlit, deeper ink blue"),
+    dict(cn="岁除", en="Year's Eve", suit="season",
+         kw_up="辞旧 · 结清 · 轻装", kw_rev="拖账 · 留恋 · 翻不了篇",
+         up="把旧的那页合上，明天就是新本子。", rev="总翻回前一页，新的一年就进不来。",
+         vzh_up="少女把最后一页日历轻轻撕下叠好，桌上只剩一盏灯与一只空箱子，暖红与米金",
+         vzh_rev="日历还挂着没撕，箱子里塞满没整理的旧物，少女坐着回头看，暖红转暗红",
+         ven_up="girl gently tearing off and folding the last calendar page, only a lamp and an empty box left on the table, warm red and pale gold",
+         ven_rev="calendar page still hanging unremoved, box stuffed with unsorted old things, girl sitting and looking back, warm red turned dark red"),
+    # ---- 生灵 9 张 ----
+    dict(cn="白猫", en="White Cat", suit="creature",
+         kw_up="自在 · 直觉 · 不讨好", kw_rev="疏离 · 躲闪 · 不肯靠近",
+         up="按自己的节奏来，不必谁的招呼都接。", rev="躲得太远会错过递过来的手，抬下头就好。",
+         vzh_up="少女盘腿坐在窗台，一只白猫自在地蜷在她膝上，尾巴垂着轻晃，奶油白与浅灰蓝",
+         vzh_rev="白猫缩到窗台角落背对着她，少女的手停在半空，窗台空出一大块，浅灰蓝转冷",
+         ven_up="girl sitting cross-legged on a windowsill, a white cat curled comfortably on her lap with its tail hanging and swaying, cream white and pale grey blue",
+         ven_rev="white cat shrunk into the corner of the windowsill facing away, girl's hand paused in midair, a large empty space left on the sill, cold pale grey blue"),
+    dict(cn="夜枭", en="Night Owl", suit="creature",
+         kw_up="看清 · 洞察 · 夜里清醒", kw_rev="多疑 · 熬夜 · 看太透",
+         up="夜里反而最清醒，信你看见的那个细节。", rev="看太透会累，留一点不追究的余地。",
+         vzh_up="少女肩头停着一只睁圆眼的夜枭，她借月光翻着一页摊开的书，深蓝与琥珀金",
+         vzh_rev="夜枭半闭眼把头扭开，书页被风翻乱，少女揉着眼睛撑着额头，深蓝发灰",
+         ven_up="girl with a wide-eyed night owl perched on her shoulder, turning an open page by moonlight, deep blue and amber gold",
+         ven_rev="night owl half closing its eyes and turning its head away, book pages flipped messily by wind, girl rubbing her eyes and resting her forehead on one hand, greyish deep blue"),
+    dict(cn="小狐", en="Little Fox", suit="creature",
+         kw_up="机灵 · 转圜 · 俏皮", kw_rev="滑头 · 试探 · 绕圈子",
+         up="换个说法就能过坎，机灵点没关系。", rev="绕太多圈反而没说到点上，直说试试。",
+         vzh_up="少女蹲下身与一只橘色小狐对视，小狐翘着大尾巴把一片叶子递到她手心，橘金与苔绿",
+         vzh_rev="小狐叼着叶子转身跑开、尾巴扫过草丛，少女伸出的手落空，橘金褪淡",
+         ven_up="girl crouching to meet the eyes of a small orange fox, fox holding up a big fluffy tail and offering a leaf into her palm, orange gold and moss green",
+         ven_rev="small fox turning away with the leaf in its mouth, tail sweeping through grass, girl's outstretched hand catching nothing, faded orange gold"),
+    dict(cn="鲸歌", en="Whale Song", suit="creature",
+         kw_up="深声 · 共鸣 · 被听见", kw_rev="沉底 · 闷着 · 无人回应",
+         up="慢慢说也没关系，总有人接得住你。", rev="闷在心底会越沉越重，先出一点声。",
+         vzh_up="少女站在浅蓝海水里，一头巨鲸在深处缓缓浮过，一圈圈声纹般的光波从水面荡开，深海蓝与青白",
+         vzh_rev="鲸沉入更暗的深处只剩轮廓，光波散不成圈，少女低头看着静下来的水面，深海蓝近墨",
+         ven_up="girl standing in pale blue water, a huge whale gliding slowly in the depths, rings of sound-wave-like light rippling out from the surface, deep sea blue and cyan white",
+         ven_rev="whale sunk into darker depths leaving only an outline, light rings failing to form, girl looking down at the still water surface, near-black deep sea blue"),
+    dict(cn="林鹿", en="Forest Deer", suit="creature",
+         kw_up="轻步 · 敏感 · 温柔", kw_rev="惊跳 · 退缩 · 一有动静就跑",
+         up="轻一点走，今天适合温柔地靠近。", rev="一点动静就躲，会错过原本安稳的地方。",
+         vzh_up="少女在晨雾林间放轻脚步，一只小鹿从树后探出头与她对望，叶隙漏下细光，雾绿与暖白",
+         vzh_rev="小鹿转身跃开只剩晃动的树枝，少女停在原地收住脚，雾更浓，雾绿转灰",
+         ven_up="girl stepping softly through a misty morning forest, a small deer peeking out from behind a tree to meet her gaze, thin light through leaves, misty green and warm white",
+         ven_rev="small deer turning and leaping away leaving only swaying branches, girl halted with her foot held back, mist thickening, grey misty green"),
+    dict(cn="蝴蝶", en="Butterfly", suit="creature",
+         kw_up="蜕变 · 轻盈 · 换模样", kw_rev="浮飘 · 三分钟 · 不肯落定",
+         up="换了个模样的你，轻得能多走两步。", rev="总在飘就落不了地，先停在一件事上。",
+         vzh_up="少女摊开手掌，一只刚破蛹的蝴蝶停在她指尖抖开翅膀，身后是空茧与晨光，浅粉与鹅黄",
+         vzh_rev="蝴蝶在她头顶绕圈不停落，空茧垂着晃，少女抬手去够却总差一点，浅粉泛灰",
+         ven_up="girl holding out her palm, a freshly emerged butterfly perched on her fingertip unfolding its wings, an empty chrysalis and morning light behind her, pale pink and soft yellow",
+         ven_rev="butterfly circling above her head without landing, empty chrysalis swaying, girl reaching up and always just missing it, greyish pale pink"),
+    dict(cn="月兔", en="Moon Rabbit", suit="creature",
+         kw_up="陪伴 · 慢慢熬 · 有回响", kw_rev="空忙 · 重复 · 白费劲",
+         up="慢慢熬的事会有回响，别嫌它久。", rev="同样的动作重复太久，换个法子吧。",
+         vzh_up="少女坐在满月下看一只白兔一下一下捣着石臼，细小光粉随节奏浮起，月白与淡银",
+         vzh_rev="石臼空了、木杵横搁在一边，白兔趴着不动，光粉散尽，月白转冷灰",
+         ven_up="girl sitting under a full moon watching a white rabbit steadily pounding a stone mortar, fine glowing dust rising with each beat, moon white and pale silver",
+         ven_rev="stone mortar empty with the pestle laid aside, white rabbit lying still, glowing dust all dispersed, cold grey moon white"),
+    dict(cn="燕子", en="Swallow", suit="creature",
+         kw_up="归巢 · 消息 · 顺路", kw_rev="迷航 · 迟归 · 错过季节",
+         up="顺路带回的消息，正好是你等的那个。", rev="绕远了也没关系，认得回来的方向就好。",
+         vzh_up="少女仰头看一只燕子掠回屋檐下的泥巢，嘴里衔着一枝新草，晴蓝与嫩绿",
+         vzh_rev="燕子在岔开的屋檐间盘旋没落巢，新草掉在半空，少女踮脚张望，晴蓝蒙上灰",
+         ven_up="girl looking up at a swallow sweeping back to its mud nest under the eaves, a fresh sprig of grass in its beak, clear blue and tender green",
+         ven_rev="swallow circling between forked eaves without landing, sprig of grass dropping midair, girl standing on tiptoe searching the sky, clear blue veiled with grey"),
+    dict(cn="萤火", en="Firefly", suit="creature",
+         kw_up="微光 · 聚起来 · 一点点", kw_rev="忽明忽暗 · 散掉 · 怕被比下去",
+         up="一点一点的光聚起来，就够照路了。", rev="别拿自己的微光跟别人的满月比。",
+         vzh_up="少女张开双手，十几只萤火虫在她掌间连成一条弯弯的光带，草丛与夏夜，墨绿与暖黄",
+         vzh_rev="萤火零星散开、光带断成几截，少女慢慢合拢手掌，墨绿更深、暖黄变弱",
+         ven_up="girl opening both hands, a dozen fireflies linking into a curved ribbon of light between her palms, grass and summer night, dark green and warm yellow",
+         ven_rev="fireflies scattered sparsely with the light ribbon broken into pieces, girl slowly closing her hands, darker green and weakened warm yellow"),
+    # ---- 元素灵 9 张 ----
+    dict(cn="火苗", en="Ember Sprite", suit="elemental",
+         kw_up="热度 · 点燃 · 动手", kw_rev="蹿太快 · 烧尽 · 急躁",
+         up="先动手点起来，热度会带着你往前。", rev="烧得太急容易早早熄，留点柴慢慢添。",
+         vzh_up="少女双手护着一小簇稳稳向上的橘色火苗，火星像小精灵绕着她转，暖橘与炭红",
+         vzh_rev="火苗猛蹿一下又矮下去只剩青烟，少女往后仰避开热浪，暖橘褪成灰烬色",
+         ven_up="girl cupping both hands around a small steady upward orange flame, tiny ember sprites circling her, warm orange and charcoal red",
+         ven_rev="flame flaring up sharply then shrinking to thin smoke, girl leaning back from the heat, warm orange faded to ash grey"),
+    dict(cn="水珠", en="Water Droplet", suit="elemental",
+         kw_up="柔软 · 包容 · 顺着走", kw_rev="漫溢 · 含糊 · 化掉边界",
+         up="顺着今天的水势走，比硬顶省力得多。", rev="什么都答应会把自己漫没了，留条边。",
+         vzh_up="少女托着一颗透亮的大水珠，里面映着缩小的星空，水面一圈圈缓纹，水蓝与银白",
+         vzh_rev="水珠在她掌心摊开流散、映影碎掉，少女手指合不拢，水蓝变浑",
+         ven_up="girl holding a large clear water droplet with a tiny reflected starry sky inside it, slow concentric ripples, water blue and silver white",
+         ven_rev="water droplet spreading flat and running off her palm, reflection shattered, girl unable to close her fingers, muddy water blue"),
+    dict(cn="风铃", en="Wind Chime", suit="elemental",
+         kw_up="消息 · 回应 · 轻响", kw_rev="杂音 · 心浮 · 听不真切",
+         up="有回应轻轻响了一下，别漏掉它。", rev="太多杂音混在一起，先安静半分钟。",
+         vzh_up="少女侧耳站在檐下，一串银风铃被一阵微风拂出单一清响，纸条轻轻飘起，浅青与银",
+         vzh_rev="风铃被乱风撞得七歪八响，纸条缠成一团，少女皱眉捂住一边耳朵，浅青泛灰",
+         ven_up="girl tilting her head under the eaves, a silver wind chime stirred by a gentle breeze into one clear note, a paper strip floating up, pale cyan and silver",
+         ven_rev="wind chime knocked askew by gusty wind into a jumble of notes, paper strip tangled, girl frowning and covering one ear, greyish pale cyan"),
+    dict(cn="种子", en="Seedling", suit="elemental",
+         kw_up="埋下 · 耐心 · 会发芽", kw_rev="埋太深 · 干等 · 不见动静",
+         up="今天埋下的小东西，会自己慢慢长。", rev="光等不浇水可不行，给它一点动作。",
+         vzh_up="少女跪在松软土上把一颗种子轻轻按进土里，指尖沾着泥，土面已有一线嫩绿顶出，褐土与新绿",
+         vzh_rev="土面被踩得板实、种子还搁在旁边没埋，少女抱着空水壶坐着等，褐土发灰",
+         ven_up="girl kneeling on loose soil pressing a seed gently into the earth, mud on her fingertips, a thin green shoot already pushing through, brown earth and fresh green",
+         ven_rev="soil packed hard underfoot, seed still lying beside it unplanted, girl sitting with an empty watering can waiting, greyish brown earth"),
+    dict(cn="雷光", en="Thunder Spark", suit="elemental",
+         kw_up="顿悟 · 破局 · 一闪", kw_rev="惊吓 · 冲动 · 雷声大雨点小",
+         up="想不通的那件事，今天会忽然亮一下。", rev="别被一声响吓得乱动，等光落定再走。",
+         vzh_up="少女抬手指向一道劈开云层的细白雷光，发丝微微立起，眼里映着光，靛紫与电白",
+         vzh_rev="雷光只剩远处一团散开的亮，云压得更低，少女缩回手眨着眼，靛紫转暗灰",
+         ven_up="girl raising a hand toward a thin white lightning bolt splitting the clouds, hair slightly lifted, light reflected in her eyes, indigo violet and electric white",
+         ven_rev="lightning reduced to a distant fading glow, clouds hanging lower, girl withdrawing her hand and blinking, dark grey indigo"),
+    dict(cn="初雪", en="First Snow", suit="elemental",
+         kw_up="洗净 · 安静 · 新白", kw_rev="冻住 · 冷场 · 覆得太厚",
+         up="第一场雪把旧脚印都盖平了，重新走。", rev="盖太厚就什么都看不见，扫出一小块地。",
+         vzh_up="少女伸出舌尖接住今年的第一片六角雪，肩头薄薄一层白，四周安静，雪白与浅灰蓝",
+         vzh_rev="积雪压弯了枝、把小径整个埋住，少女抱着胳膊站在原地没处下脚，雪白泛青灰",
+         ven_up="girl catching this year's first hexagonal snowflake on her fingertip, a thin layer of white on her shoulders, quiet all around, snow white and pale grey blue",
+         ven_rev="heavy snow bending branches and burying the whole path, girl standing with folded arms with nowhere to step, bluish grey snow white"),
+    dict(cn="晨雾", en="Morning Mist", suit="elemental",
+         kw_up="朦胧 · 留余地 · 慢看清", kw_rev="迷路 · 遮掩 · 看不真切",
+         up="看不清就慢半拍，雾会自己散。", rev="一直躲在雾里，路就更认不出来了。",
+         vzh_up="少女走在及膝的晨雾里，前方树影一层层淡出来，她一手轻轻拨开面前的雾，乳白与浅金",
+         vzh_rev="雾浓得连脚下的路都吞掉，少女停住四下张望，树影全糊成一片，乳白转铅灰",
+         ven_up="girl walking through knee-deep morning mist, layers of tree shadows fading in ahead, one hand gently parting the mist before her, milky white and pale gold",
+         ven_rev="mist thick enough to swallow the path underfoot, girl stopped and looking around, tree shadows blurred into one mass, leaden grey milky white"),
+    dict(cn="彩虹", en="Rainbow", suit="elemental",
+         kw_up="转晴 · 和解 · 有好结果", kw_rev="一晃就散 · 空欢喜 · 等不到",
+         up="雨停了，之前那点别扭也一起放晴。", rev="等不到那道桥也没关系，雨确实停了。",
+         vzh_up="少女从屋檐下探出半步，一道完整彩虹跨过刚收住的雨云，脚下积水映着光，淡彩七色与湿亮灰",
+         vzh_rev="彩虹只剩一小段褪色的弧，雨云重新合拢，少女收回脚靠回门边，淡彩变灰",
+         ven_up="girl stepping half out from under the eaves, a complete rainbow arching over freshly clearing rain clouds, light reflected in puddles at her feet, soft seven-colour pastel and wet grey",
+         ven_rev="rainbow reduced to one short faded arc, rain clouds closing again, girl stepping back against the doorframe, pastel turned grey"),
+    dict(cn="沙漏", en="Hourglass", suit="elemental",
+         kw_up="时机 · 节奏 · 够用", kw_rev="漏太快 · 拖延 · 来不及",
+         up="时间刚好够，按自己的节奏来就行。", rev="总说等一下，沙就漏完了，先倒过来。",
+         vzh_up="少女双手扶着一只稳稳流沙的玻璃沙漏，上半与下半沙堆匀称，侧光把影子拉得柔和，琥珀金与暖棕",
+         vzh_rev="沙漏歪斜、细沙卡在窄口洒了一桌，少女伸手去扶没扶稳，琥珀金变暗",
+         ven_up="girl steadying a glass hourglass with both hands as sand flows evenly, balanced piles above and below, side light casting a soft shadow, amber gold and warm brown",
+         ven_rev="hourglass tilted with sand stuck at the narrow neck and spilled across the table, girl reaching to steady it too late, darkened amber gold"),
+)
+
+# 补上分组名与牌组标识；字段形状与 TAROT_DECK 完全一致（element 留空，
+# 让 llm_facts 的英文侧走 "Card group: <分类英文名>" 而不是编一个元素出来）。
+ORACLE_DECK = [
+    dict(c, deck="oracle", element="",
+         suit_cn=ORACLE_GROUPS[c["suit"]][0], group_en=ORACLE_GROUPS[c["suit"]][1])
+    for c in ORACLE_DEFS
+]
+ALL_CARDS = TAROT_DECK + ORACLE_DECK  # 114 张，顺序固定（种子派生依赖顺序，勿重排）
+
+
 def tarot_deck(scope: str = "full") -> list:
-    """按配置返回可用牌池：major = 22 张大阿卡纳，其余一律完整 78 张。"""
-    return TAROT_MAJOR if str(scope) == "major" else TAROT_DECK
+    """按配置返回可用牌池（v1.11.11 起四种）。
+
+    full   = 标准塔罗 78 张（旧默认值，保持兼容）
+    major  = 22 张大阿卡纳
+    oracle = 36 张星语神谕卡
+    mixed  = 塔罗 78 + 神谕卡 36 = 114 张（新默认）
+    未知值一律回落 full，配置写坏也不会抽不到牌。
+    """
+    s = str(scope or "full")
+    if s == "major":
+        return TAROT_MAJOR
+    if s == "oracle":
+        return ORACLE_DECK
+    if s == "mixed":
+        return ALL_CARDS
+    return TAROT_DECK
 
 
 def tarot_of(seed: bytes, scope: str = "full", deck: list | None = None) -> dict:
-    """由种子确定今日塔罗（牌面、正逆位、按位解读与画面意象，纯函数可测）。
+    """由种子确定今日牌（牌面、正逆位、按位解读与画面意象，纯函数可测）。
 
     v1.11.9 起正逆位不再只换个标签：关键词、解读、画面意象全部按位取。
     """
@@ -906,6 +1216,10 @@ def tarot_of(seed: bytes, scope: str = "full", deck: list | None = None) -> dict
         "visual_en": card["ven" + tail],
         "reversed": reversed_card,
         "label": "逆位" if reversed_card else "正位",
+        # v1.11.11：牌种与分类英文名（塔罗牌缺省 tarot / ""），事实清单靠它
+        # 决定写「今日塔罗」还是「今日星语神谕卡」
+        "deck_kind": card.get("deck", "tarot"),
+        "group_en": card.get("group_en", ""),
         "deck_size": len(cards),
     }
 
@@ -919,15 +1233,18 @@ def complement_tarot(tarot: dict) -> dict:
     if not isinstance(tarot, dict):
         return {}
     out = dict(tarot)
-    if out.get("visual_zh") and out.get("visual_en") and out.get("suit"):
+    if (out.get("visual_zh") and out.get("visual_en") and out.get("suit")
+            and out.get("deck_kind")):
         return out
+    # v1.11.11：两套牌都要能反查（神谕卡的旧 payload 也要补得上画面意象）
     card = next(
-        (c for c in TAROT_DECK
+        (c for c in ALL_CARDS
          if (out.get("name_cn") and c["cn"] == out["name_cn"])
          or (out.get("name_en") and c["en"] == out["name_en"])),
         None,
     )
     if card is None:
+        out.setdefault("deck_kind", "tarot")
         return out
     tail = "_rev" if bool(out.get("reversed")) else "_up"
     for key, value in (
@@ -936,6 +1253,8 @@ def complement_tarot(tarot: dict) -> dict:
         ("suit", card["suit"]),
         ("suit_cn", card["suit_cn"]),
         ("element", card["element"]),
+        ("deck_kind", card.get("deck", "tarot")),
+        ("group_en", card.get("group_en", "")),
     ):
         if not out.get(key):
             out[key] = value

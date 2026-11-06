@@ -111,8 +111,8 @@ const GROUP_META: { name: string; description: string; keys: string[] }[] = [
     ],
   },
   {
-    name: "塔罗牌",
-    description: "每日塔罗的牌库范围、卡面标注与生图提示词",
+    name: "每日牌库",
+    description: "塔罗与星语神谕卡的牌库范围、卡面标注与生图提示词",
     keys: ["tarot_deck_scope", "tarot_label_on_image", "tarot_visual_in_prompt"],
   },
   { name: "吉凶与权重", description: "六档吉凶的抽中权重", keys: ["grade_weights"] },

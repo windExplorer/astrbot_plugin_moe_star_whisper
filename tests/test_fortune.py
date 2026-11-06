@@ -132,8 +132,8 @@ def main() -> int:
     tpl_zh = fortune.builtin_draw_prompt("zh", "natural")
     check("自然流畅" in tpl_zh and "{facts}" in tpl_zh, "zh+natural 模板应正确")
     lp = fortune.local_draw_prompt(r1, "en", "tags")
-    check("tarot card design" in lp and "1girl" in lp and "The Star" in lp,
-          "本地兜底提示词应为塔罗牌主题（v1.4.1）")
+    check("fortune card design" in lp and "1girl" in lp and "The Star" in lp,
+          "本地兜底提示词应为星语牌面主题（v1.11.11 起两套牌通用）")
     check(fortune.local_draw_prompt(r1, "zh", "natural"), "中文兜底提示词非空")
 
     # 10.1) v1.8.6：卡面主角限女性、不出男性（内置模板 / 兜底模板 / 系统提示 / 负向兜底）
@@ -158,7 +158,7 @@ def main() -> int:
     # 「边框与画布留空隙」——模型会把空隙画成白色区域（用户实踩的白边来源）
     for f in ("tags", "natural"):
         p_en = fortune.builtin_draw_prompt("en", f)
-        check("symmetrical tarot card frame" in p_en,
+        check("symmetrical fortune card frame" in p_en,
               f"英文内置模板（{f}）必须约束边框左右对称")
         check("even empty margins" not in p_en and "never touches" not in p_en,
               f"英文内置模板（{f}）不得要求边框与画布留空隙（会产生白边）")
