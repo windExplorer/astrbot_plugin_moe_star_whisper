@@ -35,6 +35,12 @@ def validate_lexicon(data: dict) -> None:
                 "item_lines", "phases"):
         if not isinstance(data.get(key), list) or not data[key]:
             raise ValueError(f"词库 {key} 必须是非空列表")
+    # v1.11.10：这两个此前只在 REQUIRED_KEYS 里查「键存在」，坏形状会一路放行到
+    # 抽签时才炸（grade_colors.get / item_line.format）——与「加载期拦截」原则不符。
+    if not isinstance(data.get("grade_colors"), dict):
+        raise ValueError("词库 grade_colors 必须是对象（吉凶档 -> 色值）")
+    if not all(isinstance(x, str) and x for x in data["item_lines"]):
+        raise ValueError("词库 item_lines 每项必须是非空字符串（含 {item} 占位）")
     for key in ("yi", "ji"):
         if not isinstance(data.get(key), list) or len(data[key]) < 2:
             raise ValueError(f"词库 {key} 至少需要 2 条（要从中不重复抽两条）")

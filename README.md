@@ -115,6 +115,8 @@ uv run --no-project python tests/test_lunar.py
 uv run --no-project python tests/test_store.py
 uv run --no-project --with pillow python tests/test_card.py
 uv run --no-project python tests/test_main_structure.py
+uv run --no-project python tests/test_webui.py
+uv run --no-project python tests/test_config_schema.py
 
 # 农历/节气数据的来源与交叉校验（可选依赖 lunar_python，不在日常测试里）
 uv run --no-project --python 3.12 --with lunar_python python tests/_tools/lunar_oracle.py

@@ -15,17 +15,33 @@ function endpointCandidates(routePath: string): string[] {
   return [...new Set(list.map((s) => s.replace(/\/+/g, "/")).filter(Boolean))];
 }
 
+/** 后端明确回的业务错误：绝不能当成「路由不存在」去换候选重试（POST 会重复写）。 */
+class BusinessError extends Error {
+  readonly isBusiness = true;
+}
+
+const ROUTE_MISSING_RE = /未找到.*路由|route.*not.*found|not.*found.*route/i;
+
 function isRouteMissing(payload: any): boolean {
   if (!payload || typeof payload !== "object") return false;
-  const text =
-    String(payload.error || "") + " " + String(payload.message || "") + " " + String(payload.detail || "");
-  return /未找到.*路由|route.*not.*found|not.*found.*route|404/i.test(text);
+  // v1.11.10：只认显式 404 状态码 / 桥接层的路由缺失标记。
+  // 以前拿 message 全文做 /404|not found/i 包含匹配，业务错误（uid 或群号里带
+  // 404、后端 "record not found"）会被误判成路由缺失，换 4 种端点写法重试，
+  // config / debug/redraw / debug/reset 可能重复写入，还把真实错误吞掉。
+  const rawStatus = typeof payload.status === "number" ? payload.status : payload.statusCode;
+  const code = Number(payload.code ?? rawStatus);
+  if (code === 404) return true;
+  if (payload.routeMissing === true || payload.error === "route_not_found") return true;
+  const detail = String(payload.error || "") + " " + String(payload.detail || "");
+  return ROUTE_MISSING_RE.test(detail);
 }
 
 function isRouteMissingError(e: any): boolean {
+  // 业务错误一律不重试，即使它的文案里恰好含 404 / not found
+  if (e instanceof BusinessError || e?.isBusiness === true) return false;
   if (isRouteMissing(e)) return true;
   const text = String(e?.message || e?.toString?.() || e || "");
-  return /未找到.*路由|route.*not.*found|not.*found.*route|404|not found/i.test(text);
+  return ROUTE_MISSING_RE.test(text) || /\b404\b|not found/i.test(text);
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -47,10 +63,10 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 /** 解信封：Dashboard 已剥一层 data，这里再兼容 status/data 与 code/data 两种形状。 */
 function unwrap(payload: any): any {
   if (payload && typeof payload === "object") {
-    if (payload.status === "error") throw new Error(payload.message || "请求失败");
+    if (payload.status === "error") throw new BusinessError(payload.message || "请求失败");
     if (payload.status === "ok" && "data" in payload) return payload.data;
     if (Object.prototype.hasOwnProperty.call(payload, "code")) {
-      if (payload.code !== 0) throw new Error(payload.message || "请求失败");
+      if (payload.code !== 0) throw new BusinessError(payload.message || "请求失败");
       return payload.data;
     }
   }

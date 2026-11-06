@@ -48,6 +48,8 @@ function isUsable(b: AstrBotPageBridge | null | undefined): b is AstrBotPageBrid
 }
 
 let _ready: Promise<AstrBotPageBridge> | null = null;
+// 桥接就绪后缓存一份 context：mount 阶段常常还拿不到，getContext() 需要它兜底
+let _context: BridgeContext | null = null;
 
 /**
  * 等桥接可用再放行（页面刚加载时 bridge 脚本可能尚未执行完）。
@@ -59,7 +61,14 @@ export function whenBridgeReady(timeoutMs = 4000): Promise<AstrBotPageBridge> {
     const start = Date.now();
     while (true) {
       const b = getBridge();
-      if (isUsable(b)) return b;
+      if (isUsable(b)) {
+        try {
+          _context = b.getContext?.() || null;
+        } catch {
+          // 某些宿主不实现 getContext
+        }
+        return b;
+      }
       if (Date.now() - start > timeoutMs) {
         throw new Error(
           "未检测到 AstrBot 插件 Page 桥接：请从 AstrBot 后台的「插件页」打开本控制台"
@@ -76,21 +85,51 @@ export function whenBridgeReady(timeoutMs = 4000): Promise<AstrBotPageBridge> {
 
 /** 当前面板下发的 context（可能为 null：bridge 未就绪或页面被独立打开）。 */
 export function getContext(): BridgeContext | null {
+  if (_context) return _context;
   try {
-    return getBridge()?.getContext?.() || null;
+    const ctx = getBridge()?.getContext?.() || null;
+    if (ctx) _context = ctx;
+    return ctx;
   } catch {
     return null;
   }
 }
 
-/** 订阅 context 变化（主题切换等）；已存在 context 时官方实现会立即回调一次。 */
+/** 订阅 context 变化（主题切换等）；已存在 context 时也会立即回调一次。 */
 export function onContext(handler: (ctx: BridgeContext) => void): () => void {
-  try {
-    const off = getBridge()?.onContext?.(handler);
-    return typeof off === "function" ? off : () => {};
-  } catch {
-    return () => {};
-  }
+  // v1.11.10：bridge 脚本可能晚于 Vue mount 注入。以前这里直接 getBridge()，
+  // 拿不到就返回空的 off 函数，之后再也不注册 —— 面板切亮/暗主题时控制台
+  // 永远不跟随，而且悄无声息。改成等 whenBridgeReady() 后再注册。
+  let off: (() => void) | null = null;
+  let cancelled = false;
+  whenBridgeReady()
+    .then((b) => {
+      const ctx = b.getContext?.() || null;
+      if (ctx) _context = ctx;
+      if (cancelled) return;
+      off = b.onContext?.((next) => {
+        _context = next;
+        handler(next);
+      }) || null;
+      if (ctx) {
+        try {
+          handler(ctx);
+        } catch {
+          // 订阅者异常不影响桥接
+        }
+      }
+    })
+    .catch(() => {
+      // 页面被独立打开（无 bridge）：保持未注册状态，主题按钮仍可手动切
+    });
+  return () => {
+    cancelled = true;
+    try {
+      off?.();
+    } catch {
+      // ignore
+    }
+  };
 }
 
 // ------------------------------------------------------------------ //

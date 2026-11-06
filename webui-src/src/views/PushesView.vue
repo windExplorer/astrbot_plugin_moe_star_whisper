@@ -123,6 +123,7 @@ import {
   NSelect,
   NTabPane,
   NTabs,
+  useMessage,
 } from "naive-ui";
 import { computed, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
@@ -135,6 +136,7 @@ import {
 } from "../api";
 
 const route = useRoute();
+const message = useMessage();
 
 // ---------------- 推送留档 ----------------
 const rangeMode = ref<string>("30");
@@ -222,6 +224,12 @@ async function load() {
     rows.value = data.rows || [];
     total.value = data.history?.total || 0;
     groups.value = data.groups || [];
+  } catch (e: any) {
+    // v1.11.10：以前只有 finally —— 接口失败会静默保留上一页数据、分页状态错位，
+    // 还产生一个未处理的 Promise rejection（其它视图都有 catch + message.error）。
+    rows.value = [];
+    total.value = 0;
+    message.error(`推送留档加载失败：${e?.message || String(e)}`);
   } finally {
     loading.value = false;
   }
@@ -239,6 +247,10 @@ async function loadEvents() {
     events.value = data.events || [];
     eventsTotal.value = data.events_meta?.total || 0;
     groupNames.value = data.group_names || {};
+  } catch (e: any) {
+    events.value = [];
+    eventsTotal.value = 0;
+    message.error(`事件日志加载失败：${e?.message || String(e)}`);
   } finally {
     eventsLoading.value = false;
   }

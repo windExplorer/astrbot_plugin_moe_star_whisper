@@ -2,6 +2,85 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v1.11.10 (2026-11-06)
+
+全量代码审查落地：并发 / 推送去重 / 事件循环性能 / 工程一致性（版本 v1.11.9 -> v1.11.10）。
+
+- **需求（用户）**：「看下还有没有优化空间」→「全部落地」。本轮不改任何功能口径，
+  只修真 bug、消掉重复计算与阻塞、补齐版本/发布链路的一致性。
+
+- **P0：首签并发会重复发星尘、重复出图（`main.py`）**
+  - 根因：`_roll_daily` 的副作用（`bump_streak` / `upsert_profile(seed_nonce)` /
+    `add_ledger("draw")`）发生在 LLM、头像、群名、萌绘那一串 `await` **之前**，
+    而 `save_fortune` 的 `INSERT OR IGNORE` 在最后。同一用户并发两条 `/星语` 时
+    两边都读到「今天没签」，各发一笔星尘、各调一次 ComfyUI、`seed_nonce` 互相覆盖，
+    撞车分支只回读不回滚。
+  - 修复：按 `(uid,date)` 加首签飞行闸（检查与登记之间无 await，单事件循环下原子），
+    后来者给一句「星盘正在铺开」立即返回，不干等 20~120 秒绘图；`yield` 移到
+    `finally` 清理之后，避免 async generator 的 finally 滞留导致闸标记不清。
+
+- **P0：推送去重在异常路径 fail-open，会向全群重推（`main.py`）**
+  - 根因：`pushed_group_ids()` 抛异常时回落 `done = set()`（等于认为一个群都没推过）；
+    发送成功就 `pop` 掉重试计数，而 `record_push_history` 失败只打 warning——消息
+    已发但去重依据没落库，下一轮该群重新进 `pending`，当天最多重推 3 次。
+  - 修复：查询失败直接 `return False` 放弃本轮（绝不 fail-open）并留痕；留档失败时
+    把该群次数直接置满 `_PUSH_MAX_TRIES`、计入 `done`，本轮起不再发。
+
+- **P0：控制台拿错误文本判 404，POST 会重试重复写（`webui-src/src/api.ts`）**
+  - 根因：`/404|not found/i` 匹配 `unwrap()` 抛出的业务错误，命中后换 4 种端点写法
+    重试——`config` / `debug/redraw` / `debug/reset` 可能重复写，真实错误还被替换成
+    「未找到可用的控制台 API 路由」。文件里的注释写着「业务错误必须立刻抛出」，实现相反。
+  - 修复：`unwrap` 改抛带 `isBusiness` 标记的 `BusinessError`，catch 见标记立即抛出；
+    路由缺失只认显式 404 状态码 / 桥接标记 / `error`+`detail` 里的路由短语，**不再看
+    `message`**（业务文案里出现 404、群号带 404 都不会误判）。
+
+- **P1：同步 Pillow 渲染与全表统计独占事件循环（`main.py` / `webui_api.py` / `store.py` / `card.py`）**
+  - 根因：全插件搜不到一处 `to_thread`。`_try_render_card`、`_push_message`（多群推送
+    逐群串行画 1024×1500 PNG）、`stats_payload`（全表 payload 逐条 `json.loads`）全部
+    跑在 async 调用栈里，期间消息 / LLM / 心跳被挡。
+  - 前置修复：`store.Store` 的公开方法统一套 `RLock`（类装饰器自动覆盖新增方法，
+    `RLock` 可重入，方法内部互调不死锁），`card.py` 的 `_font_cache` /
+    `_missing_mask_cache` 加锁——否则工作线程会与主线程抢同一条 sqlite 连接和缓存。
+  - 修复：新增 `_render_card_async` / `_utility_card_async` 两个线程池包装并替换全部
+    调用点；`_push_message` 改 async、卡渲染 `to_thread`；WebUI 的 overview / stats /
+    records / users / user / pushhistory / pushlog / 调试重抽重绘全部 `to_thread`。
+    字体解析按 `(风格, 自定义值, 数据目录)` 缓存 60 秒，不再每次渲染 glob + 试加载字体。
+
+- **P1：多群推送 N+1 与全表扫描（`main.py` / `store.py`）**
+  - 客观历法（月相/农历/节气/节日/星期）与群无关，却在每群 `_push_public(gid)` 里
+    重算；同一 `(gid, prev)` 的昨日榜被 `limit=200` 与 `limit=1` 查两遍；一轮里
+    `pushed_group_ids` 查两遍。现在按 `(日期, 盐值)` 缓存一份 base（循环内只派生群种子），
+    rows 一次取回传给数据行与头像，`done` 用内存集合、成功即 `add`。
+  - 全库此前只有 `idx_fortunes_date` 一条索引，而 `ledger` / `draw_jobs` /
+    `push_history` 只增不减：`get_balance`（每次抽签全表 SUM）、`has_ledger`、
+    `pushed_group_ids` 全在扫表。补 5 条 `CREATE INDEX IF NOT EXISTS`，老库启动自建。
+
+- **P2：健壮性 / 资源 / 一致性**
+  - `_grade_weights()` 的 `int()` 加逐项容错（数值 dict 写进脏值不再让首签抛异常、
+    用户收不到回复），`webui_api._coerce_by_schema` 的 dict 分支丢弃非数值项而不是
+    写成 `str`；`lexicon.validate_lexicon` 补 `grade_colors` 必须 dict、`item_lines`
+    元素必须字符串两条加载期校验。
+  - 启动期清理 `cards/` 下超过 90 天的 PNG（只删渲染产物，不动 fortunes 行与
+    `push/` 永久留档；WebUI 的 `has_card` 会如实变 false）；`_redraw_gate` 加 500
+    上限；`terminate` 用 `asyncio.gather(..., return_exceptions=True)` 等推送任务真正
+    结束再关库；`card.find_font` 复用 `_iter_font_files`，字体候选规则不再写两遍。
+  - `PushesView.vue` 两个加载函数补 `catch` + `message.error` 并清空旧数据（以前只有
+    `finally`，失败静默保留上一页）；`bridge.ts` 的 `getContext`/`onContext` 改走
+    `whenBridgeReady()`，桥接晚于 mount 时主题订阅不再静默丢失。
+  - 版本单一来源：`@register` 改为从 `metadata.yaml` 读（此前停在 1.10.0，落后 19 个
+    版本）；`build_webui.ps1` 注入的版本剥掉 `v`、`App.vue` 计算版本号也剥 `v`，
+    握手失败回落到前端常量时不再显示 `vv1.11.9`；顺手修正 v1.11.0 条目末尾写错的
+    「版本 v1.10.26 -> v1.10.27」。
+  - 打包：`build_zip.ps1` 去掉 M2 时代的「card.py is optional」注释与条件加入，
+    固定列入 `card.py` 并补 `LICENSE`，目录条目由 `$includeList` + 磁盘真实结构自动
+    生成（新增目录不再漏条目），构建后强制校验 `pages/console/assets/*.js` 的
+    mtime 晚于本次构建开始（防止 vite 被跳过时把旧前端静默打进包）；
+    `build_webui.ps1` 依赖清单哈希戳变化时重装（改了 package.json/lock 不再用旧
+    `node_modules` 出包），失败统一 `exit 1`。
+  - README 发布前自检命令补齐 `test_webui.py` 与 `test_config_schema.py`（共 9 个）。
+- 验证：9 个自检脚本全过 + `compileall` 全过；WebUI 重新构建并核对包内条目。
+- 版本 v1.11.9 -> v1.11.10。
+
 ## v1.11.9 (2026-11-06)
 
 塔罗从 22 张扩到标准 78 张，正逆位不再只换个标签；生图提示词补上牌面意象（版本 v1.11.8 -> v1.11.9）。
@@ -300,7 +379,7 @@
   「群 <名>（<号>）」——「群 g1：已发送」变成「群 测试群一号（g1）：已发送」。
 - **守卫**：`tests/test_webui.py` pushlog core 增补两条——目标群带群名快照
   （无群名回落空串）、`group_names` 映射随事件下发。
-- 版本 v1.10.26 -> v1.10.27。
+- 版本 v1.10.26 -> v1.11.0。
 
 ## v1.10.26 (2026-10-11)
 

@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import traceback
@@ -225,7 +226,8 @@ async def h_debug_redraw(plugin) -> dict:
     await plugin._try_llm_sign(result)
     bg = _last_ok_bg(plugin, uid, date)
     avatar_bytes = await plugin._fetch_avatar_bytes(uid)
-    card_path = plugin._try_render_card(
+    card_path = await asyncio.to_thread(
+        plugin._try_render_card,
         result, uid,
         nickname=existing.get("nickname") or "", avatar_bytes=avatar_bytes,
         bg_image=bg,
@@ -255,7 +257,8 @@ async def h_debug_rerender(plugin) -> dict:
     payload = row.get("payload") or {}
     bg = _last_ok_bg(plugin, uid, date)
     avatar_bytes = await plugin._fetch_avatar_bytes(uid)
-    card_path = plugin._try_render_card(
+    card_path = await asyncio.to_thread(
+        plugin._try_render_card,
         payload, uid,
         nickname=row.get("nickname") or "", avatar_bytes=avatar_bytes,
         bg_image=bg,
@@ -362,7 +365,10 @@ async def h_overview(plugin) -> dict:
         days = int(_q("days", 14) or 14)
     except (TypeError, ValueError):
         days = 14
-    return _overview_core(plugin._store, plugin._cfg, _tz_of(plugin), max(3, min(days, 180)))
+    # v1.11.10：统计类 core 会连做十几次聚合查询 + 全表 payload 解析，
+    # 放工作线程，避免一次面板刷新独占整个事件循环（Store 已加 RLock）。
+    return await asyncio.to_thread(
+        _overview_core, plugin._store, plugin._cfg, _tz_of(plugin), max(3, min(days, 180)))
 
 
 # ---------- 每日推送面板（v1.10.26） ----------
@@ -468,7 +474,8 @@ async def h_push_log(plugin) -> dict:
     """
     if plugin._store is None:
         return err("插件未初始化完成")
-    return _push_log_core(
+    return await asyncio.to_thread(
+        _push_log_core,
         plugin, page=_q("page", 1), size=_q("size", 8), kind=_q("kind", ""),
     )
 
@@ -516,7 +523,8 @@ async def h_push_history(plugin) -> dict:
     """推送记录：每日推送的永久留档（一群一天一条，卡文件长期在盘）。"""
     if plugin._store is None:
         return err("插件未初始化完成")
-    return _push_history_core(
+    return await asyncio.to_thread(
+        _push_history_core,
         plugin._store, _tz_of(plugin),
         page=_q("page", 1), size=_q("size", 20),
         group_id=_q("group_id", ""), days=_q("days", 0),
@@ -561,7 +569,8 @@ async def h_records(plugin) -> dict:
         days_int = int(days)
     except (TypeError, ValueError):
         days_int = 0
-    return _records_core(
+    return await asyncio.to_thread(
+        _records_core,
         plugin._store, _tz_of(plugin),
         page=_q("page", 1), size=_q("size", 20), days=days_int,
         date_from=_q("date_from", ""), date_to=_q("date_to", ""),
@@ -585,7 +594,8 @@ async def h_users(plugin) -> dict:
     """抽过签的用户列表（控制台「用户查询」页顶部列表）。"""
     if plugin._store is None:
         return err("插件未初始化完成")
-    return _users_core(
+    return await asyncio.to_thread(
+        _users_core,
         plugin._store,
         page=_q("page", 1), size=_q("size", 24),
         keyword=_q("q", ""), order=_q("order", "last"),
@@ -644,7 +654,8 @@ async def h_stats(plugin) -> dict:
         days = int(_q("days", 30) or 30)
     except (TypeError, ValueError):
         days = 30
-    return _stats_core(plugin._store, _tz_of(plugin), max(1, min(days, 365)))
+    return await asyncio.to_thread(
+        _stats_core, plugin._store, _tz_of(plugin), max(1, min(days, 365)))
 
 
 # ---------- 用户查询 ----------
@@ -719,7 +730,8 @@ async def h_user(plugin) -> dict:
         months_int = int(months)
     except (TypeError, ValueError):
         months_int = 3
-    state = _user_core(plugin._store, plugin._cfg, _tz_of(plugin), uid, months_int)
+    state = await asyncio.to_thread(
+        _user_core, plugin._store, plugin._cfg, _tz_of(plugin), uid, months_int)
     if state.get("status") == "ok":
         state["data"]["recent_uids"] = plugin._store.list_debug_uids()
     return state
@@ -798,7 +810,10 @@ def _coerce_by_schema(value, meta):
                     try:
                         out[str(k)] = float(v)
                     except (TypeError, ValueError):
-                        out[str(k)] = str(v)
+                        # v1.11.10：本插件的 dict 键（grade_weights / item_prices）
+                        # 全是数值，非数值以前被原样写成 str，读取端 int() 直接炸。
+                        # 直接丢弃这一项，保留配置里的原值（不写脏数据）。
+                        continue
             return out
         if kind == "list":
             items = value

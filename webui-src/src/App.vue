@@ -102,7 +102,12 @@ const MENU = [
 const menuOptions = MENU.map((m) => ({ label: m.label, key: m.key }));
 const activeKey = computed(() => route.path);
 const currentTitle = computed(() => MENU.find((m) => m.key === route.path)?.label || "");
-const version = computed(() => backendVersion.value || PLUGIN_VERSION || "dev");
+// v1.11.10：模板里已经写了 "v{{ version }}"，这里统一剥掉可能带的前导 v
+// （build_webui.ps1 注入的 PLUGIN_VERSION 与后端 _plugin_version 口径要一致，
+//  否则桥接握手失败回落到前端常量时会显示 "vv1.11.10"）。
+const version = computed(() =>
+  String(backendVersion.value || PLUGIN_VERSION || "dev").replace(/^v/, "")
+);
 
 const connType = computed(() =>
   connState.value === "ok" ? "success" : connState.value === "error" ? "error" : "default"

@@ -36,6 +36,7 @@ if (Test-Path (Join-Path $root "webui-src/package.json")) {
         exit 1
     }
     Write-Host "==> building WebUI (pages/console)..." -ForegroundColor Cyan
+    $buildStart = [DateTime]::UtcNow
     & powershell -NoProfile -ExecutionPolicy Bypass -File $webuiScript
     if ($LASTEXITCODE -ne 0) {
         Write-Host "ERROR: WebUI build failed, aborting package" -ForegroundColor Red
@@ -43,6 +44,19 @@ if (Test-Path (Join-Path $root "webui-src/package.json")) {
     }
     if (-not (Test-Path (Join-Path $root "pages/console/index.html"))) {
         Write-Host "ERROR: pages/console/index.html missing after WebUI build" -ForegroundColor Red
+        exit 1
+    }
+    # A green exit code alone is not enough: if vite was skipped, the OLD
+    # index.html + old js are still on disk and both checks above pass.
+    # Require at least one asset rewritten AFTER this build started.
+    $jsFiles = @(Get-ChildItem -LiteralPath (Join-Path $root "pages/console/assets") -Filter *.js -File -ErrorAction SilentlyContinue)
+    if ($jsFiles.Count -eq 0) {
+        Write-Host "ERROR: no js assets in pages/console/assets after build" -ForegroundColor Red
+        exit 1
+    }
+    $fresh = @($jsFiles | Where-Object { $_.LastWriteTimeUtc -ge $buildStart.AddSeconds(-2) })
+    if ($fresh.Count -eq 0) {
+        Write-Host "ERROR: WebUI assets were not refreshed by this build (stale pages/console would be packaged)" -ForegroundColor Red
         exit 1
     }
 }
@@ -58,7 +72,8 @@ if (-not $version) {
     exit 1
 }
 
-# --- include list: card.py is optional until M2 lands ---
+# --- include list: every top-level .py is guarded below; directories auto-add
+#     their directory entries (see the zip section), so adding one is enough.
 $includeList = @(
     "main.py",
     "fortune.py",
@@ -66,17 +81,16 @@ $includeList = @(
     "lunar.py",
     "store.py",
     "webui_api.py",
+    "card.py",
     "pages",
     "metadata.yaml",
     "_conf_schema.json",
     "requirements.txt",
     "README.md",
     "CHANGELOG.md",
+    "LICENSE",
     "data/lexicon"
 )
-if (Test-Path (Join-Path $root "card.py")) {
-    $includeList += "card.py"
-}
 
 # --- guard: every top-level .py on disk must be listed ---
 $topPy = @(Get-ChildItem -LiteralPath $root -Filter *.py -File | ForEach-Object { $_.Name })
@@ -110,8 +124,26 @@ $prefix = "$pluginName/"
 $zip = [System.IO.Compression.ZipFile]::Open($zipPath, [System.IO.Compression.ZipArchiveMode]::Create)
 $entryCount = 0
 try {
-    # explicit directory entries first (AstrBot needs them)
-    foreach ($d in @("$pluginName/", "$pluginName/data/", "$pluginName/data/lexicon/", "$pluginName/pages/", "$pluginName/pages/debug/", "$pluginName/pages/console/", "$pluginName/pages/console/assets/")) {
+    # Explicit directory entries (AstrBot needs them). Derive them from
+    # includeList + the real on-disk tree: a hand-written list goes stale as
+    # soon as a new folder is added, and the missing entry can make AstrBot
+    # refuse the install.
+    $dirEntries = @{}
+    $dirEntries["$pluginName/"] = $true
+    foreach ($rel in $includeList) {
+        $fsPath = Join-Path $root ($rel -replace '/', '\')
+        if (Test-Path $fsPath -PathType Container) {
+            $parts = $rel.Split('/')
+            for ($i = 1; $i -le $parts.Count; $i++) {
+                $dirEntries[$prefix + (($parts[0..($i - 1)]) -join '/') + "/"] = $true
+            }
+            Get-ChildItem -LiteralPath $fsPath -Recurse -Directory | ForEach-Object {
+                $sub = $_.FullName.Substring($fsPath.Length + 1).Replace('\', '/')
+                $dirEntries[$prefix + $rel + "/" + $sub + "/"] = $true
+            }
+        }
+    }
+    foreach ($d in ($dirEntries.Keys | Sort-Object)) {
         [void]$zip.CreateEntry($d)
         $entryCount++
     }

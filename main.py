@@ -62,6 +62,33 @@ DEFAULT_PRICES = {"reroll": 80, "amulet": 50, "streak_guard": 30, "candle": 20}
 # 每日推送 / /星语星象 卡底部的指令引导（v1.10.15 起；抽成常量避免两处各写一份）
 PUSH_HINT = "发送 /星语 抽今日签 ｜ /星语榜 看今日排行"
 
+# v1.11.10：卡图保留天数（只清渲染产物，不动 fortunes 行；push/ 留档永不清理）
+_CARD_KEEP_DAYS = 90
+# 内存字典上限（_push_tries / _redraw_gate 共用，键都含日期，跨天自然失效）
+_CACHE_MAX = 500
+# card 模块热重载后要重新绑定的模块级函数（模块级 from-import 绑的是旧函数对象）
+_CARD_EXPORTS = (
+    "render_card", "render_push_card", "render_help_card",
+    "render_wallet_card", "render_shop_card", "render_rank_card",
+    "render_pk_card", "render_notice_card", "render_calendar_card",
+    "clean_nickname",
+)
+
+
+def _plugin_version() -> str:
+    """@register 的版本也取自 metadata.yaml（v1.11.10：唯一版本来源）。
+
+    以前手写在装饰器里，v1.10.0 同步过一次后就再没跟上（到 v1.11.9 仍显示
+    1.10.0），排障时插件管理页与控制台版本号对不上。读取失败回落 0.0.0，
+    AstrBot 装载期本来也会用 metadata.yaml 覆盖 version。
+    """
+    try:
+        text = (Path(__file__).resolve().parent / "metadata.yaml").read_text(encoding="utf-8")
+        m = re.search(r"(?m)^\s*version:\s*v?([0-9][^\s#]*)", text)
+        return m.group(1).strip() if m else "0.0.0"
+    except Exception:
+        return "0.0.0"
+
 
 def _clean_nickname(raw, fallback: str = "旅人") -> str:
     """昵称清洗（v1.11.7）：具体实现在 `card.clean_nickname`（纯 Pillow 模块、可独立测）。
@@ -85,7 +112,7 @@ _ITEM_ALIASES = {
 }
 
 
-@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", "1.10.0")
+@register(PLUGIN_NAME, "windExplorer", "萌萌星语：每日运势签", _plugin_version())
 class StarWhisperPlugin(Star):
     # 「字体选择」不是「自定义」却还留着「自定义字体」时，只提示一次（v1.10.0）
     _font_conflict_noted = False
@@ -107,6 +134,15 @@ class StarWhisperPlugin(Star):
         self._push_empty_noted = ""
         self._member_cache: dict = {}  # group_id -> (monotonic_ts, {成员 id})，榜单用（v1.9.4）
         self._avatar_cache: dict = {}  # uid -> (monotonic_ts, bytes|None)，榜单头像用（v1.10.3）
+        # v1.11.10：同一 (uid,date) 只允许一条首签流程在飞——否则 _roll_daily 的
+        # 星尘/连签/种子序号副作用会重复执行（详见 fortune_cmd 注释）
+        self._draw_inflight: set = set()
+        # 客观历法（与群无关）按 (日期, 盐值) 缓存，多群推送只算一次
+        self._push_base_cache: dict = {}
+        # 补出图节流；与 _push_tries 同款上限，避免跨天无界增长
+        self._redraw_gate: dict = {}
+        # 字体路径按配置缓存（每次渲染都 glob + 试加载字体目录太浪费）
+        self._font_path_cache: dict = {}
         self._reload_modules()
 
     # ---------- 生命周期 ----------
@@ -118,7 +154,8 @@ class StarWhisperPlugin(Star):
         不重载的话热更上来的实例会一直跑旧接口（新增路由静默 404）。
         """
         pkg = __package__
-        for name in ("lexicon", "lunar", "fortune", "store", "webui_api"):
+        # v1.11.10：card 也要重载（卡面样式改动此前热更后一直是旧代码）
+        for name in ("lexicon", "lunar", "card", "fortune", "store", "webui_api"):
             mod = sys.modules.get(f"{pkg}.{name}")
             if mod is not None:
                 try:
@@ -128,6 +165,19 @@ class StarWhisperPlugin(Star):
                     logger.error(
                         f"[{PLUGIN_NAME}] 热重载 {name} 失败\n{traceback.format_exc()}"
                     )
+        # 光 reload 模块还不够：main 顶部 `from .card import render_card` 绑定的是
+        # reload 前的函数对象，不重新绑定就仍跑旧实现（与 v1.9.8 的 NameError 同源）。
+        if card is not None:
+            try:
+                mod = sys.modules.get(f"{pkg}.card")
+                if mod is not None:
+                    for fname in _CARD_EXPORTS:
+                        if hasattr(mod, fname):
+                            globals()[fname] = getattr(mod, fname)
+            except Exception:
+                logger.error(
+                    f"[{PLUGIN_NAME}] 重新绑定 card 导出失败\n{traceback.format_exc()}"
+                )
 
     async def initialize(self):
         try:
@@ -142,16 +192,56 @@ class StarWhisperPlugin(Star):
                 logger.error(
                     f"[{PLUGIN_NAME}] WebUI 调试面板注册失败\n{traceback.format_exc()}"
                 )
+            # v1.11.10：启动期清一次过期卡图（遍历 + 删文件放线程池，不阻塞启动）
+            try:
+                removed = await asyncio.to_thread(self._prune_cards, data_dir)
+                if removed:
+                    logger.info(
+                        f"[{PLUGIN_NAME}] 已清理 {removed} 张过期卡图"
+                        f"（超过 {_CARD_KEEP_DAYS} 天，仅删渲染产物）"
+                    )
+            except Exception:
+                logger.warning(
+                    f"[{PLUGIN_NAME}] 卡图清理失败（不影响出签）\n{traceback.format_exc()}"
+                )
             logger.info(f"[{PLUGIN_NAME}] 初始化完成，数据目录：{data_dir}")
         except Exception:
             logger.error(f"[{PLUGIN_NAME}] 初始化失败\n{traceback.format_exc()}")
             raise
+
+    @staticmethod
+    def _prune_cards(data_dir: Path) -> int:
+        """清理 `cards/` 下超过保留天数的 PNG（v1.11.10）。
+
+        只删**渲染产物**，不动 fortunes / push_history 行；`push/` 目录是每日推送的
+        永久留档，不在遍历范围内。删掉后 WebUI 的 `has_card` 会如实变成 false，
+        用户重新抽签（或调试页重绘）即可再生成。
+        """
+        root = data_dir / "cards"
+        if not root.is_dir():
+            return 0
+        cutoff = time.time() - _CARD_KEEP_DAYS * 86400
+        removed = 0
+        for p in root.rglob("*.png"):
+            try:
+                if p.stat().st_mtime < cutoff:
+                    p.unlink()
+                    removed += 1
+            except Exception:
+                pass
+        return removed
 
     async def terminate(self):
         task = self._push_task
         if task is not None:
             task.cancel()
             self._push_task = None
+            # 只 cancel 不 await：旧任务可能仍在 _do_daily_push 里，等 store 关闭后
+            # 再写库就会抛异常（v1.11.10）。
+            try:
+                await asyncio.gather(task, return_exceptions=True)
+            except Exception:
+                pass
         if self._store is not None:
             self._store.close()
             self._store = None
@@ -170,10 +260,18 @@ class StarWhisperPlugin(Star):
     def _grade_weights(self) -> dict:
         raw = self._cfg("grade_weights", None)
         if isinstance(raw, dict) and raw:
-            merged = {
-                g: int(raw.get(g, w))
-                for g, w in fortune.DEFAULT_GRADE_WEIGHTS.items()
-            }
+            merged = {}
+            for g, w in fortune.DEFAULT_GRADE_WEIGHTS.items():
+                try:
+                    # v1.11.10：grade_weights 是自由键值 dict，控制台写进非数字值时
+                    # 旧代码 int() 直接抛 ValueError，而首签路径没有兜底 → 用户
+                    # 收不到任何回复。坏值逐项回落默认权重，不让一份脏配置毁掉抽签。
+                    merged[g] = max(0, int(raw.get(g, w)))
+                except (TypeError, ValueError):
+                    merged[g] = w
+                    logger.warning(
+                        f"[{PLUGIN_NAME}] grade_weights.{g} 不是数字，已回落到 {w}"
+                    )
             if sum(merged.values()) > 0:
                 return merged
         return dict(fortune.DEFAULT_GRADE_WEIGHTS)
@@ -440,11 +538,25 @@ class StarWhisperPlugin(Star):
         只有自定义才读 card_font_path；其余取值下它被忽略（首次记一条 info 说明）。
         任何一步失败都只记日志、不抛错，绝不影响出卡。
         """
+        # v1.11.10：解析要 glob 字体目录 + 逐个试加载，一次多群推送会重复几十次。
+        # 按 (风格, 自定义值, 数据目录) 缓存 60 秒：改配置立即生效（key 变了），
+        # 往字体目录里丢新文件最多 1 分钟后也会被看到。
+        key = (str(self._cfg("card_font_style", "auto")).strip().lower(),
+               str(self._cfg("card_font_path", "") or "").strip(), str(data_dir))
+        now = time.monotonic()
+        hit = self._font_path_cache.get(key)
+        if hit is not None and now - hit[0] < 60:
+            return hit[1]
+        value = self._resolve_font_path(data_dir, key[0], key[1])
+        if len(self._font_path_cache) > _CACHE_MAX:
+            self._font_path_cache.clear()
+        self._font_path_cache[key] = (now, value)
+        return value
+
+    def _resolve_font_path(self, data_dir: Path, style: str, spec: str) -> str | None:
+        """`_card_font_path` 的实际解析逻辑（缓存未命中时才跑）。"""
         if card is None:  # 图卡模块不可用（PIL 缺失等），调用方本就不会走到这里
             return None
-        style = str(self._cfg("card_font_style", "auto")).strip().lower()
-        spec = str(self._cfg("card_font_path", "") or "").strip()
-
         if style != "custom":
             if spec and not self._font_conflict_noted:
                 self._font_conflict_noted = True
@@ -535,7 +647,7 @@ class StarWhisperPlugin(Star):
         if existing.get("avatar"):
             avatar_bytes = await self._fetch_avatar_bytes(uid)
         nickname = str(existing.get("nickname") or "旅行者")
-        card = self._try_render_card(payload, uid, nickname, avatar_bytes, bg_image=bg_path)
+        card = await self._render_card_async(payload, uid, nickname, avatar_bytes, bg_image=bg_path)
         if card:
             try:
                 self._store.set_card_path(uid, date, card)
@@ -580,7 +692,7 @@ class StarWhisperPlugin(Star):
         card_path = ""
         if bg_path:
             avatar_bytes = await self._fetch_avatar_bytes(uid)
-            card_path = self._try_render_card(
+            card_path = await self._render_card_async(
                 payload, uid,
                 nickname=str(existing.get("nickname") or ""),
                 avatar_bytes=avatar_bytes, bg_image=bg_path,
@@ -642,6 +754,20 @@ class StarWhisperPlugin(Star):
                 f"[{PLUGIN_NAME}] 提示卡渲染失败，回退纯文本\n{traceback.format_exc()}"
             )
             return None
+
+    # ---------- 离循环渲染（v1.11.10） ----------
+    #
+    # Pillow 绘制 + PNG 编码是纯 CPU，一张 1400×1200 卡要几十到几百毫秒；多群推送
+    # 时是逐群串行渲染，以前整段时间事件循环被独占（消息 / LLM / 心跳全被挡）。
+    # 保持同步方法不动（WebUI 的同步 core 仍直接调用），只在 async 指令入口套一层
+    # to_thread。前置条件：store.Store 的公开方法已用 RLock 串行化、card 的两个
+    # 全局字体缓存已加锁，否则工作线程与主线程会抢同一条 sqlite 连接 / 缓存。
+
+    async def _render_card_async(self, *args, **kwargs):
+        return await asyncio.to_thread(self._try_render_card, *args, **kwargs)
+
+    async def _utility_card_async(self, *args, **kwargs):
+        return await asyncio.to_thread(self._try_utility_card, *args, **kwargs)
 
     # ---------- 萌绘底图联动（F23/D6/D11，契约见 PRD §7.6） ----------
 
@@ -1038,7 +1164,7 @@ class StarWhisperPlugin(Star):
                 logger.error(f"[{PLUGIN_NAME}] 推送循环异常\n{traceback.format_exc()}")
                 await asyncio.sleep(300)
 
-    def _push_board_line(self, gid: str, prev: str) -> str:
+    def _push_board_line(self, gid: str, prev: str, rows=None) -> str:
         """昨日本群抽签摘要（每日推送的「本群数据」块）。
 
         推送跑在定时循环里、没有聊天事件，拿不到群成员列表，所以只能用
@@ -1048,13 +1174,14 @@ class StarWhisperPlugin(Star):
         """
         if self._store is None:
             return ""
-        try:
-            rows = self._store.list_group_day(gid, prev, limit=200)
-        except Exception:
-            logger.warning(
-                f"[{PLUGIN_NAME}] 推送取昨日榜单失败（{gid}），本群跳过数据行\n{traceback.format_exc()}"
-            )
-            return ""
+        if rows is None:  # v1.11.10：调用方可传入已取回的 rows，避免同一张表查两次
+            try:
+                rows = self._store.list_group_day(gid, prev, limit=200)
+            except Exception:
+                logger.warning(
+                    f"[{PLUGIN_NAME}] 推送取昨日榜单失败（{gid}），本群跳过数据行\n{traceback.format_exc()}"
+                )
+                return ""
         if not rows:
             return "昨日本群还没有人抽签，今天来当第一个吧"
         top = rows[0]
@@ -1083,11 +1210,53 @@ class StarWhisperPlugin(Star):
         today = fortune.local_today(tz_name)
         salt = str(self._cfg("salt", "moe-star-whisper"))
         lex = lexicon.load_lexicon()
-        seed_day = fortune.derive_seed(today, "daily-push", salt)
+
+        # v1.11.10：客观历法（月相/农历/节气/节日/星期）与群无关，一天只算一次。
+        # 以前每群都调一次 _push_public → load_lexicon + lunar.describe + now_in，
+        # N 个群白算 N 遍；缓存键含日期与盐值，跨天/改盐自动失效，只留一份。
+        base_key = (today, salt)
+        base = self._push_base_cache.get(base_key)
+        if base is None:
+            seed_day = fortune.derive_seed(today, "daily-push", salt)
+            fest = (lex.get("festivals") or {}).get(today[5:])
+            phase = fortune.pick_text(seed_day, "push_phase", lex["phases"])
+            # v1.10.17：历法块——农历（含干支生肖）、节气、节日（公历 + 农历都要查）。
+            # lunar.describe 超范围/解析失败返回 {}，整块降级成「不画这几行」。
+            almanac = lunar.describe(today)
+            _lunar_line = ""
+            if almanac.get("lunar_text"):
+                _lunar_line = f"{almanac['lunar_text']} · {almanac.get('ganzhi_text', '')}".strip(" ·")
+            fest_lines = []
+            if fest:
+                # 节日/节气是客观历法 → 走 seed_day：同一天各群文案一致
+                fest_lines.append(fortune.pick_text(seed_day, "push_fest", fest))
+            lunar_fest = (lex.get("lunar_festivals") or {}).get(almanac.get("lunar_key") or "")
+            if lunar_fest:
+                fest_lines.append(fortune.pick_text(seed_day, "push_lunar_fest", lunar_fest))
+            # 公历与农历节日可能撞同一天（国庆撞中秋），两个都发，用全角空格隔开
+            _fest_line = "　".join(t for t in fest_lines if t)
+            jieqi = str(almanac.get("jieqi") or "")
+            _jieqi_line = ""
+            if jieqi:
+                copy = (lex.get("jieqi") or {}).get(jieqi) or []
+                note = fortune.pick_text(seed_day, f"push_jieqi:{jieqi}", copy) if copy else ""
+                _jieqi_line = f"{jieqi}——{note}" if note else jieqi
+            base = {
+                "seed_day": seed_day,
+                "prev": fortune.prev_date(today),
+                "weekday_name": "星期" + "一二三四五六日"[fortune.now_in(tz_name).weekday()],
+                "phase": phase,
+                "fest_line": _fest_line,
+                "lunar_line": _lunar_line,
+                "jieqi_line": _jieqi_line,
+            }
+            self._push_base_cache.clear()
+            self._push_base_cache[base_key] = base
+
+        # 以下才是按群的部分：宜忌 / 幸运 / 主色（每群各不相同）
+        seed_day = base["seed_day"]
         seed = (fortune.derive_seed(today, f"daily-push:{gid}", salt)
                 if str(gid or "").strip() else seed_day)
-        fest = (lex.get("festivals") or {}).get(today[5:])
-        phase = fortune.pick_text(seed_day, "push_phase", lex["phases"])
         accent = fortune.pick_text(seed, "push_color", lex["lucky_colors"])
         yiji = lucky = None
         try:
@@ -1104,36 +1273,15 @@ class StarWhisperPlugin(Star):
             logger.warning(
                 f"[{PLUGIN_NAME}] 推送黄历块生成失败，本次只发月相\n{traceback.format_exc()}"
             )
-        # v1.10.17：历法块——农历（含干支生肖）、节气、节日（公历 + 农历都要查）。
-        # lunar.describe 超范围/解析失败返回 {}，整块降级成「不画这几行」，不影响出卡。
-        almanac = lunar.describe(today)
-        _lunar_line = ""
-        if almanac.get("lunar_text"):
-            _lunar_line = f"{almanac['lunar_text']} · {almanac.get('ganzhi_text', '')}".strip(" ·")
-        fest_lines = []
-        if fest:
-            # 节日/节气是客观历法 → 走 seed_day：同一天各群文案一致
-            fest_lines.append(fortune.pick_text(seed_day, "push_fest", fest))
-        lunar_fest = (lex.get("lunar_festivals") or {}).get(almanac.get("lunar_key") or "")
-        if lunar_fest:
-            fest_lines.append(fortune.pick_text(seed_day, "push_lunar_fest", lunar_fest))
-        # 公历与农历节日可能撞同一天（国庆撞中秋），两个都发，用全角空格隔开
-        _fest_line = "　".join(t for t in fest_lines if t)
-        jieqi = str(almanac.get("jieqi") or "")
-        _jieqi_line = ""
-        if jieqi:
-            copy = (lex.get("jieqi") or {}).get(jieqi) or []
-            note = fortune.pick_text(seed_day, f"push_jieqi:{jieqi}", copy) if copy else ""
-            _jieqi_line = f"{jieqi}——{note}" if note else jieqi
         return {
             "today": today,
-            "prev": fortune.prev_date(today),
-            "weekday_name": "星期" + "一二三四五六日"[fortune.now_in(tz_name).weekday()],
-            "phase": phase,
+            "prev": base["prev"],
+            "weekday_name": base["weekday_name"],
+            "phase": base["phase"],
             "accent": accent,
-            "fest_line": _fest_line,
-            "lunar_line": _lunar_line,
-            "jieqi_line": _jieqi_line,
+            "fest_line": base["fest_line"],
+            "lunar_line": base["lunar_line"],
+            "jieqi_line": base["jieqi_line"],
             "yiji": yiji,
             "lucky": lucky,
         }
@@ -1208,18 +1356,19 @@ class StarWhisperPlugin(Star):
             )
             return None
 
-    async def _push_board_avatar(self, gid: str, prev: str):
+    async def _push_board_avatar(self, gid: str, prev: str, rows=None):
         """本群数据块的「最吉」头像（v1.11.8）；取不到返回 None（卡面画首字占位圆）。
 
         走主插件统一的头像缓存下载（`_fetch_avatar_bytes`，10 分钟 TTL）——推送与
         星语榜用同一个接口，不会两套逻辑。任何一步失败都静默返回 None。
         """
-        if self._store is None:
-            return None
-        try:
-            rows = self._store.list_group_day(gid, prev, limit=1)
-        except Exception:
-            return None
+        if rows is None:  # v1.11.10：复用 _push_board_line 已取回的 rows
+            if self._store is None:
+                return None
+            try:
+                rows = self._store.list_group_day(gid, prev, limit=1)
+            except Exception:
+                return None
         if not rows:
             return None
         uid = str(rows[0].get("user_id") or "").strip()
@@ -1230,14 +1379,16 @@ class StarWhisperPlugin(Star):
         except Exception:
             return None
 
-    def _push_message(self, public: dict, board_line: str, file_key: str,
-                      with_card: bool = True, board_avatar: bytes | None = None):
+    async def _push_message(self, public: dict, board_line: str, file_key: str,
+                            with_card: bool = True, board_avatar: bytes | None = None):
         """(文字, 卡路径|None)：卡在就发卡（文字只留标题 + 引导），卡没了把内容补进文字。
 
         `with_card=False`（v1.10.19，「出签方式 = 仅文字」）连渲染都跳过，直接走文字，
         省一次绘图；此时文字会自动带上本群数据/宜忌/幸运/农历/节气（内容不丢）。
         """
-        card = (self._push_card(public, board_line, file_key, board_avatar=board_avatar)
+        # v1.11.10：渲染（Pillow + PNG 编码）离事件循环，文字组装很轻留在原地
+        card = (await asyncio.to_thread(self._push_card, public, board_line, file_key,
+                                       board_avatar=board_avatar)
                 if with_card else None)
         caption = self._push_caption(public)
         if card is None:
@@ -1272,10 +1423,20 @@ class StarWhisperPlugin(Star):
                 )
             return False
         try:
-            done = self._store.pushed_group_ids(today)
+            done = set(self._store.pushed_group_ids(today))
         except Exception:
-            done = set()
-        if len(self._push_tries) > 500:  # 内存计数防膨胀（键含日期，跨天自然失效）
+            # v1.11.10：查询失败绝不能当成「一个群都没推过」——那等于向所有群
+            # 重发一轮。留档表是「今天推没推」的唯一依据，读不到就放弃本轮，
+            # 等下一轮重试（最多 _PUSH_MAX_TRIES 次），绝不 fail-open。
+            self._log_push(
+                "error", "读取今日推送留档失败，本轮放弃推送（下一轮重试）",
+                error=traceback.format_exc()[-400:],
+            )
+            logger.warning(
+                f"[{PLUGIN_NAME}] pushed_group_ids 失败，本轮不推送\n{traceback.format_exc()}"
+            )
+            return False
+        if len(self._push_tries) > _CACHE_MAX:  # 键含日期，跨天自然失效
             self._push_tries.clear()
         pending = []
         for gid, platform in targets:
@@ -1308,10 +1469,16 @@ class StarWhisperPlugin(Star):
             platform = self._resolve_platform_id(platform)
             # v1.10.22：内容按群生成（宜忌/幸运/主色每群不同），所以放在循环里
             public = self._push_public(gid)
-            board_line = self._push_board_line(gid, public["prev"])  # 本群数据：各群不同
+            # v1.11.10：昨日榜单只查一次，数据行与头像共用同一份 rows（以前同一个
+            # (gid, prev) 查了两遍，limit=200 与 limit=1 各一次）
+            try:
+                board_rows = self._store.list_group_day(gid, public["prev"], limit=200)
+            except Exception:
+                board_rows = None  # 让两个方法各自走原有容错路径
+            board_line = self._push_board_line(gid, public["prev"], board_rows)  # 本群数据：各群不同
             # v1.11.8：本群数据块带头像（昨天最吉那位；取不到图时卡面画首字占位圆）
-            board_avatar = await self._push_board_avatar(gid, public["prev"])
-            caption, card = self._push_message(
+            board_avatar = await self._push_board_avatar(gid, public["prev"], board_rows)
+            caption, card = await self._push_message(
                 public, board_line, gid, with_card=want_card, board_avatar=board_avatar)
             session = f"{platform}:GroupMessage:{gid}"
             chain = MessageChain(chain=[])
@@ -1323,7 +1490,6 @@ class StarWhisperPlugin(Star):
             try:
                 ok = await StarTools.send_message(session, chain)
                 if ok:
-                    self._push_tries.pop(key, None)  # 成功：清掉本群今日的重试计数
                     self._log_push(
                         "ok", f"群 {gid}：已发送",
                         gid=gid, platform=platform, with_card=bool(card),
@@ -1340,9 +1506,18 @@ class StarWhisperPlugin(Star):
                             caption=caption, card_path=card or "",
                         )
                     except Exception:
+                        # v1.11.10：消息已经发出去了，但去重依据没落库。旧代码这里只打
+                        # 日志、却已把重试计数清掉，下一轮会把该群重新算成「没推过」→
+                        # 当天重推最多 3 次。现在直接置满次数并计入 done，本轮起不再发。
                         logger.warning(
-                            f"[{PLUGIN_NAME}] 推送留档失败（{gid}）\n{traceback.format_exc()}"
+                            f"[{PLUGIN_NAME}] 推送留档失败（{gid}），本群今日不再重发"
+                            f"\n{traceback.format_exc()}"
                         )
+                        self._push_tries[key] = self._PUSH_MAX_TRIES
+                        done.add(gid)
+                        continue
+                    self._push_tries.pop(key, None)  # 留档也成功：清掉本群今日的重试计数
+                    done.add(gid)
                 else:
                     self._log_push(
                         "no_platform",
@@ -1362,10 +1537,7 @@ class StarWhisperPlugin(Star):
                 )
                 logger.error(f"[{PLUGIN_NAME}] 推送 {gid} 失败\n{traceback.format_exc()}")
         # 本轮结束：还有没有「今天没成功 + 次数没用尽」的群？（决定循环是重试还是等明天）
-        try:
-            done = self._store.pushed_group_ids(today)
-        except Exception:
-            pass
+        # v1.11.10：done 是本轮内存集合（发送成功即 add），不再重复查一次库。
         left = [
             g for g, _p in targets
             if g not in done
@@ -1463,6 +1635,10 @@ class StarWhisperPlugin(Star):
                     now = time.monotonic()
                     key = f"{uid}:{date}"
                     if now - float(gate.get(key) or 0.0) >= 60:
+                        # v1.11.10：与 _push_tries 同款上限，键含日期，跨天不淘汰
+                        # 以前会无界增长（每个抽过签的用户都留一条）
+                        if len(gate) > _CACHE_MAX:
+                            gate.clear()
                         gate[key] = now
                         redrawn = await self._try_redraw_today(
                             event, existing, payload, uid, date, salt)
@@ -1490,63 +1666,77 @@ class StarWhisperPlugin(Star):
                 yield event.plain_result(self._format_result(payload, repeat=True))
             return
 
-        # 首次抽签（生日特权/佩戴道具/彩蛋/星尘奖励统一在 _roll_daily）
-        profile = self._store.get_profile(uid) or {}
-        result = self._roll_daily(uid, date, salt, profile)
-
-        await self._try_llm_sign(result, event)
-
-        nickname = event.get_sender_name() or "旅行者"
-        avatar_url = self._sender_avatar(event, uid)  # URL 快照入库（D10）
-        avatar_bytes = await self._fetch_avatar_bytes(uid) if avatar_url else None
-        group_id = "" if event.is_private_chat() else str(event.get_group_id() or "")
-        group_name = await self._group_name_of(event) if group_id else ""  # 群名快照入库（v1.9.3）
-
-        mode = str(self._cfg("output_mode", "图卡"))
-        card_path = None
-        bg_fail_hint = ""
-        if mode != "纯文本":
-            # D11 先绘后卡：萌绘底图（可选）→ 合卡 → 发送；失败静默回退幸运色渐变
-            await self._announce_drawing(event)
-            bg_path, job = await self._try_draw_background(event, result, uid, date, salt)
-            card_path = self._try_render_card(result, uid, nickname, avatar_bytes, bg_image=bg_path)
-            if job is not None:
-                job["card_path"] = card_path or ""
-                try:
-                    self._store.record_draw_job(uid, date, **job)
-                except Exception:
-                    logger.error(f"[{PLUGIN_NAME}] draw_jobs 落库失败\n{traceback.format_exc()}")
-                if job.get("status") in ("timeout", "error", "skipped_no_anima"):
-                    bg_fail_hint = str(self._cfg("draw_fail_hint", "") or "")
-
-        saved = self._store.save_fortune(
-            uid, date, result,
-            nickname=nickname, avatar=avatar_url, group_id=group_id, group_name=group_name,
-            card_path=card_path or "",
-            platform=self._sender_platform(event),
-        )
-        if not saved:  # 并发撞车：读回已存的那份
-            existing = self._store.get_fortune(uid, date)
-            payload = (existing or {}).get("payload") or result
-            card_path = str(
-                (existing or {}).get("card_path") or payload.get("card_path") or card_path or ""
-            )
-            if card_path and Path(card_path).exists():
-                yield event.chain_result([Image.fromFileSystem(card_path)])
-            else:
-                yield event.plain_result(self._format_result(payload))
+        # v1.11.10：首签并发闸。_roll_daily 的副作用（星尘流水 / 连签 / 种子序号）
+        # 全都发生在 LLM、头像、群名、萌绘那一串 await 之前，而 save_fortune 的
+        # INSERT OR IGNORE 在最后——同一用户并发两条 /星语 时，两边都读到「今天没签」，
+        # 于是各发一笔星尘、各调一次萌绘、seed_nonce 互相覆盖，输的一方只回读不回滚。
+        # 检查与登记之间没有 await，单事件循环下是原子的；后来者直接给一句提示，
+        # 不必干等 20~120 秒的绘图，也不会重复任何副作用。
+        inflight = f"{uid}:{date}"
+        if inflight in self._draw_inflight:
+            yield event.plain_result("星盘正在铺开，稍等一下再看看～")
             return
-
-        # 结果合并成一条链：图 + 文本 + 失败提示一起发，群里只 @ 一次（v1.9.3）
+        self._draw_inflight.add(inflight)
         comps: list = []
-        if card_path:
-            comps.append(Image.fromFileSystem(card_path))
-            if mode == "图卡+文本":
-                comps.append(Plain("\n" + self._format_result(result)))
-        else:
-            comps.append(Plain(self._format_result(result)))
-        if bg_fail_hint:
-            comps.append(Plain("\n" + bg_fail_hint))
+        try:
+            # 首次抽签（生日特权/佩戴道具/彩蛋/星尘奖励统一在 _roll_daily）
+            profile = self._store.get_profile(uid) or {}
+            result = self._roll_daily(uid, date, salt, profile)
+
+            await self._try_llm_sign(result, event)
+
+            nickname = event.get_sender_name() or "旅行者"
+            avatar_url = self._sender_avatar(event, uid)  # URL 快照入库（D10）
+            avatar_bytes = await self._fetch_avatar_bytes(uid) if avatar_url else None
+            group_id = "" if event.is_private_chat() else str(event.get_group_id() or "")
+            group_name = await self._group_name_of(event) if group_id else ""  # 群名快照入库（v1.9.3）
+
+            mode = str(self._cfg("output_mode", "图卡"))
+            card_path = None
+            bg_fail_hint = ""
+            if mode != "纯文本":
+                # D11 先绘后卡：萌绘底图（可选）→ 合卡 → 发送；失败静默回退幸运色渐变
+                await self._announce_drawing(event)
+                bg_path, job = await self._try_draw_background(event, result, uid, date, salt)
+                card_path = await self._render_card_async(result, uid, nickname, avatar_bytes, bg_image=bg_path)
+                if job is not None:
+                    job["card_path"] = card_path or ""
+                    try:
+                        self._store.record_draw_job(uid, date, **job)
+                    except Exception:
+                        logger.error(f"[{PLUGIN_NAME}] draw_jobs 落库失败\n{traceback.format_exc()}")
+                    if job.get("status") in ("timeout", "error", "skipped_no_anima"):
+                        bg_fail_hint = str(self._cfg("draw_fail_hint", "") or "")
+
+            saved = self._store.save_fortune(
+                uid, date, result,
+                nickname=nickname, avatar=avatar_url, group_id=group_id, group_name=group_name,
+                card_path=card_path or "",
+                platform=self._sender_platform(event),
+            )
+            if not saved:  # 极端并发（WebUI 重抽等不走本闸的路径）：读回已存的那份
+                existing = self._store.get_fortune(uid, date)
+                payload = (existing or {}).get("payload") or result
+                card_path = str(
+                    (existing or {}).get("card_path") or payload.get("card_path") or card_path or ""
+                )
+                comps = ([Image.fromFileSystem(card_path)]
+                         if card_path and Path(card_path).exists()
+                         else [Plain(self._format_result(payload))])
+            else:
+                # 结果合并成一条链：图 + 文本 + 失败提示一起发，群里只 @ 一次（v1.9.3）
+                if card_path:
+                    comps.append(Image.fromFileSystem(card_path))
+                    if mode == "图卡+文本":
+                        comps.append(Plain("\n" + self._format_result(result)))
+                else:
+                    comps.append(Plain(self._format_result(result)))
+                if bg_fail_hint:
+                    comps.append(Plain("\n" + bg_fail_hint))
+        finally:
+            self._draw_inflight.discard(inflight)
+        # yield 必须放在闸外：async generator 的 finally 要等消费者继续迭代才执行，
+        # 若把结果 yield 写在 try 里，in-flight 标记会滞留到下一次请求之后。
         yield event.chain_result(comps)
 
     @filter.command("星语榜", alias={"运势榜"})
@@ -1622,7 +1812,7 @@ class StarWhisperPlugin(Star):
             avatars = list(await asyncio.gather(
                 *(self._fetch_avatar_bytes(u) for u in uids)
             )) if uids else []
-            card_path = self._try_utility_card(
+            card_path = await self._utility_card_async(
                 render_rank_card, title=title, rows=rows, date_str=today,
                 subtitle=f"萌萌星语 · {scope}",
                 empty_text=empty_text,
@@ -1710,7 +1900,7 @@ class StarWhisperPlugin(Star):
         if self._utility_cards_on():
             # 主题色用胜者（平局用发起人）的当日幸运色
             accent = _hex_of(mine if winner != "right" else theirs) or "#F6C6D3"
-            card_path = self._try_utility_card(
+            card_path = await self._utility_card_async(
                 render_pk_card,
                 m_name, m_score, t_name, t_score, verdict, line,
                 winner=winner, accent_hex=accent, file_key=f"{uid}_{today}",
@@ -1777,7 +1967,7 @@ class StarWhisperPlugin(Star):
         extra = "（2 月 29 日的稀有生日！只在闰年的今天生效哦）" if (mo, dy) == (2, 29) else ""
         card_path = None
         if self._utility_cards_on():
-            card_path = self._try_utility_card(
+            card_path = await self._utility_card_async(
                 render_notice_card,
                 title="生日绑定成功",
                 lines=[
@@ -1828,7 +2018,7 @@ class StarWhisperPlugin(Star):
             lines = [f"星座：{prof['constellation']}", today_line]
             if (prof.get("birthday") or "") == today[5:]:
                 lines.append("今天是生日！生日签已就位")
-            card_path = self._try_utility_card(
+            card_path = await self._utility_card_async(
                 render_notice_card,
                 title="星座查询",
                 lines=lines,
@@ -1883,7 +2073,7 @@ class StarWhisperPlugin(Star):
         }
         card_path = None
         if self._utility_cards_on():
-            card_path = self._try_utility_card(
+            card_path = await self._utility_card_async(
                 render_calendar_card,
                 year, month, days,
                 file_key=f"{uid}_{month_prefix}",
@@ -1940,7 +2130,7 @@ class StarWhisperPlugin(Star):
         # v1.10.19：跟随「出签方式」——默认「萌系图卡」只发卡（不再把标题那段文字一起发），
         # 「图卡加文字」才图 + 文，「仅文字」连卡都不渲染、全走文字。
         mode = str(self._cfg("output_mode", "图卡"))
-        caption, card = self._push_message(
+        caption, card = await self._push_message(
             public, board_line, gid or "private", with_card=mode != "纯文本",
             board_avatar=board_avatar)
         comps: list = []
@@ -1971,7 +2161,7 @@ class StarWhisperPlugin(Star):
         ]
         card_path = None
         if self._utility_cards_on():
-            card_path = self._try_utility_card(
+            card_path = await self._utility_card_async(
                 render_wallet_card,
                 nickname=event.get_sender_name() or "旅行者",
                 balance=balance, items=items,
@@ -2005,7 +2195,7 @@ class StarWhisperPlugin(Star):
         ]
         card_path = None
         if self._utility_cards_on():
-            card_path = self._try_utility_card(
+            card_path = await self._utility_card_async(
                 render_shop_card,
                 nickname=event.get_sender_name() or "旅行者",
                 entries=entries, uid=uid,
@@ -2062,7 +2252,7 @@ class StarWhisperPlugin(Star):
         today = fortune.local_today(tz_name)
         card_path = None
         if self._utility_cards_on():
-            card_path = self._try_utility_card(
+            card_path = await self._utility_card_async(
                 render_notice_card,
                 title="购买成功",
                 lines=[
@@ -2128,7 +2318,7 @@ class StarWhisperPlugin(Star):
                 await self._announce_drawing(event)
                 bg_path, job = await self._try_draw_background(event, new_result, uid, date, salt)
                 avatar_bytes = await self._fetch_avatar_bytes(uid)
-                card_path = self._try_render_card(
+                card_path = await self._render_card_async(
                     new_result, uid,
                     nickname=existing.get("nickname") or "", avatar_bytes=avatar_bytes,
                     bg_image=bg_path,
@@ -2169,7 +2359,7 @@ class StarWhisperPlugin(Star):
             self._store.add_ledger(uid, 0, f"use:{item_id}", date)
             card_path = None
             if self._utility_cards_on():
-                card_path = self._try_utility_card(
+                card_path = await self._utility_card_async(
                     render_notice_card,
                     title="道具已使用",
                     lines=[
@@ -2226,7 +2416,7 @@ class StarWhisperPlugin(Star):
         nickname = profile.get("nickname") or self._store.last_nickname(uid) or "旅行者"
         card_path = None
         if str(self._cfg("output_mode", "图卡")) != "纯文本":
-            card_path = self._try_render_card(result, uid, nickname=nickname)
+            card_path = await self._render_card_async(result, uid, nickname=nickname)
         self._store.save_fortune(
             uid, prev, result, nickname=nickname,
             avatar=profile.get("avatar") or "", platform=self._sender_platform(event),

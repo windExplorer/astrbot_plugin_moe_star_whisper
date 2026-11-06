@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import io
 import re
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -38,6 +39,10 @@ _DISPLAY_CANDIDATES = (
 )
 
 _font_cache: dict = {}
+# v1.11.10：图卡渲染改走 asyncio.to_thread，多个工作线程会同时读写这两个缓存。
+# 「检查-加载-写入」不是原子操作，必须串行化（否则两个线程会各自加载同一字体，
+# 更糟的是 _missing_mask_cache 以 id(font) 为键，可能拿到别的字体对象的结果）。
+_font_lock = threading.RLock()
 
 
 def _font_loadable(path: str) -> bool:
@@ -64,14 +69,9 @@ def find_font(explicit: str | None = None, extra_dirs=None) -> str | None:
     candidates: list = []
     if explicit:
         candidates.append(explicit)
-    for d in extra_dirs or []:
-        p = Path(d)
-        if p.is_dir():
-            for pat in ("*.ttf", "*.otf", "*.ttc", "*.woff2"):
-                for x in sorted(p.glob(pat)):
-                    if any(h in x.name.lower() for h in _SKIP_FONT_NAME_HINTS):
-                        continue
-                    candidates.append(str(x))
+    # v1.11.10：候选枚举规则只留一份（_iter_font_files），避免扩展名列表 /
+    # 跳过 emoji 字体的规则改一处漏一处（v1.9.6 被 emoji 字体字母序坑过）。
+    candidates.extend(str(x) for x in _iter_font_files(extra_dirs))
     candidates += _SYSTEM_FONT_CANDIDATES
     for c in candidates:
         if c and Path(c).is_file() and _font_loadable(c):
@@ -223,9 +223,10 @@ def resolve_font(spec: str, dirs=None) -> tuple[str | None, str]:
 
 def _font(font_file: str, size: float) -> ImageFont.FreeTypeFont:
     key = (font_file, int(size))
-    if key not in _font_cache:
-        _font_cache[key] = ImageFont.truetype(font_file, int(size))
-    return _font_cache[key]
+    with _font_lock:
+        if key not in _font_cache:
+            _font_cache[key] = ImageFont.truetype(font_file, int(size))
+        return _font_cache[key]
 
 
 def _bold_variant(font_file: str) -> str:
@@ -348,15 +349,16 @@ _missing_mask_cache: dict = {}
 def _missing_mask(font):
     """该字体渲染「缺字形字符」的结果（拿私用区 U+E123 取样，几乎没有字体给它做字形）。"""
     key = id(font)
-    if key in _missing_mask_cache:
-        return _missing_mask_cache[key]
-    try:
-        mask = font.getmask("\ue123")
-        ref = (mask.size, bytes(mask))
-    except Exception:
-        ref = None
-    _missing_mask_cache[key] = ref
-    return ref
+    with _font_lock:
+        if key in _missing_mask_cache:
+            return _missing_mask_cache[key]
+        try:
+            mask = font.getmask("\ue123")
+            ref = (mask.size, bytes(mask))
+        except Exception:
+            ref = None
+        _missing_mask_cache[key] = ref
+        return ref
 
 
 def font_has_glyph(font, ch: str) -> bool:

@@ -7,8 +7,10 @@
 """
 from __future__ import annotations
 
+import functools
 import json
 import sqlite3
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -90,13 +92,49 @@ CREATE TABLE IF NOT EXISTS push_history (
   PRIMARY KEY (group_id, date)    -- 一群一天一条；同天重推覆盖，**永不清理**
 );
 CREATE INDEX IF NOT EXISTS idx_fortunes_date ON fortunes(date);
+-- v1.11.10：ledger / draw_jobs / push_history 只增不减，之前只有上面一条索引，
+-- get_balance（每次抽签）、has_ledger、pushed_group_ids 都在全表扫描。
+CREATE INDEX IF NOT EXISTS idx_fortunes_group_date ON fortunes(group_id, date);
+CREATE INDEX IF NOT EXISTS idx_ledger_user_ref ON ledger(user_id, ref_date, reason);
+CREATE INDEX IF NOT EXISTS idx_draw_jobs_user_date ON draw_jobs(user_id, date);
+CREATE INDEX IF NOT EXISTS idx_push_history_date ON push_history(date);
+CREATE INDEX IF NOT EXISTS idx_push_log_kind ON push_log(kind);
 """
 
 
+def _serialized(cls):
+    """把 Store 的所有公开方法串行化（v1.11.10）。
+
+    一个 Store 只有一条 sqlite3 连接且 ``check_same_thread=False``——以前渲染、
+    统计都跑在事件循环线程里，恰好没有并发；现在图卡渲染 / 统计查询走
+    ``asyncio.to_thread``，同一连接会被工作线程与主线程同时使用。sqlite3 要求
+    调用方自己串行化连接，故在类定义后统一给公开方法套一层可重入锁：
+      * 覆盖所有公开方法，新增方法自动生效，不会漏；
+      * ``RLock`` 可重入，方法内部调用另一个公开方法（如 bump_streak →
+        get_profile / upsert_profile）不会自锁；
+      * ``__init__`` / ``_query`` / ``_one`` 等私有方法不包装，它们要么在持锁
+        的公开方法里被调用，要么只在构造期使用（此时还没有并发）。
+    """
+    for name, fn in list(cls.__dict__.items()):
+        if name.startswith("_") or not callable(fn):
+            continue
+
+        @functools.wraps(fn)
+        def wrapper(self, *args, _fn=fn, **kwargs):
+            with self._lock:
+                return _fn(self, *args, **kwargs)
+
+        setattr(cls, name, wrapper)
+    return cls
+
+
+@_serialized
 class Store:
     def __init__(self, db_path):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        # 必须先建锁：装饰后的公开方法都会取 self._lock
+        self._lock = threading.RLock()
         self._db = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA journal_mode=WAL")

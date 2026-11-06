@@ -38,25 +38,61 @@ try {
     $pluginVersion = "dev"
     if (Test-Path $metaPath) {
         $metaRaw = [System.IO.File]::ReadAllText($metaPath, [System.Text.Encoding]::UTF8)
-        if ($metaRaw -match '(?m)^\s*version:\s*"?([^"#\r\n]+?)"?\s*(?:#.*)?$') {
+        if ($metaRaw -match '(?m)^\s*version:\s*v?([0-9][^#\r\n\s]*)\s*(?:#.*)?$') {
             $pluginVersion = $Matches[1].Trim()
         }
     }
+    # Strip a leading "v" so this matches webui_api._plugin_version() (which also
+    # strips it). App.vue renders "v{{ version }}", so keeping the v here produced
+    # "vv1.11.9" whenever the backend handshake failed.
+    $pluginVersion = $pluginVersion -replace '^v', ''
     $versionTs = "export const PLUGIN_VERSION = `"$pluginVersion`";`n"
     Set-Content -Path (Join-Path $src "src/version.ts") -Value $versionTs -Encoding UTF8
     Write-Host "==> injected plugin version: $pluginVersion" -ForegroundColor Green
 
-    # --- dependencies on first build ---
-    if (-not (Test-Path (Join-Path $src "node_modules"))) {
-        Write-Host "==> node_modules missing, running npm install..." -ForegroundColor Yellow
+    # --- dependencies: reinstall when manifests changed, not only when the folder
+    #     is missing. Editing package.json / package-lock.json used to silently
+    #     rebuild pages/console with the OLD node_modules, shipping a new version
+    #     number on top of stale frontend dependencies.
+    $stampPath = Join-Path $src "node_modules/.deps-stamp"
+    function Get-ManifestHash {
+        $hash = ""
+        foreach ($name in @("package.json", "package-lock.json")) {
+            $p = Join-Path $src $name
+            if (Test-Path $p) {
+                $hash += (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash
+            }
+        }
+        return $hash
+    }
+    $manifestHash = Get-ManifestHash
+    $needInstall = -not (Test-Path (Join-Path $src "node_modules"))
+    if (-not $needInstall) {
+        if (-not (Test-Path $stampPath)) {
+            $needInstall = $true
+        } elseif ([System.IO.File]::ReadAllText($stampPath).Trim() -ne $manifestHash) {
+            $needInstall = $true
+        }
+    }
+    if ($needInstall) {
+        Write-Host "==> dependencies changed/missing, running npm install..." -ForegroundColor Yellow
         npm install
-        if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "ERROR: npm install failed" -ForegroundColor Red
+            exit 1
+        }
+        # npm install may rewrite package-lock.json; stamp the FINAL manifests.
+        $manifestHash = Get-ManifestHash
+        [System.IO.File]::WriteAllText($stampPath, $manifestHash)
     }
 
     # --- build ---
     Write-Host "==> vite build..." -ForegroundColor Yellow
     npm run build
-    if ($LASTEXITCODE -ne 0) { throw "vite build failed" }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: vite build failed" -ForegroundColor Red
+        exit 1
+    }
 } finally {
     Pop-Location
 }
