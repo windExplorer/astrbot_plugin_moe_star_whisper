@@ -84,6 +84,7 @@ $includeList = @(
     "card.py",
     "pages",
     "metadata.yaml",
+    "logo.png",
     "_conf_schema.json",
     "requirements.txt",
     "README.md",
