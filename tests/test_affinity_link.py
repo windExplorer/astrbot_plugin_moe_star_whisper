@@ -77,6 +77,21 @@ def main() -> int:
           "送礼与档位加成有配置开关")
     check("get_registered_star(AFFINITY_PLUGIN)" in main_src, "契约经 get_registered_star 获取")
 
+    # ---------- 4.5) v1.12.2 卡面好感度折算：系数经契约同步，不在本地复制口径 ----------
+    check("sync_info" in main_src and "_affinity_gain_estimate" in main_src,
+          "折算系数经契约 sync_info 从中枢实时读取（本地不存第二份口径）")
+    check("affinity_gain=result.get(\"affinity_gain\")" in main_src,
+          "卡渲染接收 payload 里的 affinity_gain（补渲染/回放路径自动带上）")
+    tmp2 = Path(tempfile.mkdtemp(prefix="affinity_link2_"))
+    st2 = store.Store(tmp2 / "star_whisper.db")
+    st2.add_ledger("u2", 15, "draw", "2026-11-12")
+    st2.add_ledger("u2", 3, "tier", "2026-11-12")
+    st2.add_ledger("u2", -10, "send:candy", "2026-11-12")
+    st2.add_ledger("u2", 40, "gift:back", "2026-11-12")
+    check(st2.day_stardust_reasons("u2", "2026-11-12") == 18,
+          "卡面「今日获得」= 抽签 15 + 档位加成 3（不含消费与礼盒返利）")
+    check(st2.day_stardust_reasons("u2", "2026-11-13") == 0, "跨天归零")
+
     # ---------- 5) schema：新键齐全且每节点有 type ----------
     schema = json.loads((ROOT / "_conf_schema.json").read_text(encoding="utf-8"))
     allowed = {"int", "float", "bool", "string", "text", "list", "file",

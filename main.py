@@ -631,13 +631,13 @@ class StarWhisperPlugin(Star):
             return None
         try:
             data_dir = Path(StarTools.get_data_dir(PLUGIN_NAME))
-            # 星尘展示（M9）：当日获得（reason='draw' 流水）+ 累计余额；经济关/无库时不画
+            # 星尘展示（M9）：当日获得（v1.12.2 起 = 抽签 + 档位加成）+ 累计余额；经济关/无库时不画
             sd_today = sd_total = None
             if self._store is not None and self._economy_on():
                 try:
                     draw_date = str(result.get("date") or "")
                     if draw_date:
-                        sd_today = self._store.day_stardust(uid, draw_date)
+                        sd_today = self._store.day_stardust_reasons(uid, draw_date)
                     sd_total = self._store.get_balance(uid)
                 except Exception:
                     sd_today = sd_total = None
@@ -657,6 +657,7 @@ class StarWhisperPlugin(Star):
                 tarot_label_on_image=bool(self._cfg("tarot_label_on_image", False)),
                 stardust_today=sd_today,
                 stardust_total=sd_total,
+                affinity_gain=result.get("affinity_gain"),
             )
         except Exception:
             logger.error(
@@ -1115,6 +1116,39 @@ class StarWhisperPlugin(Star):
     def _gift_used_today(self, uid: str, date: str) -> int:
         """今日已送次数（扣款流水 send:<id> 计数；退款与礼盒返利流水不计入）。"""
         return self._store.day_reason_count(uid, date, "send:")
+
+    async def _affinity_gain_estimate(self, result: dict) -> float | None:
+        """抽签将折算进好感度档案的**预计**分值（卡面/文本展示用）。
+
+        口径对齐的关键：系数经契约 ``sync_info`` 从中枢**实时读取**——唯一来源
+        仍是中枢的 ``stardust_sync.scale`` 配置，星语只显示不存储，两边数字天然
+        同源，不存在各配一份的漂移。中枢未装 / 同步关闭 / 旧版无 sync_info →
+        返回 None（卡上就不画这一行）。显示值是「预计」：实际落库以中枢同步时刻
+        的配置为准，幂等键保证当天只落一次；权威数字永远在 /好感度。
+        """
+        api = self._affinity_api()
+        if api is None:
+            return None
+        info_fn = getattr(api, "sync_info", None)
+        if info_fn is None:
+            return None  # 旧版中枢：没有这个契约方法
+        try:
+            info = await info_fn()
+        except Exception:
+            return None
+        if not isinstance(info, dict) or info.get("status") != "ok" or not info.get("enabled"):
+            return None
+        stardust = result.get("stardust")
+        if not stardust:
+            return None
+        try:
+            scale = float(info.get("scale") or 0.0)
+        except (TypeError, ValueError):
+            return None
+        if scale <= 0:
+            return None
+        gain = round(float(stardust) * scale, 1)
+        return gain if gain > 0 else None
 
     async def _award_tier(self, uid: str, date: str) -> int:
         """好感度档位星尘加成（每日首签发一次，has_ledger 幂等闸）。
@@ -1801,6 +1835,8 @@ class StarWhisperPlugin(Star):
             lines.append(f"星尘 +{stardust}（{tail}/星尘 查看背包）")
         if payload.get("tier_bonus"):
             lines.append(f"💖 好感度档位加成 +{payload['tier_bonus']} 星尘")
+        if payload.get("affinity_gain") is not None:
+            lines.append(f"💞 好感度 +{payload['affinity_gain']}（抽签折算 · /好感度 查看）")
         if payload.get("double_day"):
             lines.append("✨ 周日双倍星尘日，今天的收获翻倍～")
         lines.append("—— 星语者")
@@ -1903,6 +1939,10 @@ class StarWhisperPlugin(Star):
             if tier_bonus > 0:
                 result["tier_bonus"] = tier_bonus
                 result["stardust_total"] = self._store.get_balance(uid)
+            # v1.12.2 卡面展示：抽签预计折算的好感度（系数经契约读中枢，两边同源）
+            affinity_gain = await self._affinity_gain_estimate(result)
+            if affinity_gain is not None:
+                result["affinity_gain"] = affinity_gain
 
             await self._try_llm_sign(result, event)
 

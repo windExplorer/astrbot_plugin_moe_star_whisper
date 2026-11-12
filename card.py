@@ -624,6 +624,7 @@ def render_card(
     tarot_label_on_image: bool = False,
     stardust_today: int | None = None,
     stardust_total: int | None = None,
+    affinity_gain: float | None = None,
 ) -> str:
     """渲染当日星语签，落盘 cards_root/<date>.png 并返回路径。失败抛异常由调用方回退。"""
     nickname = sanitize_name(nickname)
@@ -641,6 +642,7 @@ def render_card(
             theme=str(theme or "light"),
             tarot_label_on_image=bool(tarot_label_on_image),
             stardust_today=stardust_today, stardust_total=stardust_total,
+            affinity_gain=affinity_gain,
         )
 
     SW, H_cfg = int(width), int(height)
@@ -674,6 +676,7 @@ def render_card(
         lucky_rgb=lucky_rgb, grade_rgb=grade_rgb, dark=dark, ink=ink, sub=sub,
         line_rgb=divider_rgb, nickname=nickname, uid=uid, avatar_data=avatar_data,
         signer=signer, stardust_today=stardust_today, stardust_total=stardust_total,
+        affinity_gain=affinity_gain,
     )
     if overflow > 0:
         # 配置高度实在放不下（连最小间隙都挤不下）时才加高画布重铺一次，绝不截断
@@ -684,6 +687,7 @@ def render_card(
             lucky_rgb=lucky_rgb, grade_rgb=grade_rgb, dark=dark, ink=ink, sub=sub,
             line_rgb=divider_rgb, nickname=nickname, uid=uid, avatar_data=avatar_data,
             signer=signer, stardust_today=stardust_today, stardust_total=stardust_total,
+            affinity_gain=affinity_gain,
         )
     img = canvas
 
@@ -700,7 +704,8 @@ def _draw_fortune_panel(canvas, box, result, font_file, *,
                         nickname: str = "", uid: str = "", avatar_data=None,
                         signer: str = "星语者",
                         stardust_today: int | None = None,
-                        stardust_total: int | None = None) -> int:
+                        stardust_total: int | None = None,
+                        affinity_gain: float | None = None) -> int:
     """在 canvas 的 box=(x0, y0, x1, y1) 内画「运势面板」，返回溢出高度（>0 = 装不下）。
 
     v1.10.24：这套版式原本只属于**塔罗双联的右联**，而「没有 AI 牌面」的单联走的是
@@ -869,7 +874,16 @@ def _draw_fortune_panel(canvas, box, result, font_file, *,
     block(int(2 * (64 * u + 10 * u)), b_lucky)
 
     # ⑧.5 星尘（M9：今日获得 + 累计；经济关闭或调用方未传时不画）
+    # v1.12.2：affinity_gain（抽签预计折算的好感度，经契约读中枢系数）不为空时
+    # 在星尘行下方补一行小字；块高相应加高，放不下时由单联的溢出重铺机制兜底。
     gold_soft = (222, 186, 84) if dark else (176, 142, 48)
+    _gain_text = ""
+    try:
+        if affinity_gain is not None and float(affinity_gain) > 0:
+            gain_val = float(affinity_gain)
+            _gain_text = f"好感度 +{gain_val:g} · /好感度 查看"
+    except (TypeError, ValueError):
+        _gain_text = ""
     if stardust_total is not None:
         def b_stardust(y):
             cy = y + int(30 * u)
@@ -881,7 +895,10 @@ def _draw_fortune_panel(canvas, box, result, font_file, *,
                           "今日获得", font=_font(font_file, int(20 * u)), fill=sub, anchor="lm")
             draw.text((right, cy), f"累计 {stardust_total}",
                       font=_font(font_file, int(26 * u)), fill=ink, anchor="rm")
-        block(int(60 * u), b_stardust)
+            if _gain_text:
+                draw.text((right, cy + int(34 * u)), _gain_text,
+                          font=_font(font_file, int(20 * u)), fill=sub, anchor="rm")
+        block(int(60 * u) + (int(36 * u) if _gain_text else 0), b_stardust)
 
     # ⑨ 脚注（月相/连签）
     phase = result.get("phase") or {}
@@ -927,6 +944,7 @@ def render_tarot_card(
     tarot_label_on_image: bool = False,
     stardust_today: int | None = None,
     stardust_total: int | None = None,
+    affinity_gain: float | None = None,
 ) -> str:
     """塔罗双联版式（M8/M8.5）：左联 AI 牌面 + 右联运势面板。
 
@@ -982,6 +1000,7 @@ def render_tarot_card(
         lucky_rgb=lucky_rgb, grade_rgb=grade_rgb, dark=dark, ink=ink, sub=sub,
         line_rgb=line_rgb, nickname=nickname, uid=uid, avatar_data=avatar_data,
         signer=signer, stardust_today=stardust_today, stardust_total=stardust_total,
+        affinity_gain=affinity_gain,
     )
 
     cards_root = Path(cards_root)

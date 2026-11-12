@@ -472,6 +472,21 @@ class Store:
         ).fetchone()
         return int(row["total"] or 0)
 
+    def day_stardust_reasons(self, user_id: str, date: str,
+                             reasons=("draw", "tier")) -> int:
+        """当日指定来源的正向流水合计（v1.12.2：卡面「今日获得」口径 = 抽签 + 档位加成）。
+
+        与 day_stardust 的区别：把好感度联动发的档位星尘（reason='tier'）也算进
+        「今日获得」，否则卡面显示的数字和实际到账差一截。
+        """
+        placeholders = ",".join("?" for _ in reasons)
+        row = self._db.execute(
+            f"SELECT COALESCE(SUM(delta), 0) AS total FROM ledger"
+            f" WHERE user_id=? AND ref_date=? AND reason IN ({placeholders}) AND delta>0",
+            (user_id, date, *reasons),
+        ).fetchone()
+        return int(row["total"] or 0)
+
     # ---------- 星尘 2.0（v1.11.12）：任务 / 成长 / 排行 ----------
 
     def day_income(self, user_id: str, date: str) -> int:
