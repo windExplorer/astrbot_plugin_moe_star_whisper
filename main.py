@@ -80,6 +80,30 @@ TASK_DEFS = (
     ("task:star", "看一次今日星象"),
 )
 
+# v1.12.0 好感度联动 · 送礼：花星尘给角色送心意，直接加好感度中枢的分数。
+# (id -> (名称, 默认价, 好感度))；单次分值刻意压小（最多 +4），叠加每日上限
+# gift_daily_limit（默认 3 次）把总敞口控制在每天 +12 以内，不会盖过聊天计分。
+GIFT_DEFS = {
+    "candy": ("星光糖", 10, 1),
+    "bouquet": ("星尘花束", 30, 2),
+    "letter": ("星语贺卡", 60, 4),
+}
+GIFT_ALIASES = {
+    "candy": "candy", "星光糖": "candy", "糖果": "candy",
+    "bouquet": "bouquet", "花束": "bouquet", "星尘花束": "bouquet",
+    "letter": "letter", "贺卡": "letter", "星语贺卡": "letter",
+}
+# v1.12.0 好感度联动 · 档位加成：好感度档位越高，每日首签星尘 +N（key=中枢档位键）。
+TIER_BONUS = {
+    "known": 1,     # 眼熟 100+
+    "familiar": 2,  # 熟悉 300+
+    "close": 3,     # 亲近 600+
+    "intimate": 4,  # 亲密 1000+
+    "bonded": 6,    # 羁绊 2000+
+}
+AFFINITY_PLUGIN = "astrbot_plugin_moe_affinity"
+AFFINITY_API_VERSION = "affinity.v1"
+
 # 每日推送 / /星语星象 卡底部的指令引导（v1.10.15 起；抽成常量避免两处各写一份）
 PUSH_HINT = "发送 /星语 抽今日签 ｜ /星语榜 看今日排行"
 
@@ -1050,6 +1074,75 @@ class StarWhisperPlugin(Star):
             )
             return 0
 
+    # ---------- 好感度联动（v1.12.0） ----------
+
+    def _affinity_api(self):
+        """取好感度中枢契约（affinity.v1）。
+
+        中枢未安装 / 未启用 / 版本不匹配 / 旧版本没有 gift_to_user、best_tier
+        方法时一律返回 None，调用方安全降级（送礼拒绝、档位不加成），绝不炸主流程。
+        """
+        try:
+            star = self.context.get_registered_star(AFFINITY_PLUGIN)
+            if star is None or not getattr(star, "activated", False):
+                return None
+            api = getattr(star.star_cls, "api", None)
+            if api is None or str(getattr(api, "API_VERSION", "") or "") != AFFINITY_API_VERSION:
+                return None
+            if not hasattr(api, "gift_to_user") or not hasattr(api, "best_tier"):
+                return None  # 旧版中枢：契约里有 v1 但没有这两个方法
+            return api
+        except Exception:
+            return None
+
+    def _gift_def(self, gift_id: str) -> tuple[str, int, int]:
+        """(名称, 价格, 好感度)；价格可被 gift_prices 配置覆盖。"""
+        name, price, delta = GIFT_DEFS[gift_id]
+        raw = self._cfg("gift_prices", None)
+        if isinstance(raw, dict) and raw.get(gift_id) is not None:
+            try:
+                price = max(0, int(raw[gift_id]))
+            except (TypeError, ValueError):
+                pass
+        return name, price, delta
+
+    def _gift_daily_limit(self) -> int:
+        try:
+            return max(0, int(self._cfg("gift_daily_limit", 3)))
+        except (TypeError, ValueError):
+            return 3
+
+    def _gift_used_today(self, uid: str, date: str) -> int:
+        """今日已送次数（扣款流水 send:<id> 计数；退款与礼盒返利流水不计入）。"""
+        return self._store.day_reason_count(uid, date, "send:")
+
+    async def _award_tier(self, uid: str, date: str) -> int:
+        """好感度档位星尘加成（每日首签发一次，has_ledger 幂等闸）。
+
+        中枢不可用 / 没有记录 / 陌生档 → 0，静默；最高分跨角色取（best_tier）。
+        """
+        if not uid or self._store is None or not self._economy_on():
+            return 0
+        if not bool(self._cfg("tier_bonus_enabled", True)):
+            return 0
+        try:
+            if self._store.has_ledger(uid, date, "tier"):
+                return 0
+            api = self._affinity_api()
+            if api is None:
+                return 0
+            info = await api.best_tier(uid)
+            if not isinstance(info, dict) or info.get("status") != "ok":
+                return 0
+            bonus = int(TIER_BONUS.get(str(info.get("stage") or ""), 0))
+            if bonus <= 0:
+                return 0
+            self._store.add_ledger(uid, bonus, "tier", date)
+            return bonus
+        except Exception:
+            logger.warning(f"[{PLUGIN_NAME}] 好感度档位加成失败\n{traceback.format_exc()}")
+            return 0
+
     def _today_special(self, date: str) -> str:
         """今日半价的玩法 key（按日期+盐值派生，同一天所有人一致）。"""
         return fortune.daily_special(
@@ -1103,6 +1196,10 @@ class StarWhisperPlugin(Star):
             f"· /星语玩 {v[0]} {self._fun_price(k, date)}★"
             for k, v in FUN_DEFS.items()
         ]
+        gifts = " · ".join(
+            f"{self._gift_def(g)[0]} {self._gift_def(g)[1]}★" for g in GIFT_DEFS
+        )
+        lines.append(f"心意好礼：/星语送礼 {gifts}（加好感度，每日限 3 次）")
         lines.append(
             f"每项每天限一次 · 当前余额 {self._store.get_balance(uid) if self._store else 0}"
         )
@@ -1702,6 +1799,8 @@ class StarWhisperPlugin(Star):
             total = payload.get("stardust_total")
             tail = f"累计 {total}，" if total is not None else ""
             lines.append(f"星尘 +{stardust}（{tail}/星尘 查看背包）")
+        if payload.get("tier_bonus"):
+            lines.append(f"💖 好感度档位加成 +{payload['tier_bonus']} 星尘")
         if payload.get("double_day"):
             lines.append("✨ 周日双倍星尘日，今天的收获翻倍～")
         lines.append("—— 星语者")
@@ -1799,6 +1898,11 @@ class StarWhisperPlugin(Star):
             # 首次抽签（生日特权/佩戴道具/彩蛋/星尘奖励统一在 _roll_daily）
             profile = self._store.get_profile(uid) or {}
             result = self._roll_daily(uid, date, salt, profile)
+            # v1.12.0 好感度联动：档位星尘加成（幂等，中枢不在/无记录时静默跳过）
+            tier_bonus = await self._award_tier(uid, date)
+            if tier_bonus > 0:
+                result["tier_bonus"] = tier_bonus
+                result["stardust_total"] = self._store.get_balance(uid)
 
             await self._try_llm_sign(result, event)
 
@@ -2668,6 +2772,114 @@ class StarWhisperPlugin(Star):
             return
         yield event.plain_result("\n".join(lines))
 
+    @filter.command("星语送礼", alias={"运势送礼", "送礼"})
+    async def gift_cmd(self, event: AstrMessageEvent):
+        """花星尘送心意（好感度联动）：/星语送礼 [星光糖|星尘花束|星语贺卡]
+
+        即时服务，不进背包：扣款走 ledger 的 `send:<id>`（负 delta 可审计；前缀刻意
+        不用 gift:，那是星尘礼盒返利流水 `gift:back` 的地盘），
+        送出后由好感度中枢把小额好感写进「该用户有记录的每个角色」（签到同款
+        展开口径）。每日限 gift_daily_limit 次（默认 3），单次分值刻意压小。
+        中枢不可用 / 没聊过天（无角色记录）时**不扣星尘**。
+        """
+        if self._store is None or not self._economy_on():
+            yield event.plain_result("道具经济未开放～")
+            return
+        if not bool(self._cfg("gift_enabled", True)):
+            yield event.plain_result("送礼功能未开放～")
+            return
+        uid = str(event.get_sender_id() or "").strip()
+        tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
+        today = fortune.local_today(tz_name)
+        api = self._affinity_api()
+        if api is None:
+            yield event.plain_result(
+                "送礼需要「萌萌好感度」插件（v0.13.0+）在线，TA 现在收不到心意～"
+            )
+            return
+        raw = str(event.message_str or "").replace(" ", "")
+        for w in ("运势送礼", "星语送礼", "/"):
+            raw = raw.replace(w, "")
+        gift_id = GIFT_ALIASES.get(raw.strip())
+        if gift_id is None:
+            lines = ["💝 可送的心意："]
+            for gid, (name, price, delta) in GIFT_DEFS.items():
+                _, p, d = self._gift_def(gid)
+                lines.append(f"· /星语送礼 {name}：{p} 星尘，好感度 +{d}")
+            used = self._gift_used_today(uid, today)
+            lines.append(f"今日已送 {used}/{self._gift_daily_limit()} 次")
+            yield event.plain_result("\n".join(lines))
+            return
+        name, price, delta = self._gift_def(gift_id)
+        limit = self._gift_daily_limit()
+        used = self._gift_used_today(uid, today)
+        if limit <= 0 or used >= limit:
+            yield event.plain_result(
+                f"今天已经送过 {used} 次心意啦，感情不在多，明天再来～"
+            )
+            return
+        balance = self._store.get_balance(uid)
+        if balance < price:
+            yield event.plain_result(
+                f"星尘不够啦：{name} 需要 {price}，你还差 {price - balance}。"
+            )
+            return
+        # 先扣款再送：送出失败（理论上只在竞态下发生）会全额退款，流水可审计。
+        # 扣款前缀用 send: 而不是 gift:——`gift:back` 已被星尘礼盒的返利流水占用
+        # （v1.11.12），前缀计数会把「开礼盒」误算进送礼次数。
+        self._store.add_ledger(uid, -price, f"send:{gift_id}", today)
+        try:
+            result = await api.gift_to_user(
+                uid,
+                delta=float(delta),
+                client_ref=f"gift:{today}:{used + 1}",
+                evidence=json.dumps(
+                    {
+                        "from": PLUGIN_NAME,
+                        "gift": gift_id,
+                        "name": name,
+                        "price": price,
+                        "date": today,
+                    },
+                    ensure_ascii=False,
+                ),
+                display_name=str(event.get_sender_name() or ""),
+            )
+        except Exception:
+            self._store.add_ledger(uid, price, f"refund:send:{gift_id}", today)
+            logger.warning(f"[{PLUGIN_NAME}] 送礼调用中枢失败（已退款）\n{traceback.format_exc()}")
+            yield event.plain_result("心意没能送达（中枢开小差了），星尘已原路退回～")
+            return
+        if not isinstance(result, dict) or result.get("status") != "ok":
+            self._store.add_ledger(uid, price, f"refund:send:{gift_id}", today)
+            if isinstance(result, dict) and result.get("status") == "no_role":
+                yield event.plain_result(
+                    "TA 还不认识你呢——先和 TA 聊聊天，下次再送吧（星尘已退回）～"
+                )
+            else:
+                yield event.plain_result("心意没能送达，星尘已原路退回～")
+            return
+        lines = [
+            f"{name} 已送出 · -{price} 星尘",
+            f"好感度 +{delta}（心意已记进好感度档案）",
+            f"今日已送 {used + 1}/{limit} 次 · 余额 {self._store.get_balance(uid)}",
+        ]
+        card_path = None
+        if self._utility_cards_on():
+            card_path = await self._utility_card_async(
+                render_notice_card,
+                title="心意送达",
+                lines=lines,
+                subtitle="萌萌星语 · 好感度联动",
+                accent_hex=self._accent_hex(uid, today),
+                file_key=f"{uid}_{today}_gift",
+                footer="/星语送礼 看看还能送什么",
+            )
+        if card_path:
+            yield event.image_result(card_path)
+            return
+        yield event.plain_result("\n".join(lines))
+
     @filter.command("星语任务", alias={"运势任务", "星语成就"})
     async def task_cmd(self, event: AstrMessageEvent):
         """今日任务进度 + 等级称号 + 成就徽章（攒星尘的长期目标）。"""
@@ -2780,6 +2992,7 @@ class StarWhisperPlugin(Star):
                 ("/星语使用 <名称>", "使用换签卡/护身符/香烛"),
                 ("/星语补签", "断签 3 天内补回昨天"),
                 ("/星语玩 <名称>", "星尘小玩法：小确幸签/祝福卡/礼盒（每天每项一次）"),
+                ("/星语送礼 <名称>", "花星尘送心意，加好感度（星光糖/星尘花束/星语贺卡，每日限 3 次）"),
                 ("/星语任务", "今日任务、星尘等级称号与成就徽章"),
                 ("/星语星尘榜 [日|周|总]", "星尘获得排行"),
                 ("/星语发放 @用户 <±n>", "手动调整星尘（管理员）"),

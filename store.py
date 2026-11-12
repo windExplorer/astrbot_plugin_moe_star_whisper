@@ -450,6 +450,19 @@ class Store:
         ).fetchone()
         return row is not None
 
+    def day_reason_count(self, user_id: str, ref_date: str, reason_prefix: str) -> int:
+        """当日某类流水条数（前缀匹配，送礼每日限额用）。
+
+        前缀以 ``gift:`` 结尾可以精确排除退款流水（``refund:gift:*``）：
+        计数只认扣款（``gift:<id>``），退款不该占每日限额。
+        """
+        row = self._db.execute(
+            "SELECT COUNT(*) AS n FROM ledger"
+            " WHERE user_id=? AND ref_date=? AND reason LIKE ?",
+            (user_id, ref_date, str(reason_prefix) + "%"),
+        ).fetchone()
+        return int(row["n"] or 0)
+
     def day_stardust(self, user_id: str, date: str) -> int:
         """当日抽签获得的星尘（reason='draw' 流水合计；换签卡不重复发奖，天然幂等）。"""
         row = self._db.execute(
