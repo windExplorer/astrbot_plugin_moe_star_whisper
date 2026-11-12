@@ -81,12 +81,12 @@ TASK_DEFS = (
 )
 
 # v1.12.0 好感度联动 · 送礼：花星尘给角色送心意，直接加好感度中枢的分数。
-# (id -> (名称, 默认价, 好感度))；单次分值刻意压小（最多 +4），叠加每日上限
-# gift_daily_limit（默认 3 次）把总敞口控制在每天 +12 以内，不会盖过聊天计分。
+# (id -> (名称, 默认价, 好感度))；v1.12.1 按用户反馈再压小：单次最多 +3，
+# 叠加每日上限 gift_daily_limit（默认 2 次）把总敞口控制在每天 +6 以内。
 GIFT_DEFS = {
     "candy": ("星光糖", 10, 1),
     "bouquet": ("星尘花束", 30, 2),
-    "letter": ("星语贺卡", 60, 4),
+    "letter": ("星语贺卡", 60, 3),
 }
 GIFT_ALIASES = {
     "candy": "candy", "星光糖": "candy", "糖果": "candy",
@@ -1108,9 +1108,9 @@ class StarWhisperPlugin(Star):
 
     def _gift_daily_limit(self) -> int:
         try:
-            return max(0, int(self._cfg("gift_daily_limit", 3)))
+            return max(0, int(self._cfg("gift_daily_limit", 2)))
         except (TypeError, ValueError):
-            return 3
+            return 2
 
     def _gift_used_today(self, uid: str, date: str) -> int:
         """今日已送次数（扣款流水 send:<id> 计数；退款与礼盒返利流水不计入）。"""

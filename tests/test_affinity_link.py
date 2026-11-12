@@ -99,7 +99,7 @@ def main() -> int:
     check(not bad, f"schema 每节点有合法 type {bad or ''}")
     for key in ("gift_enabled", "gift_prices", "gift_daily_limit", "tier_bonus_enabled"):
         check(key in schema, f"schema 顶层键 {key} 存在")
-    check(schema.get("gift_daily_limit", {}).get("default") == 3, "送礼每日上限默认 3 次")
+    check(schema.get("gift_daily_limit", {}).get("default") == 2, "送礼每日上限默认 2 次（v1.12.1 压小）")
 
     print()
     if FAILED:
