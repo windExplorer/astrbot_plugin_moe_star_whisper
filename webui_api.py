@@ -270,7 +270,11 @@ async def h_debug_rerender(plugin) -> dict:
 
 
 async def h_debug_reset(plugin) -> dict:
-    """重置：删除某 uid 的今日签记录与卡文件（星尘会随重抽再次发放，仅测试用）。"""
+    """重置：删除某 uid 的今日签记录与卡文件（仅测试用）。
+
+    星尘流水与档案不动：首抽星尘/档位加成保留在账上，重抽因种子序号 ≥1
+    不再发新星尘（v1.3.1 起），好感度在中枢侧、幂等键按天，完全不受影响。
+    """
     if plugin._store is None:
         return err("插件未初始化完成")
     uid = await _uid_of()

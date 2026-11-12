@@ -1117,7 +1117,7 @@ class StarWhisperPlugin(Star):
         """今日已送次数（扣款流水 send:<id> 计数；退款与礼盒返利流水不计入）。"""
         return self._store.day_reason_count(uid, date, "send:")
 
-    async def _affinity_gain_estimate(self, result: dict) -> float | None:
+    async def _affinity_gain_estimate(self, result: dict, uid: str = "") -> float | None:
         """抽签将折算进好感度档案的**预计**分值（卡面/文本展示用）。
 
         口径对齐的关键：系数经契约 ``sync_info`` 从中枢**实时读取**——唯一来源
@@ -1125,6 +1125,11 @@ class StarWhisperPlugin(Star):
         同源，不存在各配一份的漂移。中枢未装 / 同步关闭 / 旧版无 sync_info →
         返回 None（卡上就不画这一行）。显示值是「预计」：实际落库以中枢同步时刻
         的配置为准，幂等键保证当天只落一次；权威数字永远在 /好感度。
+
+        v1.12.5：折算基数从「本次抽签新发的星尘」放宽为「当日抽签流水合计
+        （reason='draw' 正项）」——中枢同步读的就是这份合计，两者口径完全一致；
+        调试重置/换签卡后的重抽不发新星尘（种子序号 ≥1），也能如实显示折算值，
+        不再出现「卡面好感度行凭空消失」。
         """
         api = self._affinity_api()
         if api is None:
@@ -1139,6 +1144,12 @@ class StarWhisperPlugin(Star):
         if not isinstance(info, dict) or info.get("status") != "ok" or not info.get("enabled"):
             return None
         stardust = result.get("stardust")
+        if not stardust and uid and self._store is not None:
+            try:
+                stardust = self._store.day_stardust_reasons(
+                    uid, str(result.get("date") or ""), reasons=("draw",))
+            except Exception:
+                stardust = 0
         if not stardust:
             return None
         try:
@@ -1939,8 +1950,9 @@ class StarWhisperPlugin(Star):
             if tier_bonus > 0:
                 result["tier_bonus"] = tier_bonus
                 result["stardust_total"] = self._store.get_balance(uid)
-            # v1.12.2 卡面展示：抽签预计折算的好感度（系数经契约读中枢，两边同源）
-            affinity_gain = await self._affinity_gain_estimate(result)
+            # v1.12.2 卡面展示：抽签预计折算的好感度（系数经契约读中枢，两边同源）；
+            # v1.12.5 基数 = 当日抽签流水合计，重置/换签后的重抽也能显示
+            affinity_gain = await self._affinity_gain_estimate(result, uid)
             if affinity_gain is not None:
                 result["affinity_gain"] = affinity_gain
 
@@ -2577,6 +2589,11 @@ class StarWhisperPlugin(Star):
                 uid, date, salt, self._store.get_profile(uid) or {},
                 streak=int(payload.get("streak") or 1),
             )
+            # v1.12.5：换签不发新星尘（种子序号 ≥1），好感度折算按当日流水合计
+            # 显示——与中枢同步口径一致，换签卡不再凭空丢掉好感度行
+            _gain = await self._affinity_gain_estimate(new_result, uid)
+            if _gain is not None:
+                new_result["affinity_gain"] = _gain
             # v1.10.13：换签与首签走**同一条「先绘后卡」流程**，包括那句过程提示。
             # 以前这里直接调 _try_draw_background，既不提示「占卜中」（用户对着
             # 萌绘的 20-25s 干等，还以为卡住了），也不看输出方式——「纯文本」模式
