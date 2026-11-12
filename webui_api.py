@@ -223,6 +223,12 @@ async def h_debug_redraw(plugin) -> dict:
         uid, date, _salt(plugin), plugin._store.get_profile(uid) or {},
         streak=int(payload.get("streak") or 1),
     )
+    # v1.12.6：重抽不发新星尘（种子序号 ≥1），好感度折算按当日流水合计如实
+    # 展示——与聊天内 /星语 重抽同口径，调试时卡面才能看到真实效果；
+    # 只是展示值，中枢同步按天幂等，不会重复加分
+    _gain = await plugin._affinity_gain_estimate(result, uid)
+    if _gain is not None:
+        result["affinity_gain"] = _gain
     await plugin._try_llm_sign(result)
     bg = _last_ok_bg(plugin, uid, date)
     avatar_bytes = await plugin._fetch_avatar_bytes(uid)
@@ -255,6 +261,13 @@ async def h_debug_rerender(plugin) -> dict:
     if row is None:
         return err("该用户今天还没有签记录")
     payload = row.get("payload") or {}
+    # v1.12.6：payload 是旧版存的（或重抽前没有该字段）时补一次折算估计，
+    # 让「改样式后看效果」的预览也能看到好感度行的真实排版；payload 已有
+    # 该字段则原样用，重绘始终忠实于已存数据
+    if "affinity_gain" not in payload:
+        _gain = await plugin._affinity_gain_estimate(payload, uid)
+        if _gain is not None:
+            payload = dict(payload, affinity_gain=_gain)
     bg = _last_ok_bg(plugin, uid, date)
     avatar_bytes = await plugin._fetch_avatar_bytes(uid)
     card_path = await asyncio.to_thread(
