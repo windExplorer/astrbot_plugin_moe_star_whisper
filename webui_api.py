@@ -374,6 +374,40 @@ async def h_overview(plugin) -> dict:
         _overview_core, plugin._store, plugin._cfg, _tz_of(plugin), max(3, min(days, 180)))
 
 
+async def h_affinity_status(plugin) -> dict:
+    """好感度联动状态卡（v1.12.3）：中枢在不在、系数、今日送礼/档位加成次数。
+
+    中枢未装时 installed=False，前端显示「未联动」；系数经契约 sync_info 实时读
+    （口径与卡面预计值同源），旧版中枢没有该方法时 scale=None。
+    """
+    if plugin._store is None:
+        return err("插件未初始化完成")
+    api = plugin._affinity_api()
+    api_version = ""
+    scale = None
+    if api is not None:
+        api_version = str(getattr(api, "API_VERSION", "") or "")
+        info_fn = getattr(api, "sync_info", None)
+        if info_fn is not None:
+            try:
+                info = await info_fn()
+                if isinstance(info, dict) and info.get("status") == "ok" and info.get("enabled"):
+                    scale = float(info.get("scale") or 0.0)
+            except Exception:
+                scale = None
+    today = fortune.local_today(_tz_of(plugin))
+    counts = await asyncio.to_thread(plugin._store.day_link_counts, today)
+    return ok({
+        "installed": api is not None,
+        "api_version": api_version,
+        "scale": scale,
+        "gift_today": int(counts["gift"]),
+        "tier_today": int(counts["tier"]),
+        "gift_enabled": bool(plugin._cfg("gift_enabled", True)),
+        "tier_bonus_enabled": bool(plugin._cfg("tier_bonus_enabled", True)),
+    })
+
+
 # ---------- 每日推送面板（v1.10.26） ----------
 
 def _push_log_core(plugin, page=1, size=8, kind="") -> dict:
@@ -936,6 +970,7 @@ def register(plugin) -> None:
     routes = [
         # 控制台（v1.9.0）
         ("/overview", h_overview, ["GET"]),
+        ("/affinity/status", h_affinity_status, ["GET"]),
         ("/pushlog", h_push_log, ["GET"]),
         ("/pushhistory", h_push_history, ["GET"]),
         ("/records", h_records, ["GET"]),

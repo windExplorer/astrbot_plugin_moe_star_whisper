@@ -44,6 +44,47 @@
 
     <section class="panel">
       <div class="head">
+        <b>好感度联动</b>
+        <span class="sub">萌萌好感度中枢（astrbot_plugin_moe_affinity）</span>
+        <span class="chip" :class="{ bad: !affinity?.installed }">
+          {{ affinity?.installed ? "已联动" : "未联动" }}
+        </span>
+      </div>
+      <ul class="kv">
+        <li>
+          <span>中枢状态</span>
+          <b :class="{ off: !affinity?.installed }">{{ affinityText }}</b>
+        </li>
+        <li>
+          <span>抽签折算系数</span>
+          <b>{{ affinity?.scale != null ? "×" + affinity.scale : "—" }}</b>
+        </li>
+        <li>
+          <span>今日送礼</span>
+          <b>{{ affinity?.gift_today ?? 0 }} 次</b>
+        </li>
+        <li>
+          <span>今日档位加成</span>
+          <b>{{ affinity?.tier_today ?? 0 }} 人次</b>
+        </li>
+      </ul>
+      <div class="chips">
+        <span class="chip" :class="{ bad: !affinity?.gift_enabled }">
+          送礼：{{ affinity?.gift_enabled ? "开" : "关" }}
+        </span>
+        <span class="chip" :class="{ bad: !affinity?.tier_bonus_enabled }">
+          档位加成：{{ affinity?.tier_bonus_enabled ? "开" : "关" }}
+        </span>
+        <span class="chip" v-if="affinity?.installed">/星语送礼 送心意 · /好感度 看分数</span>
+      </div>
+      <div class="sub" style="margin-top: 6px">
+        未联动（未安装/版本过旧）时星语照常运转：抽签与星尘不受影响，档位不加成、送礼不可用，
+        卡面不显示好感度行。装好中枢（v0.13.2+）后自动恢复联动。
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="head">
         <b>每日推送</b>
         <span class="sub">事件持久化在插件数据库（最多保留 500 条，自动清理）</span>
         <a class="refresh" @click="loadPush">{{ pushLoading ? "刷新中…" : "刷新" }}</a>
@@ -153,6 +194,32 @@ const errorMsg = ref("");
 const data = ref<Overview | null>(null);
 const pushData = ref<PushLogPayload | null>(null);
 const pushLoading = ref(false);
+
+// 好感度联动状态卡（v1.12.3）：独立接口，失败不影响总览主体
+interface AffinityStatus {
+  installed: boolean;
+  api_version: string;
+  scale: number | null;
+  gift_today: number;
+  tier_today: number;
+  gift_enabled: boolean;
+  tier_bonus_enabled: boolean;
+}
+const affinity = ref<AffinityStatus | null>(null);
+const affinityText = computed(() => {
+  if (!affinity.value) return "-";
+  return affinity.value.installed
+    ? `在线（契约 ${affinity.value.api_version || "affinity.v1"}）`
+    : "未安装或版本过旧";
+});
+
+async function loadAffinity() {
+  try {
+    affinity.value = await apiGet<AffinityStatus>("affinity/status");
+  } catch {
+    affinity.value = null;
+  }
+}
 
 const SWITCH_LABELS: Record<string, string> = {
   timezone: "时区",
@@ -356,7 +423,10 @@ async function load() {
   await loadPush();
 }
 
-onMounted(load);
+onMounted(() => {
+  load();
+  loadAffinity();
+});
 </script>
 
 <style scoped>

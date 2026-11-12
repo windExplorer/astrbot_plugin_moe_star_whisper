@@ -463,6 +463,22 @@ class Store:
         ).fetchone()
         return int(row["n"] or 0)
 
+    def day_link_counts(self, date: str) -> dict:
+        """当日好感度联动流水统计（v1.12.3，全用户，控制台状态卡用）。
+
+        gift：送礼扣款笔数（reason LIKE 'send:%'，含各礼物）；
+        tier：档位加成发放人次（reason='tier'）。退款不计入。
+        """
+        send_row = self._db.execute(
+            "SELECT COUNT(*) AS n FROM ledger WHERE ref_date=? AND reason LIKE 'send:%'",
+            (date,),
+        ).fetchone()
+        tier_row = self._db.execute(
+            "SELECT COUNT(*) AS n FROM ledger WHERE ref_date=? AND reason='tier'",
+            (date,),
+        ).fetchone()
+        return {"gift": int(send_row["n"] or 0), "tier": int(tier_row["n"] or 0)}
+
     def day_stardust(self, user_id: str, date: str) -> int:
         """当日抽签获得的星尘（reason='draw' 流水合计；换签卡不重复发奖，天然幂等）。"""
         row = self._db.execute(

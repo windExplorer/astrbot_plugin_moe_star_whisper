@@ -26,6 +26,10 @@ export const REASON_LABELS: Record<string, string> = {
   "fun:bless": "玩法 · 星语祝福卡",
   "fun:gift": "玩法 · 星尘礼盒",
   "gift:back": "礼盒星尘返利",
+  tier: "好感度档位加成",
+  "send:candy": "送礼 · 星光糖",
+  "send:bouquet": "送礼 · 星尘花束",
+  "send:letter": "送礼 · 星语贺卡",
 };
 
 /** 绘图任务状态：未知值原样显示（便于排查新状态）。 */
@@ -33,11 +37,14 @@ export function statusLabel(status: string): string {
   return STATUS_LABELS[String(status)] || String(status);
 }
 
-/** 星尘流水原因：支持 buy:xxx / use:xxx 前缀。 */
+/** 星尘流水原因：支持 buy:xxx / use:xxx / send:xxx / refund:* 前缀。 */
 export function reasonLabel(reason: string): string {
   const key = String(reason || "");
   if (REASON_LABELS[key]) return REASON_LABELS[key];
+  if (key.startsWith("refund:send:")) return "退款 · 送礼 " + key.slice(12);
+  if (key.startsWith("refund:")) return "退款 · " + reasonLabel(key.slice(7));
   if (key.startsWith("buy:")) return "购买 " + key.slice(4);
   if (key.startsWith("use:")) return "使用 " + key.slice(4);
+  if (key.startsWith("send:")) return "送礼 " + key.slice(5);
   return key;
 }
