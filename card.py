@@ -705,7 +705,8 @@ def _draw_fortune_panel(canvas, box, result, font_file, *,
                         signer: str = "星语者",
                         stardust_today: int | None = None,
                         stardust_total: int | None = None,
-                        affinity_gain: float | None = None) -> int:
+                        affinity_gain: float | None = None,
+                        compact_only: bool = False) -> int:
     """在 canvas 的 box=(x0, y0, x1, y1) 内画「运势面板」，返回溢出高度（>0 = 装不下）。
 
     v1.10.24：这套版式原本只属于**塔罗双联的右联**，而「没有 AI 牌面」的单联走的是
@@ -715,6 +716,11 @@ def _draw_fortune_panel(canvas, box, result, font_file, *,
     金框与「固定块高 + 弹性间隙等分」，形态切换不再换脸。
 
     返回溢出高度：连最小间隙都放不下时调用方可据此加高画布（单联用）。
+
+    v1.12.4 紧凑档位（compact_only）：双联版式高度被左联牌面锁死、加不了高，
+    内容装不下时按档位逐级压缩（好感度并入星尘行 → 压解读/签文行数 → 整体
+    压块高），宁可挤一点也不砍内容、绝不叠到落款上；单联能加高画布，固定
+    走档位 0（信息一个不少），由调用方按返回的溢出高度重铺。
     """
     x0, y0, x1, y1 = (int(v) for v in box)
     pw, ph = x1 - x0, y1 - y0
@@ -738,183 +744,268 @@ def _draw_fortune_panel(canvas, box, result, font_file, *,
     right = x1 - int(22 * u)
     mid = (left + right) // 2
     top = y0 + int(18 * u)
-    content_h = (y1 - int(42 * u)) - top
+    # v1.12.4：底部预留 42u → 56u。以前脚注文字一长就会怼到右下角「—— 星语者」
+    # 落款上（好感度行加入后内容更满，用户实测踩到叠字），多留一段安全距离。
+    content_h = (y1 - int(56 * u)) - top
 
-    blocks = []
-
-    def block(h, fn):
-        blocks.append((int(h), fn))
-
-    # ① 身份头
-    def b_head(y):
-        av_d = int(84 * u)
-        av = None
-        if avatar_data:
-            try:
-                av = Image.open(io.BytesIO(avatar_data)).convert("RGBA")
-            except Exception:
-                av = None
-        if av is not None:
-            avatar_img = _circle_img(av, av_d)
-        else:
-            placeholder = Image.new("RGBA", (av_d * 2, av_d * 2),
-                                    _mix(lucky_rgb, (255, 255, 255), 0.35) + (255,))
-            pdr = ImageDraw.Draw(placeholder)
-            pdr.text((av_d, av_d), (nickname or "星")[0],
-                     font=_font(font_file, int(60 * u)), fill=(255, 255, 255, 255), anchor="mm")
-            avatar_img = _circle_img(placeholder, av_d)
-        canvas.paste(avatar_img, (left, y), avatar_img)
-        tx = left + av_d + int(24 * u)
-        # 同单联：昵称给右侧日期让位（v1.10.23，窄面下昵称长会叠字）
-        date_text = str(result.get("date", ""))
-        date_font = _font(font_file, int(24 * u))
-        avail_name = right - draw_len(date_text, date_font) - int(20 * u) - tx
-        name_font, name_text = _shrink_to_fit(
-            nickname or "旅行者", font_file, int(40 * u), avail_name, floor=int(26 * u))
-        draw.text((tx, y), name_text, font=name_font, fill=ink)
-        qq_line = f"QQ {uid}" if uid else ""
-        if result.get("constellation"):
-            qq_line += f" · {result['constellation']}"
-        draw.text((tx, y + int(54 * u)), qq_line, font=_font(font_file, int(24 * u)), fill=sub)
-        draw.text((right, y), date_text,
-                  font=date_font, fill=sub, anchor="ra")
-    block(int(88 * u), b_head)
-
-    def b_divider(y):
-        draw.line([(left, y + int(4 * u)), (right, y + int(4 * u))], fill=line_rgb, width=1)
-    block(int(10 * u), b_divider)
-
-    # ② 塔罗行（牌名/正逆位/关键词/解读，行距拉开避免重叠）
-    interp_lines = _wrap(str(tarot.get("interp", "")), _font(font_file, int(22 * u)), right - left)[:2]
-    def b_tarot(y):
-        draw.text((left, y), tarot.get("name_cn", "？"),
-                  font=_font(disp, int(40 * u)), fill=gold)
-        draw.text((right, y + int(10 * u)), f"{tarot.get('label', '')} · {tarot.get('name_en', '')}",
-                  font=_font(font_file, int(22 * u)), fill=sub, anchor="ra")
-        draw.text((left, y + int(56 * u)), tarot.get("keywords", ""),
-                  font=_font(font_file, int(21 * u)), fill=sub)
-        for i, line in enumerate(interp_lines):
-            draw.text((left, y + int(84 * u) + i * int(32 * u)), line,
-                      font=_font(font_file, int(22 * u)), fill=ink)
-    block(int(84 * u) + int(32 * u) * len(interp_lines) + int(10 * u), b_tarot)
-
-    # ③ 吉凶大字
-    grade = str(result.get("grade_display") or result.get("grade", "？"))
-    def b_grade(y):
-        draw.text((mid, y + int(52 * u)), grade,
-                  font=_font(disp, int(108 * u)), fill=grade_rgb, anchor="mm")
-    block(int(112 * u), b_grade)
-
-    # ④ 签文话语区
-    sign_lines = _wrap(str(result.get("sign_text", "")), _font(font_file, int(30 * u)), right - left)[:4]
-    line_h = int(46 * u)
-    def b_sign(y):
-        for i, line in enumerate(sign_lines):
-            draw.text((mid, y + i * line_h), line,
-                      font=_font(font_file, int(30 * u)), fill=ink, anchor="ma")
-    block(line_h * len(sign_lines) + int(4 * u), b_sign)
-
-    # ⑤ 六维星数
-    dims = result.get("dims") or {}
-    cell_w = (right - left) / 2
-    def b_dims(y):
-        for i, (k, v) in enumerate(dims.items()):
-            cx = left + cell_w * (i % 2) + int(8 * u)
-            cy = y + (i // 2) * int(46 * u)
-            draw.text((cx, cy), k, font=_font(font_file, int(24 * u)), fill=sub)
-            draw.text((cx + int(112 * u), cy), "★" * v + "☆" * (5 - v),
-                      font=_font(font_file, int(26 * u)), fill=grade_rgb)
-    block(int(46 * u) * ((len(dims) + 1) // 2), b_dims)
-
-    # ⑥ 幸运指数（label 与数字同一中线，不再错位）
-    def b_score(y):
-        cy = y + int(28 * u)
-        draw.text((left, cy), "幸运指数", font=_font(font_file, int(24 * u)), fill=sub, anchor="lm")
-        draw.text((left + int(110 * u), cy), str(result.get("score", "？")),
-                  font=_font(disp, int(52 * u)), fill=grade_rgb, anchor="lm")
-        draw.text((right, cy), f"满分 100", font=_font(font_file, int(20 * u)), fill=sub, anchor="rm")
-    block(int(60 * u), b_score)
-
-    # ⑦ 宜忌
-    def b_yiji(y):
-        yy = y
-        for label, items, rgb in (("宜", result.get("yi") or [], (122, 178, 138)),
-                                  ("忌", result.get("ji") or [], (216, 128, 128))):
-            chip_w, chip_h = int(52 * u), int(36 * u)
-            draw.rounded_rectangle([left, yy, left + chip_w, yy + chip_h],
-                                   radius=int(9 * u), fill=_mix(rgb, (255, 255, 255), 0.35) + (255,))
-            draw.text((left + chip_w / 2, yy + chip_h / 2), label,
-                      font=_font(font_file, int(24 * u)), fill=(255, 255, 255, 255), anchor="mm")
-            draw.text((left + chip_w + int(16 * u), yy + chip_h / 2), "、".join(items),
-                      font=_font(font_file, int(26 * u)), fill=ink, anchor="lm")
-            yy += chip_h + int(8 * u)
-    block(int(2 * (36 * u + 8 * u)), b_yiji)
-
-    # ⑧ 幸运四件套（2×2 小卡网格，带淡底与润色小注）
-    def b_lucky(y):
-        cells = [
-            ("幸运物", str(result.get("lucky_item", "？")), "带在身边试试"),
-            ("幸运色", str((result.get("lucky_color") or {}).get("name", "？")), "今天多看它两眼"),
-            ("幸运数字", str(result.get("lucky_number", "？")), "做选择时想起它"),
-            ("幸运方位", str(result.get("lucky_dir", "？")), "朝它走两步"),
-        ]
-        cw, ch, gapx = (right - left) / 2 - int(8 * u), int(64 * u), int(12 * u)
-        for i, (label, value, note) in enumerate(cells):
-            cx = left + (cw + gapx) * (i % 2)
-            cy = y + (ch + int(10 * u)) * (i // 2)
-            draw.rounded_rectangle([cx, cy, cx + cw, cy + ch],
-                                   radius=int(10 * u),
-                                   fill=_mix(lucky_rgb, (255, 255, 255), 0.55) + (200,))
-            draw.text((cx + int(14 * u), cy + int(10 * u)), label,
-                      font=_font(font_file, int(19 * u)), fill=sub)
-            draw.text((cx + int(14 * u), cy + int(30 * u)), value,
-                      font=_font(font_file, int(27 * u)), fill=ink)
-            draw.text((cx + cw - int(8 * u), cy + int(10 * u)), note,
-                      font=_font(font_file, int(17 * u)), fill=sub, anchor="ra")
-    block(int(2 * (64 * u + 10 * u)), b_lucky)
-
-    # ⑧.5 星尘（M9：今日获得 + 累计；经济关闭或调用方未传时不画）
-    # v1.12.2：affinity_gain（抽签预计折算的好感度，经契约读中枢系数）不为空时
-    # 在星尘行下方补一行小字；块高相应加高，放不下时由单联的溢出重铺机制兜底。
+    # 好感度小字（v1.12.2）：抽签预计折算的好感度，经契约读中枢系数，星语只显示不存储
     gold_soft = (222, 186, 84) if dark else (176, 142, 48)
-    _gain_text = ""
+    _gain_val = None
     try:
         if affinity_gain is not None and float(affinity_gain) > 0:
-            gain_val = float(affinity_gain)
-            _gain_text = f"好感度 +{gain_val:g} · /好感度 查看"
+            _gain_val = float(affinity_gain)
     except (TypeError, ValueError):
-        _gain_text = ""
-    if stardust_total is not None:
-        def b_stardust(y):
-            cy = y + int(30 * u)
-            draw.text((left, cy), "星尘", font=_font(font_file, int(24 * u)), fill=sub, anchor="lm")
-            if (stardust_today or 0) > 0:
-                draw.text((left + int(84 * u), cy), f"+{stardust_today}",
-                          font=_font(disp, int(46 * u)), fill=gold_soft, anchor="lm")
-                draw.text((left + int(84 * u) + draw_len(f"+{stardust_today}", _font(disp, int(46 * u))) + int(14 * u), cy),
-                          "今日获得", font=_font(font_file, int(20 * u)), fill=sub, anchor="lm")
-            draw.text((right, cy), f"累计 {stardust_total}",
-                      font=_font(font_file, int(26 * u)), fill=ink, anchor="rm")
-            if _gain_text:
-                draw.text((right, cy + int(34 * u)), _gain_text,
-                          font=_font(font_file, int(20 * u)), fill=sub, anchor="rm")
-        block(int(60 * u) + (int(36 * u) if _gain_text else 0), b_stardust)
+        _gain_val = None
 
-    # ⑨ 脚注（月相/连签）
-    phase = result.get("phase") or {}
-    foot = f"月相·{phase.get('name', '？')}：{phase.get('text', '')}"
-    streak = result.get("streak") or 0
-    if streak >= 2:
-        foot += f" ｜ 连签 {streak} 天"
-    def b_foot(y):
-        draw.text((mid, y), foot, font=_font(font_file, int(21 * u)), fill=sub, anchor="ma")
-    block(int(30 * u), b_foot)
+    # ---- 紧凑档位（v1.12.4）：块高/行数随档位收紧，内容一行不丢（超行数才截断补省略号）----
+    def _build(level: int) -> list:
+        out: list = []
 
-    # ---- 弹性间隙等分布局 ----
+        def add(h, fn):
+            out.append((int(h), fn))
+
+        sq = level >= 3
+        compact_gain = level >= 1
+        interp_n = 2 if level < 2 else 1
+        # 签文是核心内容，砍行数放最后一级，且最多压到 3 行（超长部分省略号收尾）
+        sign_n = 4 if level < 3 else 3
+
+        def _cap(raw: list, font, width: int, n: int) -> list:
+            if len(raw) <= n:
+                return raw
+            cut = raw[:n]
+            cut[-1] = _fit_text(cut[-1] + "…", font, width)
+            return cut
+
+        # ① 身份头
+        def b_head(y):
+            av_d = int(84 * u)
+            av = None
+            if avatar_data:
+                try:
+                    av = Image.open(io.BytesIO(avatar_data)).convert("RGBA")
+                except Exception:
+                    av = None
+            if av is not None:
+                avatar_img = _circle_img(av, av_d)
+            else:
+                placeholder = Image.new("RGBA", (av_d * 2, av_d * 2),
+                                        _mix(lucky_rgb, (255, 255, 255), 0.35) + (255,))
+                pdr = ImageDraw.Draw(placeholder)
+                pdr.text((av_d, av_d), (nickname or "星")[0],
+                         font=_font(font_file, int(60 * u)), fill=(255, 255, 255, 255), anchor="mm")
+                avatar_img = _circle_img(placeholder, av_d)
+            canvas.paste(avatar_img, (left, y), avatar_img)
+            tx = left + av_d + int(24 * u)
+            # 同单联：昵称给右侧日期让位（v1.10.23，窄面下昵称长会叠字）
+            date_text = str(result.get("date", ""))
+            date_font = _font(font_file, int(24 * u))
+            avail_name = right - draw_len(date_text, date_font) - int(20 * u) - tx
+            name_font, name_text = _shrink_to_fit(
+                nickname or "旅行者", font_file, int(40 * u), avail_name, floor=int(26 * u))
+            draw.text((tx, y), name_text, font=name_font, fill=ink)
+            qq_line = f"QQ {uid}" if uid else ""
+            if result.get("constellation"):
+                qq_line += f" · {result['constellation']}"
+            draw.text((tx, y + int(54 * u)), qq_line, font=_font(font_file, int(24 * u)), fill=sub)
+            draw.text((right, y), date_text,
+                      font=date_font, fill=sub, anchor="ra")
+        add(int(88 * u), b_head)
+
+        def b_divider(y):
+            draw.line([(left, y + int(4 * u)), (right, y + int(4 * u))], fill=line_rgb, width=1)
+        add(int((8 if sq else 10) * u), b_divider)
+
+        # ② 塔罗行（牌名/正逆位/关键词/解读，行距拉开避免重叠）
+        _t_font = _font(font_file, int((20 if sq else 22) * u))
+        interp_lines = _cap(_wrap(str(tarot.get("interp", "")), _t_font, right - left),
+                            _t_font, right - left, interp_n)
+        _t_base = int((70 if sq else 84) * u)
+        _t_step = int((26 if sq else 32) * u)
+
+        def b_tarot(y):
+            draw.text((left, y), tarot.get("name_cn", "？"),
+                      font=_font(disp, int((34 if sq else 40) * u)), fill=gold)
+            draw.text((right, y + int(10 * u)), f"{tarot.get('label', '')} · {tarot.get('name_en', '')}",
+                      font=_t_font, fill=sub, anchor="ra")
+            draw.text((left, y + int((44 if sq else 56) * u)), tarot.get("keywords", ""),
+                      font=_font(font_file, int((19 if sq else 21) * u)), fill=sub)
+            for i, line in enumerate(interp_lines):
+                draw.text((left, y + _t_base + i * _t_step), line, font=_t_font, fill=ink)
+        add(_t_base + _t_step * len(interp_lines) + int((8 if sq else 10) * u), b_tarot)
+
+        # ③ 吉凶大字
+        grade = str(result.get("grade_display") or result.get("grade", "？"))
+        _g_size = int((96 if sq else 108) * u)
+
+        def b_grade(y):
+            draw.text((mid, y + int((48 if sq else 52) * u)), grade,
+                      font=_font(disp, _g_size), fill=grade_rgb, anchor="mm")
+        add(int((100 if sq else 112) * u), b_grade)
+
+        # ④ 签文话语区
+        _s_font = _font(font_file, int((27 if sq else 30) * u))
+        sign_lines = _cap(_wrap(str(result.get("sign_text", "")), _s_font, right - left),
+                          _s_font, right - left, sign_n)
+        _s_lh = int((40 if sq else 46) * u)
+
+        def b_sign(y):
+            for i, line in enumerate(sign_lines):
+                draw.text((mid, y + i * _s_lh), line, font=_s_font, fill=ink, anchor="ma")
+        add(_s_lh * len(sign_lines) + int(4 * u), b_sign)
+
+        # ⑤ 六维星数
+        dims = result.get("dims") or {}
+        _d_row = int((42 if sq else 46) * u)
+        cell_w = (right - left) / 2
+
+        def b_dims(y):
+            for i, (k, v) in enumerate(dims.items()):
+                cx = left + cell_w * (i % 2) + int(8 * u)
+                cy = y + (i // 2) * _d_row
+                draw.text((cx, cy), k, font=_font(font_file, int(24 * u)), fill=sub)
+                draw.text((cx + int(112 * u), cy), "★" * v + "☆" * (5 - v),
+                          font=_font(font_file, int(26 * u)), fill=grade_rgb)
+        add(_d_row * ((len(dims) + 1) // 2), b_dims)
+
+        # ⑥ 幸运指数（label 与数字同一中线，不再错位）
+        def b_score(y):
+            cy = y + int((24 if sq else 28) * u)
+            draw.text((left, cy), "幸运指数", font=_font(font_file, int(24 * u)), fill=sub, anchor="lm")
+            draw.text((left + int(110 * u), cy), str(result.get("score", "？")),
+                      font=_font(disp, int((44 if sq else 52) * u)), fill=grade_rgb, anchor="lm")
+            draw.text((right, cy), "满分 100", font=_font(font_file, int(20 * u)), fill=sub, anchor="rm")
+        add(int((52 if sq else 60) * u), b_score)
+
+        # ⑦ 宜忌
+        _y_chip = int((32 if sq else 36) * u)
+        _y_gap = int((6 if sq else 8) * u)
+
+        def b_yiji(y):
+            yy = y
+            for label, items, rgb in (("宜", result.get("yi") or [], (122, 178, 138)),
+                                      ("忌", result.get("ji") or [], (216, 128, 128))):
+                chip_w = int(52 * u)
+                draw.rounded_rectangle([left, yy, left + chip_w, yy + _y_chip],
+                                       radius=int(9 * u), fill=_mix(rgb, (255, 255, 255), 0.35) + (255,))
+                draw.text((left + chip_w / 2, yy + _y_chip / 2), label,
+                          font=_font(font_file, int(24 * u)), fill=(255, 255, 255, 255), anchor="mm")
+                draw.text((left + chip_w + int(16 * u), yy + _y_chip / 2), "、".join(items),
+                          font=_font(font_file, int((24 if sq else 26) * u)), fill=ink, anchor="lm")
+                yy += _y_chip + _y_gap
+        add(int(2 * (_y_chip + _y_gap)), b_yiji)
+
+        # ⑧ 幸运四件套（2×2 小卡网格，带淡底与润色小注）
+        _l_ch = int((56 if sq else 64) * u)
+        _l_gap = int((8 if sq else 10) * u)
+
+        def b_lucky(y):
+            cells = [
+                ("幸运物", str(result.get("lucky_item", "？")), "带在身边试试"),
+                ("幸运色", str((result.get("lucky_color") or {}).get("name", "？")), "今天多看它两眼"),
+                ("幸运数字", str(result.get("lucky_number", "？")), "做选择时想起它"),
+                ("幸运方位", str(result.get("lucky_dir", "？")), "朝它走两步"),
+            ]
+            cw = (right - left) / 2 - int(8 * u)
+            for i, (label, value, note) in enumerate(cells):
+                cx = left + (cw + int(12 * u)) * (i % 2)
+                cy = y + (_l_ch + _l_gap) * (i // 2)
+                draw.rounded_rectangle([cx, cy, cx + cw, cy + _l_ch],
+                                       radius=int(10 * u),
+                                       fill=_mix(lucky_rgb, (255, 255, 255), 0.55) + (200,))
+                draw.text((cx + int(14 * u), cy + int(9 * u)), label,
+                          font=_font(font_file, int((17 if sq else 19) * u)), fill=sub)
+                draw.text((cx + int(14 * u), cy + int((27 if sq else 30) * u)), value,
+                          font=_font(font_file, int((24 if sq else 27) * u)), fill=ink)
+                draw.text((cx + cw - int(8 * u), cy + int(9 * u)), note,
+                          font=_font(font_file, int((15 if sq else 17) * u)), fill=sub, anchor="ra")
+        add(int(2 * (_l_ch + _l_gap)), b_lucky)
+
+        # ⑧.5 星尘（M9：今日获得 + 累计；经济关闭或调用方未传时不画）
+        # v1.12.2：affinity_gain（抽签预计折算的好感度）不为空时展示；
+        # 宽松档独立一行小字（带 /好感度 引导），紧凑档并入星尘行（引导放得下才带）。
+        if stardust_total is not None:
+            _sd_h = int((54 if sq else 60) * u)
+            _sd_cy = int((26 if sq else 30) * u)
+
+            def b_stardust(y):
+                cy = y + _sd_cy
+                draw.text((left, cy), "星尘", font=_font(font_file, int(24 * u)), fill=sub, anchor="lm")
+                tail_x = left
+                if (stardust_today or 0) > 0:
+                    plus = f"+{stardust_today}"
+                    draw.text((left + int(84 * u), cy), plus,
+                              font=_font(disp, int(46 * u)), fill=gold_soft, anchor="lm")
+                    tail_x = (left + int(84 * u)
+                              + draw_len(plus, _font(disp, int(46 * u))) + int(14 * u))
+                    draw.text((tail_x, cy), "今日获得",
+                              font=_font(font_file, int(20 * u)), fill=sub, anchor="lm")
+                    tail_x += draw_len("今日获得", _font(font_file, int(20 * u)))
+                acc_font = _font(font_file, int(26 * u))
+                acc_text = f"累计 {stardust_total}"
+                acc_w = draw_len(acc_text, acc_font)
+                draw.text((right, cy), acc_text, font=acc_font, fill=ink, anchor="rm")
+                if _gain_val is None:
+                    return
+                if compact_gain:
+                    g_font = _font(font_file, int(20 * u))
+                    gain_txt = f"好感度 +{_gain_val:g} · /好感度 查看"
+                    if draw_len(gain_txt, g_font) > right - acc_w - int(16 * u) - tail_x - int(12 * u):
+                        gain_txt = f"好感度 +{_gain_val:g}"
+                    draw.text((right - acc_w - int(16 * u), cy), gain_txt,
+                              font=g_font, fill=sub, anchor="rm")
+                else:
+                    draw.text((right, cy + int(34 * u)), f"好感度 +{_gain_val:g} · /好感度 查看",
+                              font=_font(font_file, int(20 * u)), fill=sub, anchor="rm")
+
+            if compact_gain:
+                add(_sd_h, b_stardust)
+            else:
+                add(_sd_h + (int(36 * u) if _gain_val is not None else 0), b_stardust)
+
+        # ⑨ 脚注（月相/连签；v1.12.4 起按宽度折行，长月相文案不再横向怼出面板）
+        phase = result.get("phase") or {}
+        foot = f"月相·{phase.get('name', '？')}：{phase.get('text', '')}"
+        streak = result.get("streak") or 0
+        if streak >= 2:
+            foot += f" ｜ 连签 {streak} 天"
+        _f_font = _font(font_file, int((19 if sq else 21) * u))
+        _f_step = int((26 if sq else 30) * u)
+        foot_lines = _wrap(foot, _f_font, right - left)[:2]
+
+        def b_foot(y):
+            for i, line in enumerate(foot_lines):
+                draw.text((mid, y + i * _f_step), line, font=_f_font, fill=sub, anchor="ma")
+        add(_f_step * len(foot_lines) + int(2 * u), b_foot)
+        return out
+
+    # ---- 选档 + 弹性间隙等分布局 ----
+    # 舒适间隙 12u（v1.12.4 从 6u 提到 12u，块间有呼吸感）；双联没有加高的余地，
+    # 装不下时先降间隙到 6u、再逐级压档位，宁可挤一点也不砍内容、绝不叠到落款上。
+    _GAP_OK = int(12 * u)
+    _GAP_MIN = int(6 * u)
+    levels = (0, 1, 2, 3) if compact_only else (0,)
+    blocks, min_gap = None, (_GAP_MIN if compact_only else _GAP_OK)
+    for lv in levels:
+        cand = _build(lv)
+        n_gaps = max(1, len(cand) - 1)
+        total_h = sum(h for h, _ in cand)
+        blocks = cand
+        if total_h + _GAP_OK * n_gaps <= content_h:
+            min_gap = _GAP_OK
+            break
+        if compact_only and total_h + _GAP_MIN * n_gaps <= content_h:
+            min_gap = _GAP_MIN
+            break
+        if not compact_only:
+            # 单联：装不下就按 12u 间隙返回溢出高度，由调用方加高画布重铺（信息不裁）
+            min_gap = _GAP_OK
+            break
+
     total = sum(h for h, _ in blocks)
     gaps = max(1, len(blocks) - 1)
     free = max(0, content_h - total)
-    gap = int(min(30 * u, max(6 * u, free / gaps)))
+    gap = int(min(30 * u, max(min_gap, free / gaps)))
     y = top
     for i, (h, fn) in enumerate(blocks):
         fn(y)
@@ -926,7 +1017,7 @@ def _draw_fortune_panel(canvas, box, result, font_file, *,
               font=_font(font_file, int(24 * u)), fill=sub, anchor="rs")
 
     # 连最小间隙都放不下时的差额（单联据此加高画布，绝不截断内容）
-    return int(max(0, total + int(6 * u) * gaps - content_h))
+    return int(max(0, total + int(min_gap) * gaps - content_h))
 
 
 def render_tarot_card(
@@ -1001,6 +1092,9 @@ def render_tarot_card(
         line_rgb=line_rgb, nickname=nickname, uid=uid, avatar_data=avatar_data,
         signer=signer, stardust_today=stardust_today, stardust_total=stardust_total,
         affinity_gain=affinity_gain,
+        # v1.12.4：双联高度被左联牌面锁死、加不了高——内容装不下时按紧凑档位压缩，
+        # 否则好感度行加入后块会直接叠到幸运格/落款上（用户实测）
+        compact_only=True,
     )
 
     cards_root = Path(cards_root)
