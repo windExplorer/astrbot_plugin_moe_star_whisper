@@ -182,6 +182,8 @@ class StarWhisperPlugin(Star):
         # v1.11.10：同一 (uid,date) 只允许一条首签流程在飞——否则 _roll_daily 的
         # 星尘/连签/种子序号副作用会重复执行（详见 fortune_cmd 注释）
         self._draw_inflight: set = set()
+        # 签到联动后台任务（v1.13.0）：仅在老婆插件缺席时由本插件兜底响应
+        self._link_tasks: set = set()
         # 客观历法（与群无关）按 (日期, 盐值) 缓存，多群推送只算一次
         self._push_base_cache: dict = {}
         # 补出图节流；与 _push_tries 同款上限，避免跨天无界增长
@@ -277,6 +279,9 @@ class StarWhisperPlugin(Star):
         return removed
 
     async def terminate(self):
+        for link_task in list(getattr(self, "_link_tasks", ())):
+            link_task.cancel()
+        self._link_tasks.clear()
         task = self._push_task
         if task is not None:
             task.cancel()
@@ -1854,6 +1859,88 @@ class StarWhisperPlugin(Star):
         if repeat:
             lines.insert(0, "（今天已经抽过啦，这是你今天的星语签～）")
         return "\n".join(lines)
+
+    # ---------- 签到联动（v1.13.0） ----------
+    #
+    # 常态下由「萌萌今日老婆」当编排者：它抢在 get_px 之前建后台任务，先抽老婆，
+    # 抽完再调本插件的 linked_fortune()。所以本插件的入口只是**兜底**——老婆插件
+    # 没装/被禁用/没开联动时，才由星语自己响应「签到」。
+    # 两边都不 stop_event、不 yield，get_px 的 /签到 照常出卡，两套出图并行。
+
+    CHECKIN_LINK_RE = r"^签到$"
+    CHECKIN_LINK_EXTRA = "_moe_checkin_link"
+
+    def checkin_link_ready(self) -> bool:
+        """给别的插件看：本插件是否接受「签到」联动。"""
+        try:
+            return bool(self._cfg("checkin_link_enabled", False))
+        except Exception:
+            return False
+
+    @filter.regex(CHECKIN_LINK_RE, priority=10)
+    async def checkin_link_entry(self, event: AstrMessageEvent):
+        """兜底入口：老婆插件已接管时直接让位，否则自己起后台任务。"""
+        if not self.checkin_link_ready():
+            return
+        if event.get_extra(self.CHECKIN_LINK_EXTRA):
+            return  # 今日老婆接管了，它会在抽完后调用 linked_fortune()
+        if self._store is None:
+            return
+        event.set_extra(self.CHECKIN_LINK_EXTRA, True)
+        event.should_call_llm(False)
+        task = asyncio.create_task(self._run_checkin_link(event))
+        self._link_tasks.add(task)
+        task.add_done_callback(self._link_tasks.discard)
+
+    async def _run_checkin_link(self, event: AstrMessageEvent):
+        try:
+            async for res in self.linked_fortune(event):
+                await self._send_linked_result(event, res)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.error(f"[{PLUGIN_NAME}] 签到联动失败\n{traceback.format_exc()}")
+
+    async def linked_fortune(self, event: AstrMessageEvent):
+        """给签到联动用的公开入口：当天已抽 / 正在抽 / 群被停用时静默跳过。
+
+        与 ``fortune_cmd`` 的区别只有一条：**不发旧卡**。用户手发 /星语 仍走
+        原指令的重发逻辑，这里只负责「当天首签」的那一次。
+        """
+        if not self.checkin_link_ready():
+            return
+        if self._store is None:
+            return
+        uid = str(event.get_sender_id() or "").strip()
+        if not uid:
+            return
+        if not event.is_private_chat():
+            gid = str(event.get_group_id() or "")
+            if gid and gid in self._disabled_groups():
+                return
+        tz_name = str(self._cfg("timezone", "Asia/Shanghai"))
+        date = fortune.local_today(tz_name)
+        if bool(self._cfg("checkin_link_only_first", True)):
+            if self._store.get_fortune(uid, date) is not None:
+                return  # 今天已经抽过：不重发、不重抽
+            if f"{uid}:{date}" in self._draw_inflight:
+                return  # 手发 /星语 正在铺星盘：让那次自己发
+        async for res in self.fortune_cmd(event):
+            yield res
+
+    async def _send_linked_result(self, event: AstrMessageEvent, res) -> None:
+        """联动结果走 context 主动发送，避开与 get_px respond 共用 event 的路径。"""
+        chain = getattr(res, "chain", None)
+        if not chain:
+            return
+        try:
+            await self.context.send_message(
+                event.unified_msg_origin, MessageChain(chain=list(chain))
+            )
+        except Exception:
+            logger.error(
+                f"[{PLUGIN_NAME}] 签到联动发送失败\n{traceback.format_exc()}"
+            )
 
     # ---------- 指令 ----------
 

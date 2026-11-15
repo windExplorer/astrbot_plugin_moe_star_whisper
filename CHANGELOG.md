@@ -2,6 +2,27 @@
 
 > 倒序（最新在上）。版本唯一来源为 `metadata.yaml` 的 `version`，条目号与其严格一致。
 
+## v1.13.0 (2026-11-16)
+
+**新增「签到联动」：一条 `签到` 顺带抽当日星语签**（与「萌萌今日老婆」v0.55.0 配套）。
+
+- 常态下由今日老婆当编排者：它抢在 `astrbot_plugin_get_px` 的 `/签到` 之前建
+  后台任务，先抽老婆、抽完再调本插件的 `linked_fortune(event)`。本插件的入口只是
+  **兜底**——老婆没装 / 被禁用 / 没开联动时，才由星语自己响应「签到」。
+- 入口 `@filter.regex(r"^签到$", priority=10)`：只 `create_task` 后立即返回，
+  **不 stop_event、不 yield**（否则会拦掉 get_px 自己的签到卡）。老婆的 priority
+  是 20，同一条消息上它会先设 `_moe_checkin_link` 标记，星语看到就让位。
+- `linked_fortune()` 只发**当日首签**：今天已抽过 / 正在抽（`_draw_inflight`）/
+  群被停用时静默跳过，不重发旧卡、不重复消耗萌绘；用户手发 `/星语` 仍走原指令的
+  重发逻辑。
+- 新配置（控制台「签到联动」分区）：`checkin_link_enabled`（默认关）、
+  `checkin_link_only_first`（默认开）。
+- 生命周期：后台任务登记在 `_link_tasks`，`terminate()` 统一取消。
+- 测试：新增 `tests/test_checkin_link.py`（配置键 / 优先级 / 不吞事件 / 让位 /
+  首签判定 / 生命周期）；`ConfigView.vue` 的 `GROUP_META` 新增分区，避免新键掉进
+  「其他」。
+- 版本 v1.12.6 -> v1.13.0。
+
 ## v1.12.6 (2026-11-12)
 
 调试路径（WebUI 重抽/重绘）的卡面也能看到好感度行（版本 v1.12.5 -> v1.12.6）。
