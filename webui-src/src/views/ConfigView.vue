@@ -138,7 +138,7 @@ const GROUP_META: { name: string; description: string; keys: string[] }[] = [
   {
     name: "签到联动",
     description: "用户只发一条「签到」就顺带抽当日星语签（仅首签才发）",
-    keys: ["checkin_link_enabled", "checkin_link_only_first"],
+    keys: ["checkin_link_enabled", "checkin_link_only_first", "checkin_link_announce"],
   },
 ];
 

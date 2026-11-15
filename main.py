@@ -493,6 +493,8 @@ class StarWhisperPlugin(Star):
         与出图同一个开关（`draw_enabled`），关掉绘图就没有这句——纯本地渲染是瞬间的。
         直发（`_send_plain`），不进结果链，避免被框架自动 @。
         """
+        if event.get_extra(self.CHECKIN_LINK_SILENT):
+            return  # 签到联动默认静默（v1.13.1），见 linked_fortune()
         if bool(self._cfg("draw_enabled", False)):
             await self._send_plain(event, "🔮 占卜中，星盘铺开……请稍候")
 
@@ -1869,6 +1871,7 @@ class StarWhisperPlugin(Star):
 
     CHECKIN_LINK_RE = r"^签到$"
     CHECKIN_LINK_EXTRA = "_moe_checkin_link"
+    CHECKIN_LINK_SILENT = "_moe_checkin_link_silent"
 
     def checkin_link_ready(self) -> bool:
         """给别的插件看：本插件是否接受「签到」联动。"""
@@ -1925,8 +1928,17 @@ class StarWhisperPlugin(Star):
                 return  # 今天已经抽过：不重发、不重抽
             if f"{uid}:{date}" in self._draw_inflight:
                 return  # 手发 /星语 正在铺星盘：让那次自己发
-        async for res in self.fortune_cmd(event):
-            yield res
+        # v1.13.1：签到联动默认不出「占卜中」过程提示（用户：一条签到已经知道在抽了，
+        # 签到卡又先出，这句纯属噪音）；手动 /星语 不受影响，照旧提示。
+        silent = not bool(self._cfg("checkin_link_announce", False))
+        if silent:
+            event.set_extra(self.CHECKIN_LINK_SILENT, True)
+        try:
+            async for res in self.fortune_cmd(event):
+                yield res
+        finally:
+            if silent:
+                event.set_extra(self.CHECKIN_LINK_SILENT, False)
 
     async def _send_linked_result(self, event: AstrMessageEvent, res) -> None:
         """联动结果走 context 主动发送，避开与 get_px respond 共用 event 的路径。"""

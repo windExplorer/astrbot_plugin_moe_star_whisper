@@ -38,7 +38,7 @@ def body_of(name: str) -> str:
 
 
 # ---------- 配置 ----------
-keys = {"checkin_link_enabled", "checkin_link_only_first"}
+keys = {"checkin_link_enabled", "checkin_link_only_first", "checkin_link_announce"}
 check("签到联动配置键齐全", keys.issubset(schema.keys()),
       f"缺：{sorted(keys - set(schema.keys()))}")
 bad = [k for k in keys if schema.get(k, {}).get("type") not in ALLOWED]
@@ -64,6 +64,11 @@ check("受 only_first 控制", "checkin_link_only_first" in linked)
 check("沿用群停用守卫", "_disabled_groups()" in linked)
 check("复用原指令生成器", "fortune_cmd(event)" in linked)
 check("公开入口可被跨插件调用", "async def linked_fortune" in src)
+
+# ---------- 过程提示（v1.13.1） ----------
+check("联动过程提示默认关闭", schema["checkin_link_announce"].get("default") is False)
+check("联动时打静默标记", "CHECKIN_LINK_SILENT" in linked)
+check("过程提示识别静默标记", "CHECKIN_LINK_SILENT" in body_of("_announce_drawing"))
 
 # ---------- 发送与生命周期 ----------
 check("联动结果走 context 主动发送", "context.send_message" in body_of("_send_linked_result"))
