@@ -1869,7 +1869,8 @@ class StarWhisperPlugin(Star):
     # 没装/被禁用/没开联动时，才由星语自己响应「签到」。
     # 两边都不 stop_event、不 yield，get_px 的 /签到 照常出卡，两套出图并行。
 
-    CHECKIN_LINK_RE = r"^签到$"
+    # 与今日老婆插件保持同口径：裸词与 /签到 都认（v1.13.x）
+    CHECKIN_LINK_RE = r"^/?签到$"
     CHECKIN_LINK_EXTRA = "_moe_checkin_link"
     CHECKIN_LINK_SILENT = "_moe_checkin_link_silent"
 
